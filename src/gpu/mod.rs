@@ -271,6 +271,7 @@ pub struct BindGroup {
 }
 
 pub struct Display {
+    window: sdl2::video::Window,
     swapchain: ash::vk::SwapchainKHR,
     surface: ash::vk::SurfaceKHR,
     images: Vec<Handle<Image>>,
@@ -1762,20 +1763,23 @@ impl Context {
         }
     }
 
-    pub fn make_window(&mut self, info: &WindowInfo) {
+    pub fn make_window(&mut self, info: &WindowInfo) -> (sdl2::video::Window, vk::SurfaceKHR) {
         let window = self
             .sdl_video
             .window(&info.title, info.size[0], info.size[1])
             .vulkan()
             .build()
-            .unwrap();
+            .expect("Unable to create SDL2 Window!");
 
+        let surface = window
+            .vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
+            .expect("Unable to create vulkan surface!");
+
+       (window, vk::Handle::from_raw(surface)) 
     }
 
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
-        let mut surface: vk::SurfaceKHR = Default::default();
-        let window = info.window;
-        let handle = self.make_window(info.window);
+        let (window, surface) = self.make_window(info.window);
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
         let capabilities =
@@ -1869,8 +1873,8 @@ impl Context {
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .build(),
                 extent: vk::Extent3D::builder()
-                    .width(size.width)
-                    .height(size.height)
+                    .width(size[0])
+                    .height(size[1])
                     .depth(1)
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
@@ -1913,6 +1917,7 @@ impl Context {
             fences.push(Fence::new_simple(f, self.device.clone()));
         }
         return Ok(Display {
+            window,
             swapchain,
             surface,
             images: handles,
