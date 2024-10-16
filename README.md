@@ -33,7 +33,7 @@ See the [tests](https://github.com/JordanHendl/dashi/tree/main/tests) for exampl
 
 ## Documentation
 
-Detailed documentation is available [here](https://github.com/yourusername/dashi/wiki). It includes guides, API references, and examples to help you get the most out of Dashi.
+Detailed documentation is available [here](https://github.com/JordanHendl/dashi/wiki). It includes guides, API references, and examples to help you get the most out of Dashi.
 
 ## Roadmap
 
@@ -48,6 +48,6 @@ Dashi is licensed under the [MIT License](LICENSE).
 
 ## Contact
 
-For questions or suggestions, feel free to reach out via [GitHub Issues](https://github.com/yourusername/dashi/issues).
+For questions or suggestions, feel free to reach out via [GitHub Issues](https://github.com/JordanHendl/dashi/issues).
 
 
