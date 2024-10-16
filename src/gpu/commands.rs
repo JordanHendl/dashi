@@ -1,6 +1,6 @@
 use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
-    Filter, GPUError, GraphicsPipelineLayout, ImageView, Rect2D, Viewport,
+    convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList, Filter,
+    GPUError, GraphicsPipeline, GraphicsPipelineLayout, ImageView, Rect2D, Viewport,
 };
 use super::{Attachment, RenderPass};
 use super::{BindGroup, Handle};
@@ -44,11 +44,9 @@ impl Default for ImageBlit {
 }
 
 #[derive(Clone)]
-pub struct RenderPassBegin<'a> {
+pub struct RenderPassBegin {
     pub viewport: Viewport,
-    pub pipeline_layout: Handle<GraphicsPipelineLayout>,
-    pub color_attachments: &'a [Attachment],
-    pub depth_stencil_attachment: Option<&'a Attachment>,
+    pub render_pass: Handle<RenderPass>,
 }
 
 #[derive(Clone)]
@@ -106,12 +104,9 @@ impl CommandList {
         self.append(Command::ImageBarrierCommand(barrier.clone()));
     }
 
-    pub fn begin_render_pass<'a>(
-        &mut self,
-        rec: &RenderPassBegin<'a>,
-    ) -> Result<RenderPass, GPUError> {
+    pub fn begin_render_pass<'a>(&mut self, rec: &RenderPassBegin) -> Result<RenderPass, GPUError> {
         if self.curr_rp.is_none() {
-            self.curr_rp = unsafe { Some((*self.ctx).get_cached_render_pass(rec)?) };
+            self.curr_rp = Some(rec.render_pass);
         }
 
         unsafe {
@@ -130,22 +125,27 @@ impl CommandList {
                 vk::SubpassContents::INLINE,
             );
 
-            self.curr_pipeline = rp.gfx;
-            if rp.gfx.is_some() {
-                let gfx = (*self.ctx)
-                    .gfx_pipelines
-                    .get_ref(rp.gfx.unwrap_unchecked())
-                    .unwrap();
-                (*self.ctx).device.cmd_bind_pipeline(
-                    self.cmd_buf,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    gfx.raw,
-                );
-            }
-
             self.last_op_stage = vk::PipelineStageFlags::NONE;
             self.last_op_access = vk::AccessFlags::NONE;
             return Ok(rp.clone());
+        }
+    }
+
+    pub fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) {
+        if let Some(gfx) = self.curr_pipeline {
+            if pipeline == gfx {
+                return;
+            }
+        }
+
+        unsafe {
+            self.curr_pipeline = Some(pipeline);
+            let gfx = (*self.ctx).gfx_pipelines.get_ref(pipeline).unwrap();
+            (*self.ctx).device.cmd_bind_pipeline(
+                self.cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                gfx.raw,
+            );
         }
     }
 

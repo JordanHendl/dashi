@@ -183,37 +183,6 @@ pub(super) struct CommandBufferQueue {
     )>,
 }
 
-impl CommandBufferQueue {
-    fn new() -> Self {
-        CommandBufferQueue {
-            queue: VecDeque::new(),
-        }
-    }
-
-    fn push(
-        &mut self,
-        cmd: (
-            vk::CommandBuffer,
-            vk::Fence,
-            vk::Semaphore,
-            Arc<Mutex<bool>>,
-        ),
-    ) {
-        self.queue.push_back(cmd);
-    }
-
-    fn pop(
-        &mut self,
-    ) -> Option<(
-        vk::CommandBuffer,
-        vk::Fence,
-        vk::Semaphore,
-        Arc<Mutex<bool>>,
-    )> {
-        self.queue.pop_front()
-    }
-}
-
 #[derive(Debug)]
 pub struct Buffer {
     buf: vk::Buffer,
@@ -253,8 +222,8 @@ pub struct ImageView {
 #[derive(Clone)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
+    pub(super) viewport: Viewport,
     pub(super) fb: Vec<(vk::Framebuffer, Vec<Handle<Image>>)>,
-    pub(super) gfx: Option<Handle<GraphicsPipeline>>,
     pub(super) clear_values: Vec<vk::ClearValue>,
 }
 
@@ -271,7 +240,7 @@ pub struct BindGroup {
 }
 
 pub struct Display {
-    window: sdl2::video::Window,
+    window: std::cell::Cell<sdl2::video::Window>,
     swapchain: ash::vk::SwapchainKHR,
     surface: ash::vk::SurfaceKHR,
     images: Vec<Handle<Image>>,
@@ -287,11 +256,6 @@ pub struct Display {
 pub struct Fence {
     raw: vk::Fence,
     device: ash::Device,
-    should_cleanup: bool,
-    cmd_buf: Option<vk::CommandBuffer>,
-    is_waited: Arc<Mutex<bool>>,
-    sem: vk::Semaphore,
-    ctx: *mut Context,
 }
 
 impl Default for Fence {
@@ -299,45 +263,18 @@ impl Default for Fence {
         Self {
             raw: Default::default(),
             device: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
-            is_waited: Arc::new(Mutex::new(false)),
-            cmd_buf: None,
-            ctx: std::ptr::null_mut(),
-            sem: Default::default(),
-            should_cleanup: true,
         }
     }
 }
 
 impl Fence {
-    fn new_simple(raw: vk::Fence, device: ash::Device) -> Self {
-        Self {
-            raw,
-            device,
-            cmd_buf: Default::default(),
-            is_waited: Arc::new(Mutex::new(false)),
-            ctx: std::ptr::null_mut(),
-            sem: Default::default(),
-            should_cleanup: true,
-        }
-    }
-
     fn new(
         raw: vk::Fence,
         device: ash::Device,
-        cmd_buf: Option<vk::CommandBuffer>,
-        sem: vk::Semaphore,
-        wait: bool,
-        should_cleanup: bool,
-        ctx: *mut Context,
     ) -> Self {
         Self {
             raw,
             device,
-            cmd_buf,
-            is_waited: Arc::new(Mutex::new(wait)),
-            ctx,
-            sem,
-            should_cleanup,
         }
     }
 
@@ -352,48 +289,7 @@ impl Fence {
 
     fn reset(&mut self) -> Result<(), GPUError> {
         unsafe { self.device.reset_fences(&[self.raw]) }?;
-        let mut v = self.is_waited.lock().unwrap();
-        *v = false;
         Ok(())
-    }
-}
-
-impl Drop for Fence {
-    fn drop(&mut self) {
-        if !self.should_cleanup {
-            return;
-        }
-
-        let l = self.is_waited.lock().unwrap();
-        if !*l
-            && !self.ctx.is_null()
-            && self.cmd_buf.is_some()
-            && Arc::strong_count(&self.is_waited) == 1
-        {
-            unsafe {
-                let (lock, cvar) = &*(*self.ctx).cmd_buf_queue;
-                let mut queue_guard = lock.lock().unwrap();
-                queue_guard.push((
-                    self.cmd_buf.unwrap(),
-                    self.raw,
-                    self.sem,
-                    self.is_waited.clone(),
-                ));
-                (*self.ctx).cmd_destroy_queue.push((
-                    self.cmd_buf.unwrap(),
-                    self.is_waited.clone(),
-                    self.sem.clone(),
-                ));
-                cvar.notify_one();
-            }
-        } else if *l && self.cmd_buf.is_some() && !self.ctx.is_null() {
-            unsafe { self.device.destroy_fence(self.raw, None) };
-            unsafe { self.device.destroy_semaphore(self.sem, None) };
-            unsafe {
-                self.device
-                    .free_command_buffers((*self.ctx).pool, &[self.cmd_buf.unwrap()])
-            };
-        }
     }
 }
 
@@ -459,9 +355,9 @@ pub struct Context {
     pub(super) instance: ash::Instance,
     pub(super) pdevice: vk::PhysicalDevice,
     pub(super) device: ash::Device,
+    pub(super) properties: ash::vk::PhysicalDeviceProperties,
     pub(super) pool: vk::CommandPool,
     pub(super) allocator: vk_mem::Allocator,
-    pub(super) cmd_buf_queue: Arc<(Mutex<CommandBufferQueue>, Condvar)>,
     pub(super) gfx_queue: Queue,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
@@ -473,7 +369,9 @@ pub struct Context {
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) rps: HashMap<u64, Handle<RenderPass>>,
+    #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
+    #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_video: sdl2::VideoSubsystem,
     pub(super) cmd_destroy_queue: Vec<(vk::CommandBuffer, Arc<Mutex<bool>>, vk::Semaphore)>,
     #[cfg(debug_assertions)]
@@ -509,6 +407,7 @@ impl Context {
 
         let pdevice = unsafe { instance.enumerate_physical_devices()?[0] };
         let device_prop = unsafe { instance.get_physical_device_properties(pdevice) };
+
         let queue_prop = unsafe { instance.get_physical_device_queue_family_properties(pdevice) };
         let features = unsafe { instance.get_physical_device_features(pdevice) };
 
@@ -568,8 +467,6 @@ impl Context {
         #[cfg(debug_assertions)]
         let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
 
-        let q = Arc::new((Mutex::new(CommandBufferQueue::new()), Condvar::new()));
-        Context::start_cmd_thread(device.clone(), q.clone());
         let sdl_context = sdl2::init().unwrap();
         let sdl_video = sdl_context.video().unwrap();
         return Ok(Context {
@@ -579,10 +476,14 @@ impl Context {
             device,
             pool,
             allocator,
-            cmd_buf_queue: q.clone(),
             gfx_queue,
+            properties: device_prop,
+
+            #[cfg(feature = "dashi-sdl2")]
             sdl_context,
+            #[cfg(feature = "dashi-sdl2")]
             sdl_video,
+
             buffers: Default::default(),
             render_passes: Default::default(),
             images: Default::default(),
@@ -598,6 +499,11 @@ impl Context {
             #[cfg(debug_assertions)]
             debug_utils,
         });
+    }
+
+    #[cfg(feature = "dashi-sdl2")]
+    pub fn get_sdl_event(&mut self) -> sdl2::EventPump {
+        return self.sdl_context.event_pump().unwrap();
     }
 
     fn set_name<T>(&self, obj: T, name: &str, t: vk::ObjectType)
@@ -653,52 +559,7 @@ impl Context {
         });
     }
 
-    pub(super) fn get_cached_render_pass(
-        &mut self,
-        info: &RenderPassBegin,
-    ) -> Result<Handle<RenderPass>, GPUError> {
-        let mut s = DefaultHasher::new();
-        info.color_attachments.hash(&mut s);
-        if let Some(depth) = info.depth_stencil_attachment {
-            depth.hash(&mut s);
-        }
-
-        let h = s.finish();
-
-        let mut should_insert = false;
-        match self.rps.get(&h) {
-            Some(rp) => return Ok(*rp),
-            None => should_insert = true,
-        };
-
-        if should_insert {
-            let rp = self.make_render_pass(info)?;
-            self.rps.insert(h, rp);
-            return Ok(rp);
-        }
-
-        return Err(GPUError::SlotError());
-    }
-
-    fn query_cmd_destructions(&mut self) {
-        self.cmd_destroy_queue.retain(|cmd| {
-            let l = cmd.1.try_lock();
-            match l {
-                Ok(b) => {
-                    if *b {
-                        unsafe { self.device.free_command_buffers(self.pool, &[cmd.0]) };
-                        unsafe { self.device.destroy_semaphore(cmd.2, None) };
-                        return false;
-                    }
-                }
-                Err(_) => {}
-            }
-            return true;
-        });
-    }
-
     pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
-        self.query_cmd_destructions();
         let cmd = unsafe {
             self.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
@@ -747,11 +608,6 @@ impl Context {
             fence: Fence::new(
                 f,
                 self.device.clone(),
-                Some(cmd[0]),
-                s,
-                false,
-                info.should_cleanup,
-                self,
             ),
             semaphore: s,
             dirty: true,
@@ -1373,9 +1229,9 @@ impl Context {
         Ok(shader_module)
     }
 
-    pub(super) fn make_render_pass(
+    pub fn make_render_pass(
         &mut self,
-        info: &RenderPassBegin,
+        info: &RenderPassInfo,
     ) -> Result<Handle<RenderPass>, GPUError> {
         let mut attachments = Vec::new();
         let mut color_attachment_refs = Vec::new();
@@ -1467,14 +1323,13 @@ impl Context {
         let render_pass = unsafe { self.device.create_render_pass(&render_pass_info, None) }?;
 
         let fbs = self.create_framebuffers(render_pass, info)?;
-        let gfx = self.make_graphics_pipeline(render_pass, info)?;
         return Ok(self
             .render_passes
             .insert(RenderPass {
                 raw: render_pass,
                 fb: fbs,
-                gfx: Some(gfx),
-                clear_values: clear_values,
+                clear_values,
+                viewport: info.viewport,
             })
             .unwrap());
     }
@@ -1590,15 +1445,13 @@ impl Context {
             .unwrap());
     }
 
-    pub(super) fn make_graphics_pipeline(
+    pub fn make_graphics_pipeline(
         &mut self,
-        rp: vk::RenderPass,
-        info: &RenderPassBegin,
+        info: &GraphicsPipelineInfo,
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
-        let layout = self
-            .gfx_pipeline_layouts
-            .get_ref(info.pipeline_layout)
-            .unwrap();
+        let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
+        let rp = self.render_passes.get_ref(info.render_pass).unwrap().raw;
+        let rp_viewport = self.render_passes.get_ref(info.render_pass).unwrap().viewport.clone();
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&[layout.vertex_input])
@@ -1607,22 +1460,22 @@ impl Context {
 
         // Step 4: Viewport and Scissor State
         let viewport = vk::Viewport::builder()
-            .x(info.viewport.area.x)
-            .y(info.viewport.area.y)
-            .width(info.viewport.area.w)
-            .height(info.viewport.area.h)
+            .x(rp_viewport.area.x)
+            .y(rp_viewport.area.y)
+            .width(rp_viewport.area.w)
+            .height(rp_viewport.area.h)
             .min_depth(0.0)
             .max_depth(1.0)
             .build();
 
         let scissor = vk::Rect2D::builder()
             .offset(vk::Offset2D {
-                x: info.viewport.scissor.x as i32,
-                y: info.viewport.scissor.y as i32,
+                x: rp_viewport.scissor.x as i32,
+                y: rp_viewport.scissor.y as i32,
             })
             .extent(vk::Extent2D {
-                width: info.viewport.scissor.w,
-                height: info.viewport.scissor.h,
+                width: rp_viewport.scissor.w,
+                height: rp_viewport.scissor.h,
             })
             .build();
 
@@ -1680,7 +1533,7 @@ impl Context {
             .gfx_pipelines
             .insert(GraphicsPipeline {
                 raw: graphics_pipelines[0],
-                layout: info.pipeline_layout,
+                layout: info.layout,
             })
             .unwrap());
     }
@@ -1688,7 +1541,7 @@ impl Context {
     pub(super) fn create_framebuffers(
         &mut self,
         render_pass: vk::RenderPass,
-        render_pass_begin: &RenderPassBegin,
+        render_pass_begin: &RenderPassInfo,
     ) -> Result<Vec<(vk::Framebuffer, Vec<Handle<Image>>)>, GPUError> {
         let mut framebuffers_with_images = Vec::new();
         let mut width = std::u32::MAX;
@@ -1763,23 +1616,25 @@ impl Context {
         }
     }
 
-    pub fn make_window(&mut self, info: &WindowInfo) -> (sdl2::video::Window, vk::SurfaceKHR) {
-        let window = self
+    #[cfg(feature = "dashi-sdl2")]
+    fn make_window(&mut self, info: &WindowInfo) -> (std::cell::Cell<sdl2::video::Window>, vk::SurfaceKHR) {
+
+
+        let mut window = std::cell::Cell::new(self
             .sdl_video
             .window(&info.title, info.size[0], info.size[1])
             .vulkan()
             .build()
-            .expect("Unable to create SDL2 Window!");
+            .expect("Unable to create SDL2 Window!"));
 
-        let surface = window
-            .vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
+        let surface = window.get_mut().vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
             .expect("Unable to create vulkan surface!");
 
-       (window, vk::Handle::from_raw(surface)) 
+        (window, vk::Handle::from_raw(surface))
     }
 
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
-        let (window, surface) = self.make_window(info.window);
+        let (window, surface) = self.make_window(&info.window);
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
         let capabilities =
@@ -1914,7 +1769,7 @@ impl Context {
                 )
             }?;
 
-            fences.push(Fence::new_simple(f, self.device.clone()));
+            fences.push(Fence::new(f, self.device.clone()));
         }
         return Ok(Display {
             window,

@@ -8,6 +8,12 @@ pub struct Handle<T> {
     phantom: PhantomData<T>,
 }
 
+impl<T> PartialEq for Handle<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.slot == other.slot && self.generation == other.generation
+    }
+}
+
 impl<T> Clone for Handle<T> {
     fn clone(&self) -> Self {
         Self {
@@ -39,6 +45,7 @@ impl<T> Default for Handle<T> {
 
 pub struct Pool<T> {
     items: Vec<Option<T>>,
+    empty: Vec<usize>,
     generation: Vec<u16>,
 }
 
@@ -47,9 +54,11 @@ impl<T> Default for Pool<T> {
         const INITIAL_SIZE: usize = 1024;
         let mut p = Pool {
             items: Vec::with_capacity(INITIAL_SIZE),
+            empty: Vec::with_capacity(INITIAL_SIZE),
             generation: vec![0; INITIAL_SIZE],
         };
 
+        p.empty = (0..INITIAL_SIZE).collect();
         p.items.resize_with(INITIAL_SIZE, || None);
         return p;
     }
@@ -58,20 +67,18 @@ impl<T> Pool<T> {
     pub fn new(initial_size: usize) -> Self {
         let mut p = Pool {
             items: Vec::with_capacity(initial_size),
+            empty: Vec::with_capacity(initial_size),
             generation: vec![0; initial_size],
         };
 
+        p.empty = (0..initial_size).collect();
         p.items.resize_with(initial_size, || None);
 
         return p;
     }
 
     pub fn insert(&mut self, item: T) -> Option<Handle<T>> {
-        let empty_slot = self
-            .items
-            .as_slice()
-            .into_iter()
-            .position(|a| return a.is_none())?;
+        let empty_slot = self.empty.pop()?;
 
         self.items[empty_slot] = Some(item);
 
@@ -82,7 +89,9 @@ impl<T> Pool<T> {
         });
     }
 
-    pub fn release(&mut self, item: Handle<T>) {}
+    pub fn release(&mut self, item: Handle<T>) {
+        self.empty.push(item.slot as usize);
+    }
 
     pub fn get_ref(&self, item: Handle<T>) -> Option<&T> {
         let slot = item.slot as usize;

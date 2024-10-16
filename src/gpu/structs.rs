@@ -1,4 +1,4 @@
-use super::{BindGroupLayout, Buffer, Image, ImageView, Sampler};
+use super::{BindGroupLayout, Buffer, GraphicsPipelineLayout, Image, ImageView, RenderPass, Sampler};
 use crate::utils::Handle;
 use std::hash::{Hash, Hasher};
 
@@ -349,6 +349,14 @@ pub enum VertexRate {
     Vertex,
 }
 
+
+pub struct RenderPassInfo<'a> {
+    pub viewport: Viewport,
+    pub pipeline_layout: Handle<GraphicsPipelineLayout>,
+    pub color_attachments: &'a [Attachment],
+    pub depth_stencil_attachment: Option<&'a Attachment>,
+}
+
 #[derive(Hash, Debug)]
 pub struct VertexDescriptionInfo<'a> {
     pub entries: &'a [VertexEntryInfo], // ConstSlice in Rust can be a reference slice
@@ -371,6 +379,11 @@ pub struct GraphicsPipelineLayoutInfo<'a> {
     pub details: GraphicsPipelineDetails,
 }
 
+pub struct GraphicsPipelineInfo {
+    pub layout: Handle<GraphicsPipelineLayout>,
+    pub render_pass: Handle<RenderPass>,
+}
+
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
     pub title: String,
@@ -388,8 +401,18 @@ impl Default for WindowInfo {
     }
 }
 
-pub struct DisplayInfo<'a> {
-    pub window: &'a WindowInfo,
+pub struct DisplayInfo {
+    pub window: WindowInfo,
     pub vsync: bool,
     pub buffering: WindowBuffering,
+}
+
+impl Default for DisplayInfo {
+    fn default() -> Self {
+        Self {
+            window: Default::default(),
+            vsync: true,
+            buffering: WindowBuffering::Double,
+        }
+    }
 }
