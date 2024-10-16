@@ -72,7 +72,6 @@ impl Timer {
 
 #[cfg(feature = "dashi-tests")]
 fn main() {
-
     // The GPU context that holds all the data.
     let mut ctx = gpu::Context::new(&Default::default()).unwrap();
 
@@ -88,7 +87,7 @@ fn main() {
     const INDICES: [u32; 3] = [
         0, 1, 2, // Triangle: uses vertices 0, 1, and 2
     ];
-    
+
     // Allocate the vertices & indices.
     let vertices = ctx
         .make_buffer(&BufferInfo {
@@ -110,7 +109,6 @@ fn main() {
         })
         .unwrap();
 
-
     // Allocate the framebuffer image & view
     let fb = ctx
         .make_image(&ImageInfo {
@@ -128,7 +126,7 @@ fn main() {
             ..Default::default()
         })
         .unwrap();
-    
+
     // Make the bind group layout. This describes the bindings into a shader.
     let bg_layout = ctx
         .make_bind_group_layout(&BindGroupLayoutInfo {
@@ -141,7 +139,7 @@ fn main() {
             }],
         })
         .unwrap();
-    
+
     // Make a pipeline layout. This describes a graphics pipeline's state.
     let pipeline_layout = ctx
         .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
@@ -193,7 +191,7 @@ void main() {
             details: Default::default(),
         })
         .expect("Unable to create GFX Pipeline Layout!");
-    
+
     // Make a render pass. This describes the targets we wish to draw to.
     let render_pass = ctx
         .make_render_pass(&RenderPassInfo {
@@ -218,7 +216,7 @@ void main() {
             depth_stencil_attachment: None,
         })
         .unwrap();
-    
+
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
@@ -226,10 +224,10 @@ void main() {
             render_pass,
         })
         .unwrap();
-    
+
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    
+
     // Make bind group what we want to bind to what was described in the Bind Group Layout.
     let bind_group = ctx
         .make_bind_group(&BindGroupInfo {
@@ -241,7 +239,7 @@ void main() {
             ..Default::default()
         })
         .unwrap();
-    
+
     // Event pump for events
     let mut event_pump = ctx.get_sdl_event();
     // Display for windowing
@@ -253,7 +251,7 @@ void main() {
     'running: loop {
         // Reset the allocator
         allocator.reset();
-        
+
         // Listen to events
         for event in event_pump.poll_iter() {
             match event {
@@ -293,7 +291,6 @@ void main() {
         })
         .unwrap();
 
-
         // Bump alloc some data to write the triangle position to.
         let mut buf = allocator.bump().unwrap();
         let pos = &mut buf.slice::<[f32; 2]>()[0];
@@ -309,10 +306,10 @@ void main() {
             dynamic_buffers: [Some(buf), None, None, None],
             ..Default::default()
         }));
-        
+
         // End drawing.
         list.end_drawing().expect("Error ending drawing!");
-        
+
         // Blit the framebuffer to the display's image
         list.blit(ImageBlit {
             src: fb_view,
@@ -320,7 +317,7 @@ void main() {
             filter: Filter::Nearest,
             ..Default::default()
         });
-        
+
         // Submit our recorded commands
         let (sem, fence) = ctx.submit(&mut list, Some(&[sem])).unwrap();
 
