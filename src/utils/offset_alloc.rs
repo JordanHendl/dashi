@@ -1,5 +1,3 @@
-const USE_16_BIT_NODE_INDICES: bool = false;
-
 use std::mem;
 
 #[cfg(feature = "use_16_bit_node_indices")]

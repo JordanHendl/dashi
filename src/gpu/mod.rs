@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread;
+use std::sync::{Arc, Mutex};
 mod error;
 use crate::utils::{offset_alloc, Handle, Pool};
 use ash::*;
