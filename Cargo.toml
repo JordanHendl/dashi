@@ -7,6 +7,7 @@ edition = "2021"
 default = ["dashi-sdl2", "dashi-tests"]
 dashi-tests = ["dep:inline-spirv"]
 dashi-sdl2 = []
+use_16_bit_node_indices = []
 
 [dependencies]
 glam = "=0.8.5"
