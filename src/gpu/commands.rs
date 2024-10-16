@@ -1,8 +1,8 @@
 use super::{
     convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList, Filter,
-    GPUError, GraphicsPipeline, GraphicsPipelineLayout, ImageView, Rect2D, Viewport,
+    GPUError, GraphicsPipeline, ImageView, Rect2D, Viewport,
 };
-use super::{Attachment, RenderPass};
+use super::RenderPass;
 use super::{BindGroup, Handle};
 use ash::*;
 

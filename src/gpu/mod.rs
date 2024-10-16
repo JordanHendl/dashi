@@ -1,6 +1,4 @@
-use sdl2::*;
 use std::collections::VecDeque;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 mod error;
