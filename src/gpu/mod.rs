@@ -1,10 +1,7 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 mod error;
 use crate::utils::{offset_alloc, Handle, Pool};
 use ash::*;
 pub use error::*;
-use std::collections::HashMap;
 use std::ffi::CString;
 use vk_mem::Alloc;
 
@@ -168,16 +165,6 @@ fn convert_sample_count(sample_count: SampleCount) -> vk::SampleCountFlags {
         SampleCount::S1 => vk::SampleCountFlags::TYPE_1,
         SampleCount::S2 => vk::SampleCountFlags::TYPE_2,
     }
-}
-
-#[derive(Clone)]
-pub(super) struct CommandBufferQueue {
-    queue: VecDeque<(
-        vk::CommandBuffer,
-        vk::Fence,
-        vk::Semaphore,
-        Arc<Mutex<bool>>,
-    )>,
 }
 
 #[derive(Debug)]
@@ -393,14 +380,12 @@ pub struct Context {
     pub(super) bind_groups: Pool<BindGroup>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
-    pub(super) rps: HashMap<u64, Handle<RenderPass>>,
     pub(super) cmds_to_release: Vec<(CommandList, Fence)>,
 
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_video: sdl2::VideoSubsystem,
-    pub(super) cmd_destroy_queue: Vec<(vk::CommandBuffer, Arc<Mutex<bool>>, vk::Semaphore)>,
     #[cfg(debug_assertions)]
     pub(super) debug_utils: ash::extensions::ext::DebugUtils,
 }
@@ -520,8 +505,6 @@ impl Context {
             bind_groups: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
-            rps: Default::default(),
-            cmd_destroy_queue: Default::default(),
             samplers: Default::default(),
 
             #[cfg(debug_assertions)]

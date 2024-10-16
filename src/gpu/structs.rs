@@ -5,13 +5,18 @@ use super::{
 use crate::utils::Handle;
 use std::hash::{Hash, Hasher};
 
+#[cfg(feature = "dashi-serde")]
+use serde::{Serialize, Deserialize};
+
 #[derive(Hash, Clone, Copy, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum MemoryVisibility {
     Gpu,
     CpuAndGpu,
 }
 
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BufferUsage {
     VERTEX,
     INDEX,
@@ -20,6 +25,7 @@ pub enum BufferUsage {
 }
 
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
     RGB8,
     BGRA8,
@@ -30,12 +36,14 @@ pub enum Format {
 }
 
 #[derive(Hash, Clone, Copy, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum WindowBuffering {
     Double,
     Triple,
 }
 
 #[derive(Hash, Debug, Copy, Clone)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum LoadOp {
     Load,
     Clear,
@@ -43,18 +51,21 @@ pub enum LoadOp {
 }
 
 #[derive(Hash, Debug, Copy, Clone)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum StoreOp {
     Store,
     DontCare,
 }
 
 #[derive(Hash, Debug, Copy, Clone)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
     S1,
     S2,
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BarrierPoint {
     DrawEnd,
     BlitRead,
@@ -63,12 +74,14 @@ pub enum BarrierPoint {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Filter {
     Nearest,
     Linear,
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SamplerAddressMode {
     Repeat,
     MirroredRepeat,
@@ -77,12 +90,14 @@ pub enum SamplerAddressMode {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SamplerMipmapMode {
     Nearest,
     Linear,
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BorderColor {
     OpaqueBlack,
     OpaqueWhite,
@@ -90,6 +105,7 @@ pub enum BorderColor {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct SamplerInfo {
     pub mag_filter: Filter,
     pub min_filter: Filter,
@@ -124,12 +140,14 @@ impl Default for SamplerInfo {
 }
 
 #[derive(Debug, Hash, Default, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Extent {
     pub width: u32,
     pub height: u32,
 }
 
 #[derive(Debug, Hash, Default, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Rect2D {
     pub x: u32,
     pub y: u32,
@@ -138,6 +156,7 @@ pub struct Rect2D {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct FRect2D {
     pub x: f32,
     pub y: f32,
@@ -263,6 +282,7 @@ impl Default for Attachment {
     }
 }
 #[derive(Hash, Clone, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BindGroupVariableType {
     Uniform,
     DynamicUniform,
@@ -272,6 +292,7 @@ pub enum BindGroupVariableType {
 }
 
 #[derive(Hash, Clone, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderType {
     Vertex,
     Fragment,
@@ -279,6 +300,7 @@ pub enum ShaderType {
 }
 
 #[derive(Hash, Clone, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct BindGroupVariable {
     pub var_type: BindGroupVariableType,
     pub binding: u32,
@@ -323,6 +345,7 @@ impl<'a> Default for BindGroupInfo<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Viewport {
     pub area: FRect2D,
     pub scissor: Rect2D,
@@ -341,21 +364,25 @@ impl Default for Viewport {
     }
 }
 #[derive(Hash, Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Topology {
     TriangleList,
 }
 
 #[derive(Hash, Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum CullMode {
     Back,
 }
 
 #[derive(Hash, Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum VertexOrdering {
     Clockwise,
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct GraphicsPipelineDetails {
     pub topology: Topology,
     pub culling: CullMode,
@@ -381,12 +408,14 @@ pub struct SpecializationInfo<'a> {
 }
 
 #[derive(Hash, Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderPrimitiveType {
     Vec2,
     Vec4,
 }
 
 #[derive(Hash, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct VertexEntryInfo {
     pub format: ShaderPrimitiveType,
     pub location: usize,
@@ -394,6 +423,7 @@ pub struct VertexEntryInfo {
 }
 
 #[derive(Hash, Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum VertexRate {
     Vertex,
 }
@@ -432,6 +462,7 @@ pub struct GraphicsPipelineInfo {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct WindowInfo {
     pub title: String,
     pub size: [u32; 2],
@@ -448,6 +479,7 @@ impl Default for WindowInfo {
     }
 }
 
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DisplayInfo {
     pub window: WindowInfo,
     pub vsync: bool,

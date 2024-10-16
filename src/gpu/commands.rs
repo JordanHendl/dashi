@@ -103,6 +103,11 @@ impl CommandList {
     pub fn blit(&mut self, cmd: ImageBlit) {
         self.append(Command::BlitCommand(cmd));
     }
+
+    pub fn copy_buffers(& mut self, info: &BufferCopy) {
+        self.append(Command::BufferCopyCommand(info.clone()));
+    }
+
     pub fn image_barrier(&mut self, barrier: &ImageBarrier) {
         self.append(Command::ImageBarrierCommand(barrier.clone()));
     }
