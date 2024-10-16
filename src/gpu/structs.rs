@@ -1,4 +1,7 @@
-use super::{BindGroupLayout, Buffer, GraphicsPipelineLayout, Image, ImageView, RenderPass, Sampler};
+use super::{
+    BindGroupLayout, Buffer, DynamicAllocator, GraphicsPipelineLayout, Image, ImageView,
+    RenderPass, Sampler,
+};
 use crate::utils::Handle;
 use std::hash::{Hash, Hasher};
 
@@ -6,6 +9,14 @@ use std::hash::{Hash, Hasher};
 pub enum MemoryVisibility {
     Gpu,
     CpuAndGpu,
+}
+
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BufferUsage {
+    VERTEX,
+    INDEX,
+    UNIFORM,
+    STORAGE,
 }
 
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,13 +123,13 @@ impl Default for SamplerInfo {
     }
 }
 
-#[derive(Hash, Default, Clone, Copy)]
+#[derive(Debug, Hash, Default, Clone, Copy)]
 pub struct Extent {
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Hash, Default, Clone, Copy)]
+#[derive(Debug, Hash, Default, Clone, Copy)]
 pub struct Rect2D {
     pub x: u32,
     pub y: u32,
@@ -126,7 +137,7 @@ pub struct Rect2D {
     pub h: u32,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct FRect2D {
     pub x: f32,
     pub y: f32,
@@ -168,7 +179,34 @@ pub struct BufferInfo<'a> {
     pub debug_name: &'a str,
     pub byte_size: u32,
     pub visibility: MemoryVisibility,
+    pub usage: BufferUsage,
     pub initial_data: Option<&'a [u8]>,
+}
+
+impl<'a> Default for BufferInfo<'a> {
+    fn default() -> Self {
+        Self {
+            debug_name: "",
+            byte_size: 1024,
+            visibility: MemoryVisibility::CpuAndGpu,
+            initial_data: None,
+            usage: BufferUsage::UNIFORM,
+        }
+    }
+}
+#[derive(Hash, Clone, Copy, Debug)]
+pub struct DynamicAllocatorInfo<'a> {
+    pub debug_name: &'a str,
+    pub byte_size: u32,
+}
+
+impl<'a> Default for DynamicAllocatorInfo<'a> {
+    fn default() -> Self {
+        Self {
+            debug_name: "",
+            byte_size: 1024 * 1024,
+        }
+    }
 }
 
 #[derive(Hash)]
@@ -257,23 +295,34 @@ pub struct BindGroupLayoutInfo<'a> {
     pub shaders: &'a [ShaderInfo<'a>],
 }
 
-pub enum ShaderResource {
+pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
+    Dynamic(&'a DynamicAllocator),
     SampledImage(Handle<ImageView>, Handle<Sampler>),
 }
 
-pub struct BindingInfo {
-    pub resource: ShaderResource,
+pub struct BindingInfo<'a> {
+    pub resource: ShaderResource<'a>,
     pub binding: u32,
 }
 
 pub struct BindGroupInfo<'a> {
     pub layout: Handle<BindGroupLayout>,
-    pub bindings: &'a [BindingInfo],
+    pub bindings: &'a [BindingInfo<'a>],
     pub set: u32,
 }
 
-#[derive(Clone, Copy)]
+impl<'a> Default for BindGroupInfo<'a> {
+    fn default() -> Self {
+        Self {
+            layout: Default::default(),
+            bindings: &[],
+            set: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Viewport {
     pub area: FRect2D,
     pub scissor: Rect2D,
@@ -348,7 +397,6 @@ pub struct VertexEntryInfo {
 pub enum VertexRate {
     Vertex,
 }
-
 
 pub struct RenderPassInfo<'a> {
     pub viewport: Viewport,

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 mod error;
-use crate::utils::{Handle, Pool};
+use crate::utils::{offset_alloc, Handle, Pool};
 use ash::*;
 pub use error::*;
 use std::collections::HashMap;
@@ -188,12 +188,45 @@ pub struct Buffer {
     size: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct DynamicBuffer {
-    handle: Handle<Buffer>,
-    offset: usize,
+    pub(crate) handle: Handle<Buffer>,
+    pub(crate) alloc: offset_alloc::Allocation,
+    pub(crate) ptr: *mut u8,
+    pub(crate) size: u16,
 }
 
+impl DynamicBuffer {
+    pub fn slice<T>(&mut self) -> &mut [T] {
+        let typed_map: *mut T = unsafe { std::mem::transmute(self.ptr) };
+        return unsafe {
+            std::slice::from_raw_parts_mut(typed_map, self.size as usize / std::mem::size_of::<T>())
+        };
+    }
+}
+
+pub struct DynamicAllocator {
+    allocator: offset_alloc::Allocator,
+    ptr: *mut u8,
+    min_alloc_size: u32,
+    pool: Handle<Buffer>,
+}
+
+impl DynamicAllocator {
+    pub fn reset(&mut self) {
+        self.allocator.reset();
+    }
+
+    pub fn bump(&mut self) -> Option<DynamicBuffer> {
+        let alloc = self.allocator.allocate(self.min_alloc_size)?;
+        return Some(DynamicBuffer {
+            handle: self.pool,
+            alloc,
+            ptr: unsafe { self.ptr.offset(alloc.offset as isize) },
+            size: self.min_alloc_size as u16,
+        });
+    }
+}
 #[derive(Debug)]
 pub struct Image {
     img: vk::Image,
@@ -217,7 +250,7 @@ pub struct ImageView {
     view: vk::ImageView,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) viewport: Viewport,
@@ -266,14 +299,8 @@ impl Default for Fence {
 }
 
 impl Fence {
-    fn new(
-        raw: vk::Fence,
-        device: ash::Device,
-    ) -> Self {
-        Self {
-            raw,
-            device,
-        }
+    fn new(raw: vk::Fence, device: ash::Device) -> Self {
+        Self { raw, device }
     }
 
     pub fn wait(&mut self) -> Result<(), GPUError> {
@@ -308,9 +335,10 @@ pub struct GraphicsPipelineLayout {
     layout: vk::PipelineLayout,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct GraphicsPipeline {
     raw: vk::Pipeline,
+    render_pass: Handle<RenderPass>,
     layout: Handle<GraphicsPipelineLayout>,
 }
 
@@ -367,6 +395,8 @@ pub struct Context {
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) rps: HashMap<u64, Handle<RenderPass>>,
+    pub(super) cmds_to_release: Vec<(CommandList, Fence)>,
+
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
     #[cfg(feature = "dashi-sdl2")]
@@ -482,6 +512,7 @@ impl Context {
             #[cfg(feature = "dashi-sdl2")]
             sdl_video,
 
+            cmds_to_release: Default::default(),
             buffers: Default::default(),
             render_passes: Default::default(),
             images: Default::default(),
@@ -524,37 +555,6 @@ impl Context {
                     .expect("Error writing debug name");
             }
         }
-    }
-
-    fn start_cmd_thread(d: ash::Device, queue: Arc<(Mutex<CommandBufferQueue>, Condvar)>) {
-        thread::spawn(move || {
-            let (lock, cvar) = &*queue;
-            let device = d.clone();
-            loop {
-                // Lock the queue
-                let mut queue_guard = lock.lock().unwrap();
-
-                // Wait until there is something in the queue
-                while queue_guard.queue.is_empty() {
-                    queue_guard = cvar.wait(queue_guard).unwrap();
-                }
-
-                // Pop the command buffer from the queue
-                if let Some(cmd_buffer) = queue_guard.queue.pop_front() {
-                    drop(queue_guard); // Unlock the queue
-
-                    unsafe {
-                        device
-                            .wait_for_fences(&[cmd_buffer.1], true, std::u64::MAX)
-                            .unwrap()
-                    };
-
-                    unsafe { device.destroy_fence(cmd_buffer.1, None) };
-                    let mut l = cmd_buffer.3.lock().unwrap();
-                    *l = true;
-                }
-            }
-        });
     }
 
     pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
@@ -603,10 +603,7 @@ impl Context {
 
         return Ok(CommandList {
             cmd_buf: cmd[0],
-            fence: Fence::new(
-                f,
-                self.device.clone(),
-            ),
+            fence: Fence::new(f, self.device.clone()),
             semaphore: s,
             dirty: true,
             ctx: self,
@@ -740,6 +737,17 @@ impl Context {
                 cmd.fence.raw,
             )?
         };
+
+        for (cmd, fence) in &mut self.cmds_to_release {
+            fence.wait()?;
+            unsafe {
+                self.device.destroy_fence(fence.raw, None);
+                self.device.destroy_semaphore(cmd.semaphore, None);
+                self.device.free_command_buffers(self.pool, &[cmd.cmd_buf]);
+            }
+        }
+
+        self.cmds_to_release.clear();
 
         return Ok((Semaphore { raw: cmd.semaphore }, cmd.fence.clone()));
     }
@@ -957,6 +965,7 @@ impl Context {
                 * bytes_per_channel(&info.format)) as u32,
             visibility: MemoryVisibility::CpuAndGpu,
             initial_data: info.initial_data,
+            ..Default::default()
         })?;
 
         let mut list = self.begin_command_list(&Default::default())?;
@@ -971,6 +980,28 @@ impl Context {
         self.destroy_buffer(staging);
         self.destroy_image_view(tmp_view);
         return Ok(());
+    }
+
+    pub fn make_dynamic_allocator(
+        &mut self,
+        info: &DynamicAllocatorInfo,
+    ) -> Result<DynamicAllocator, GPUError> {
+        let buffer = self.make_buffer(&BufferInfo {
+            debug_name: info.debug_name,
+            byte_size: info.byte_size,
+            visibility: MemoryVisibility::CpuAndGpu,
+            ..Default::default()
+        })?;
+
+        return Ok(DynamicAllocator {
+            allocator: offset_alloc::Allocator::new(
+                info.byte_size,
+                self.properties.limits.min_uniform_buffer_offset_alignment as u32,
+            ),
+            pool: buffer,
+            ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),
+            min_alloc_size: self.properties.limits.min_uniform_buffer_offset_alignment as u32,
+        });
     }
 
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
@@ -1173,6 +1204,26 @@ impl Context {
                         .dst_binding(binding_info.binding)
                         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER) // Assuming a sampled image
                         .image_info(&image_infos[image_infos.len() - 1..])
+                        .build();
+
+                    write_descriptor_sets.push(write_descriptor_set);
+                }
+                ShaderResource::Dynamic(alloc) => {
+                    let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.buf)
+                        .offset(0)
+                        .range(vk::WHOLE_SIZE)
+                        .build();
+
+                    buffer_infos.push(buffer_info);
+
+                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(binding_info.binding)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
                         .build();
 
                     write_descriptor_sets.push(write_descriptor_set);
@@ -1443,13 +1494,22 @@ impl Context {
             .unwrap());
     }
 
+    pub fn release_list_on_next_submit(&mut self, fence: Fence, list: CommandList) {
+        self.cmds_to_release.push((list, fence));
+    }
+
     pub fn make_graphics_pipeline(
         &mut self,
         info: &GraphicsPipelineInfo,
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
         let rp = self.render_passes.get_ref(info.render_pass).unwrap().raw;
-        let rp_viewport = self.render_passes.get_ref(info.render_pass).unwrap().viewport.clone();
+        let rp_viewport = self
+            .render_passes
+            .get_ref(info.render_pass)
+            .unwrap()
+            .viewport
+            .clone();
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&[layout.vertex_input])
@@ -1530,6 +1590,7 @@ impl Context {
         return Ok(self
             .gfx_pipelines
             .insert(GraphicsPipeline {
+                render_pass: info.render_pass,
                 raw: graphics_pipelines[0],
                 layout: info.layout,
             })
@@ -1615,17 +1676,21 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-sdl2")]
-    fn make_window(&mut self, info: &WindowInfo) -> (std::cell::Cell<sdl2::video::Window>, vk::SurfaceKHR) {
+    fn make_window(
+        &mut self,
+        info: &WindowInfo,
+    ) -> (std::cell::Cell<sdl2::video::Window>, vk::SurfaceKHR) {
+        let mut window = std::cell::Cell::new(
+            self.sdl_video
+                .window(&info.title, info.size[0], info.size[1])
+                .vulkan()
+                .build()
+                .expect("Unable to create SDL2 Window!"),
+        );
 
-
-        let mut window = std::cell::Cell::new(self
-            .sdl_video
-            .window(&info.title, info.size[0], info.size[1])
-            .vulkan()
-            .build()
-            .expect("Unable to create SDL2 Window!"));
-
-        let surface = window.get_mut().vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
+        let surface = window
+            .get_mut()
+            .vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
             .expect("Unable to create vulkan surface!");
 
         (window, vk::Handle::from_raw(surface))
@@ -1851,6 +1916,7 @@ fn test_buffer() {
         byte_size: c_buffer_size,
         visibility: MemoryVisibility::CpuAndGpu,
         initial_data: Some(&initial_data),
+        ..Default::default()
     });
 
     assert!(buffer_res.is_ok());

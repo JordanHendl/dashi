@@ -14,7 +14,7 @@ const TOP_BINS_INDEX_SHIFT: u32 = 3;
 const LEAF_BINS_INDEX_MASK: u32 = 0x7;
 const NUM_LEAF_BINS: u32 = NUM_TOP_BINS * BINS_PER_LEAF;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Allocation {
     pub offset: u32,
     pub metadata: NodeIndex,
@@ -181,12 +181,11 @@ impl Allocator {
             self.nodes[node.bin_list_next as usize].bin_list_prev = Node::UNUSED;
         }
         self.free_storage -= node_total_size;
-        if cfg!(debug_assertions) {
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Free storage: {} (-{}) (allocate)",
                 self.free_storage, node_total_size
             );
-        }
 
         if self.bin_indices[bin_index as usize] == Node::UNUSED {
             self.used_bins[top_bin_index as usize] &= !(1 << leaf_bin_index);
@@ -263,13 +262,12 @@ impl Allocator {
         let neighbor_prev = self.nodes[node_cp.neighbor_next as usize].neighbor_prev;
 
         // Insert the removed node to freelist
-        if cfg!(debug_assertions) {
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Putting node {} into freelist[{}] (free)",
                 node_index,
                 self.free_offset + 1
             );
-        }
 
         self.free_offset += 1;
         self.free_nodes[self.free_offset as usize] = node_index;
@@ -324,13 +322,12 @@ impl Allocator {
             }
         }
 
-        if cfg!(debug_assertions) {
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Putting node {} into freelist[{}] (remove_node_from_bin)",
                 node_index,
                 self.free_offset + 1
             );
-        }
 
         // Insert the node to freelist
         self.free_offset += 1;
@@ -338,12 +335,11 @@ impl Allocator {
 
         self.free_storage -= node_cp.data_size;
 
-        if cfg!(debug_assertions) {
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Free storage {} (-{}) (remove_node_from_bin)",
                 self.free_storage, node_cp.data_size
             );
-        }
     }
 
     pub fn reset(&mut self) {
@@ -396,12 +392,12 @@ impl Allocator {
         let top_node_index = self.bin_indices[bin_index as usize];
         let node_index = self.free_nodes[self.free_offset as usize];
         self.free_offset -= 1;
-        if cfg!(debug_assertions) {
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Getting node {} from freelist[{}]",
                 node_index, self.free_offset
             );
-        }
+
         self.nodes[node_index as usize] = Node {
             data_offset,
             data_size: size,
@@ -417,12 +413,13 @@ impl Allocator {
         self.bin_indices[bin_index as usize] = node_index;
 
         self.free_storage += size;
-        if cfg!(debug_assertions) {
+
+        #[cfg(feature = "debug_offset_alloc")]
             println!(
                 "Free storage: {} (+{}) (insert_node_into_bin)",
                 self.free_storage, size
             );
-        }
+
         node_index
     }
 }

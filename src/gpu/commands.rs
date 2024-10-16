@@ -1,8 +1,8 @@
-use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList, Filter,
-    GPUError, GraphicsPipeline, ImageView, Rect2D, Viewport,
-};
 use super::RenderPass;
+use super::{
+    convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
+    DynamicBuffer, Filter, GPUError, GraphicsPipeline, ImageView, Rect2D, Viewport,
+};
 use super::{BindGroup, Handle};
 use ash::*;
 
@@ -44,14 +44,15 @@ impl Default for ImageBlit {
 }
 
 #[derive(Clone)]
-pub struct RenderPassBegin {
+pub struct DrawBegin {
     pub viewport: Viewport,
-    pub render_pass: Handle<RenderPass>,
+    pub pipeline: Handle<GraphicsPipeline>,
 }
 
 #[derive(Clone)]
 pub struct Draw {
     pub vertices: Handle<Buffer>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub instance_count: u32,
     pub count: u32,
 }
@@ -60,6 +61,7 @@ pub struct Draw {
 pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub index_count: u32,
     pub instance_count: u32,
@@ -75,6 +77,7 @@ impl Default for DrawIndexed {
             instance_count: 1,
             first_instance: 0,
             bind_groups: [None, None, None, None],
+            dynamic_buffers: [None, None, None, None],
         }
     }
 }
@@ -104,11 +107,20 @@ impl CommandList {
         self.append(Command::ImageBarrierCommand(barrier.clone()));
     }
 
-    pub fn begin_render_pass<'a>(&mut self, rec: &RenderPassBegin) -> Result<RenderPass, GPUError> {
-        if self.curr_rp.is_none() {
-            self.curr_rp = Some(rec.render_pass);
+    fn begin_render_pass<'a>(
+        &mut self,
+        render_pass: Handle<RenderPass>,
+        viewport: &Viewport,
+    ) -> Result<(), GPUError> {
+        if let Some(curr_rp) = self.curr_rp {
+            if curr_rp == render_pass {
+                return Ok(());
+            } else {
+                self.end_drawing()?;
+            }
         }
 
+        self.curr_rp = Some(render_pass);
         unsafe {
             let rp = (*self.ctx)
                 .render_passes
@@ -120,36 +132,41 @@ impl CommandList {
                     .render_pass(rp.raw)
                     .framebuffer(rp.fb[0].0)
                     .clear_values(&rp.clear_values)
-                    .render_area(convert_rect2d_to_vulkan(rec.viewport.scissor))
+                    .render_area(convert_rect2d_to_vulkan(viewport.scissor))
                     .build(),
                 vk::SubpassContents::INLINE,
             );
 
             self.last_op_stage = vk::PipelineStageFlags::NONE;
             self.last_op_access = vk::AccessFlags::NONE;
-            return Ok(rp.clone());
         }
+
+        Ok(())
     }
 
-    pub fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) {
+    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
+        let pipeline = info.pipeline;
         if let Some(gfx) = self.curr_pipeline {
             if pipeline == gfx {
-                return;
+                return Ok(());
             }
         }
 
         unsafe {
             self.curr_pipeline = Some(pipeline);
             let gfx = (*self.ctx).gfx_pipelines.get_ref(pipeline).unwrap();
+            self.begin_render_pass(gfx.render_pass, &info.viewport)?;
             (*self.ctx).device.cmd_bind_pipeline(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 gfx.raw,
             );
         }
+
+        return Ok(());
     }
 
-    pub fn end_render_pass(&mut self) -> Result<(), GPUError> {
+    pub fn end_drawing(&mut self) -> Result<(), GPUError> {
         match self.curr_rp {
             Some(_) => {
                 unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
@@ -253,6 +270,13 @@ impl CommandList {
                 let v = (*self.ctx).buffers.get_ref(rec.vertices).unwrap();
                 let i = (*self.ctx).buffers.get_ref(rec.indices).unwrap();
 
+                let mut dynamic_offsets = Vec::new();
+                for dynamic in rec.dynamic_buffers {
+                    if let Some(buf) = dynamic {
+                        dynamic_offsets.push(buf.alloc.offset);
+                    }
+                }
+
                 // TODO dont do this in a loop, collect and send all at once.
                 for opt in &rec.bind_groups {
                     if let Some(bg) = opt {
@@ -269,7 +293,7 @@ impl CommandList {
                             pl.layout,
                             0,
                             &[b.set],
-                            &[],
+                            &dynamic_offsets,
                         );
                     }
                 }
