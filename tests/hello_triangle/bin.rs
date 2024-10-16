@@ -210,7 +210,6 @@ void main() {
                 },
                 ..Default::default()
             },
-            pipeline_layout,
             color_attachments: &[Attachment {
                 view: fb_view,
                 clear_color: [0.0, 0.0, 0.0, 1.0],

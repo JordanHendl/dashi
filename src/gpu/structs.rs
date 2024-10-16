@@ -400,7 +400,6 @@ pub enum VertexRate {
 
 pub struct RenderPassInfo<'a> {
     pub viewport: Viewport,
-    pub pipeline_layout: Handle<GraphicsPipelineLayout>,
     pub color_attachments: &'a [Attachment],
     pub depth_stencil_attachment: Option<&'a Attachment>,
 }

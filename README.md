@@ -24,7 +24,7 @@ Add Dashi to your project's `Cargo.toml`:
 
 ```toml
 [dependencies]
-dashi = "https://github.com/JordanHendl/dashi"
+dashi = {git = "https://github.com/JordanHendl/dashi"}
 ```
 
 ### Example Usage
