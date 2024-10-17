@@ -183,6 +183,10 @@ pub struct DynamicBuffer {
 }
 
 impl DynamicBuffer {
+    pub fn handle(&self) -> Handle<Buffer> {
+        self.handle
+    }
+
     pub fn slice<T>(&mut self) -> &mut [T] {
         let typed_map: *mut T = unsafe { std::mem::transmute(self.ptr) };
         return unsafe {
@@ -972,6 +976,7 @@ impl Context {
         let buffer = self.make_buffer(&BufferInfo {
             debug_name: info.debug_name,
             byte_size: info.byte_size,
+            usage: info.usage,
             visibility: MemoryVisibility::CpuAndGpu,
             ..Default::default()
         })?;
@@ -1070,6 +1075,7 @@ impl Context {
                         vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                     }
                     BindGroupVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
+                    BindGroupVariableType::DynamicStorage => vk::DescriptorType::STORAGE_BUFFER_DYNAMIC,
                 };
 
                 let stage_flags = match shader_info.shader_type {

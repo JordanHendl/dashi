@@ -216,6 +216,7 @@ impl<'a> Default for BufferInfo<'a> {
 #[derive(Hash, Clone, Copy, Debug)]
 pub struct DynamicAllocatorInfo<'a> {
     pub debug_name: &'a str,
+    pub usage: BufferUsage,
     pub byte_size: u32,
 }
 
@@ -224,6 +225,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
         Self {
             debug_name: "",
             byte_size: 1024 * 1024,
+            usage: BufferUsage::UNIFORM,
         }
     }
 }
@@ -286,6 +288,7 @@ impl Default for Attachment {
 pub enum BindGroupVariableType {
     Uniform,
     DynamicUniform,
+    DynamicStorage,
     Storage,
     SampledImage,
     StorageImage,
