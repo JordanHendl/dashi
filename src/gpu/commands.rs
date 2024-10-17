@@ -100,6 +100,10 @@ pub enum Command {
 }
 
 impl CommandList {
+    pub fn draw_indexed(& mut self, cmd: &DrawIndexed) {
+        self.append(Command::DrawIndexedCommand(cmd.clone()));
+    }
+
     pub fn blit(&mut self, cmd: ImageBlit) {
         self.append(Command::BlitCommand(cmd));
     }

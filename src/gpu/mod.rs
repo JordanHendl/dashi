@@ -1196,7 +1196,7 @@ impl Context {
                     let buffer_info = vk::DescriptorBufferInfo::builder()
                         .buffer(buffer.buf)
                         .offset(0)
-                        .range(vk::WHOLE_SIZE)
+                        .range(alloc.min_alloc_size as u64)
                         .build();
 
                     buffer_infos.push(buffer_info);
