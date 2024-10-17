@@ -328,6 +328,7 @@ pub struct GraphicsPipeline {
     layout: Handle<GraphicsPipelineLayout>,
 }
 
+#[derive(Clone)]
 pub struct CommandList {
     cmd_buf: vk::CommandBuffer,
     fence: Fence,
@@ -513,8 +514,8 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-sdl2")]
-    pub fn get_sdl_event(&mut self) -> sdl2::EventPump {
-        return self.sdl_context.event_pump().unwrap();
+    pub fn get_sdl_ctx(&mut self) -> & mut sdl2::Sdl {
+        return &mut self.sdl_context;
     }
 
     fn set_name<T>(&self, obj: T, name: &str, t: vk::ObjectType)

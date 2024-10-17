@@ -241,7 +241,7 @@ void main() {
         .unwrap();
 
     // Event pump for events
-    let mut event_pump = ctx.get_sdl_event();
+    let mut event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
     // Display for windowing
     let mut display = ctx.make_display(&Default::default()).unwrap();
     // Timer to move the triangle
