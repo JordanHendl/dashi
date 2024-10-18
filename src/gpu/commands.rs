@@ -61,6 +61,8 @@ pub struct Draw {
 pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
+    pub vert_offset: u32,
+    pub index_offset: u32,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub index_count: u32,
@@ -78,6 +80,8 @@ impl Default for DrawIndexed {
             first_instance: 0,
             bind_groups: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
+            vert_offset: 0,
+            index_offset: 0,
         }
     }
 }
@@ -306,17 +310,20 @@ impl CommandList {
                         );
                     }
                 }
+
+                let vert_offset: vk::DeviceSize = rec.vert_offset as u64;
+                let ind_offset: vk::DeviceSize = rec.index_offset as u64;
                 (*self.ctx).device.cmd_bind_vertex_buffers(
                     self.cmd_buf,
                     0,
                     &[v.buf],
-                    &[DEVICE_SIZES],
+                    &[vert_offset],
                 );
 
                 (*self.ctx).device.cmd_bind_index_buffer(
                     self.cmd_buf,
                     i.buf,
-                    0,
+                    ind_offset,
                     vk::IndexType::UINT32,
                 );
                 (*self.ctx).device.cmd_draw_indexed(

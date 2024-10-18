@@ -115,6 +115,7 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::BGRA8 => return vk::Format::B8G8R8A8_SRGB,
         Format::BGRA8Unorm => return vk::Format::B8G8R8A8_SNORM,
         Format::D24S8 => vk::Format::D24_UNORM_S8_UINT,
+        Format::R8 => vk::Format::R8_SINT,
     }
 }
 
@@ -134,12 +135,13 @@ fn channel_count(fmt: &Format) -> u32 {
         Format::RGB8 => 3,
         Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA32F => 4,
         Format::D24S8 => 4,
+        Format::R8 => 1,
     }
 }
 
 fn bytes_per_channel(fmt: &Format) -> u32 {
     match fmt {
-        Format::RGB8 | Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 => 1,
+        Format::RGB8 | Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::R8 => 1,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
     }
@@ -172,6 +174,7 @@ pub struct Buffer {
     buf: vk::Buffer,
     alloc: vk_mem::Allocation,
     size: u32,
+    offset: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -185,6 +188,10 @@ pub struct DynamicBuffer {
 impl DynamicBuffer {
     pub fn handle(&self) -> Handle<Buffer> {
         self.handle
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.alloc.offset
     }
 
     pub fn slice<T>(&mut self) -> &mut [T] {
@@ -1032,6 +1039,7 @@ impl Context {
                 buf: buffer,
                 alloc: allocation,
                 size: info.byte_size,
+                offset: 0,
             }) {
                 Some(handle) => {
                     self.init_buffer(handle, info)?;
