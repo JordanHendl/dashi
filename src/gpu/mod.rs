@@ -410,6 +410,8 @@ impl Context {
             ash::extensions::khr::Surface::name().as_ptr(),
             #[cfg(target_os = "linux")]
             ash::extensions::khr::XlibSurface::name().as_ptr(),
+            #[cfg(target_os = "windows")]
+            ash::extensions::khr::Win32Surface::name().as_ptr(),
         ];
 
         let instance = unsafe {
@@ -518,7 +520,7 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-sdl2")]
-    pub fn get_sdl_ctx(&mut self) -> & mut sdl2::Sdl {
+    pub fn get_sdl_ctx(&mut self) -> &mut sdl2::Sdl {
         return &mut self.sdl_context;
     }
 
@@ -1075,7 +1077,9 @@ impl Context {
                         vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                     }
                     BindGroupVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
-                    BindGroupVariableType::DynamicStorage => vk::DescriptorType::STORAGE_BUFFER_DYNAMIC,
+                    BindGroupVariableType::DynamicStorage => {
+                        vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
+                    }
                 };
 
                 let stage_flags = match shader_info.shader_type {
