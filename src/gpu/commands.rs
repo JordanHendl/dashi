@@ -58,11 +58,33 @@ pub struct Draw {
 }
 
 #[derive(Clone)]
+pub struct DrawIndexedDynamic {
+    pub vertices: DynamicBuffer,
+    pub indices: DynamicBuffer,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub index_count: u32,
+    pub instance_count: u32,
+    pub first_instance: u32,
+}
+
+impl Default for DrawIndexedDynamic {
+    fn default() -> Self {
+        Self {
+            vertices: Default::default(),
+            indices: Default::default(),
+            index_count: Default::default(),
+            instance_count: 1,
+            first_instance: 0,
+            bind_groups: [None, None, None, None],
+            dynamic_buffers: [None, None, None, None],
+        }
+    }
+}
+#[derive(Clone)]
 pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
-    pub vert_offset: u32,
-    pub index_offset: u32,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub index_count: u32,
@@ -80,8 +102,6 @@ impl Default for DrawIndexed {
             first_instance: 0,
             bind_groups: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
-            vert_offset: 0,
-            index_offset: 0,
         }
     }
 }
@@ -99,12 +119,16 @@ pub enum Command {
     BufferImageCopyCommand(BufferImageCopy),
     DrawCommand(Draw),
     DrawIndexedCommand(DrawIndexed),
+    DrawIndexedDynamicCommand(DrawIndexedDynamic),
     BlitCommand(ImageBlit),
     ImageBarrierCommand(ImageBarrier),
 }
 
 impl CommandList {
-    pub fn draw_indexed(& mut self, cmd: &DrawIndexed) {
+    pub fn draw_dynamic_indexed(&mut self, cmd: &DrawIndexedDynamic) {
+        self.append(Command::DrawIndexedDynamicCommand(cmd.clone()));
+    }
+    pub fn draw_indexed(&mut self, cmd: &DrawIndexed) {
         self.append(Command::DrawIndexedCommand(cmd.clone()));
     }
 
@@ -112,7 +136,7 @@ impl CommandList {
         self.append(Command::BlitCommand(cmd));
     }
 
-    pub fn copy_buffers(& mut self, info: &BufferCopy) {
+    pub fn copy_buffers(&mut self, info: &BufferCopy) {
         self.append(Command::BufferCopyCommand(info.clone()));
     }
 
@@ -311,19 +335,17 @@ impl CommandList {
                     }
                 }
 
-                let vert_offset: vk::DeviceSize = rec.vert_offset as u64;
-                let ind_offset: vk::DeviceSize = rec.index_offset as u64;
                 (*self.ctx).device.cmd_bind_vertex_buffers(
                     self.cmd_buf,
                     0,
                     &[v.buf],
-                    &[vert_offset],
+                    &[DEVICE_SIZES],
                 );
 
                 (*self.ctx).device.cmd_bind_index_buffer(
                     self.cmd_buf,
                     i.buf,
-                    ind_offset,
+                    DEVICE_SIZES,
                     vk::IndexType::UINT32,
                 );
                 (*self.ctx).device.cmd_draw_indexed(
@@ -464,6 +486,63 @@ impl CommandList {
                         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                         .build()],
                 );
+            },
+            Command::DrawIndexedDynamicCommand(rec) => unsafe {
+                let v = (*self.ctx).buffers.get_ref(rec.vertices.handle()).unwrap();
+                let i = (*self.ctx).buffers.get_ref(rec.indices.handle()).unwrap();
+
+                let mut dynamic_offsets = Vec::new();
+                for dynamic in rec.dynamic_buffers {
+                    if let Some(buf) = dynamic {
+                        dynamic_offsets.push(buf.alloc.offset);
+                    }
+                }
+
+                // TODO dont do this in a loop, collect and send all at once.
+                for opt in &rec.bind_groups {
+                    if let Some(bg) = opt {
+                        let b = (*self.ctx).bind_groups.get_ref(*bg).unwrap();
+                        let p = (*self.ctx)
+                            .gfx_pipelines
+                            .get_ref(self.curr_pipeline.unwrap())
+                            .unwrap();
+                        let pl = (*self.ctx).gfx_pipeline_layouts.get_ref(p.layout).unwrap();
+
+                        (*self.ctx).device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            pl.layout,
+                            0,
+                            &[b.set],
+                            &dynamic_offsets,
+                        );
+                    }
+                }
+
+                (*self.ctx).device.cmd_bind_vertex_buffers(
+                    self.cmd_buf,
+                    0,
+                    &[v.buf],
+                    &[rec.vertices.offset() as u64],
+                );
+
+                (*self.ctx).device.cmd_bind_index_buffer(
+                    self.cmd_buf,
+                    i.buf,
+                    rec.indices.offset() as u64,
+                    vk::IndexType::UINT32,
+                );
+
+                (*self.ctx).device.cmd_draw_indexed(
+                    self.cmd_buf,
+                    rec.index_count,
+                    rec.instance_count,
+                    0,
+                    0,
+                    rec.first_instance,
+                );
+                self.last_op_stage = vk::PipelineStageFlags::VERTEX_SHADER;
+                self.last_op_access = vk::AccessFlags::VERTEX_ATTRIBUTE_READ;
             },
         }
         self.dirty = true;

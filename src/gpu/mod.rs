@@ -1,5 +1,8 @@
 mod error;
-use crate::utils::{offset_alloc, Handle, Pool};
+use crate::utils::{
+    offset_alloc::{self, NodeIndex},
+    Handle, Pool,
+};
 use ash::*;
 pub use error::*;
 use std::ffi::CString;
@@ -174,7 +177,20 @@ pub struct Buffer {
     buf: vk::Buffer,
     alloc: vk_mem::Allocation,
     size: u32,
-    offset: u32,
+}
+
+impl Handle<Buffer> {
+    pub fn to_unmapped_dynamic(&self, byte_offset: u32) -> DynamicBuffer {
+        return DynamicBuffer {
+            handle: self.clone(),
+            alloc: offset_alloc::Allocation {
+                offset: byte_offset,
+                metadata: 0,
+            },
+            ptr: std::ptr::null_mut(),
+            size: 0,
+        };
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -185,6 +201,19 @@ pub struct DynamicBuffer {
     pub(crate) size: u16,
 }
 
+impl Default for DynamicBuffer {
+    fn default() -> Self {
+        Self {
+            handle: Default::default(),
+            alloc: offset_alloc::Allocation {
+                offset: 0,
+                metadata: 0,
+            },
+            ptr: std::ptr::null_mut(),
+            size: Default::default(),
+        }
+    }
+}
 impl DynamicBuffer {
     pub fn handle(&self) -> Handle<Buffer> {
         self.handle
@@ -991,10 +1020,7 @@ impl Context {
         })?;
 
         return Ok(DynamicAllocator {
-            allocator: offset_alloc::Allocator::new(
-                info.byte_size,
-                info.num_allocations,
-            ),
+            allocator: offset_alloc::Allocator::new(info.byte_size, info.num_allocations),
             pool: buffer,
             ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),
             min_alloc_size: self.properties.limits.min_uniform_buffer_offset_alignment as u32,
@@ -1039,7 +1065,6 @@ impl Context {
                 buf: buffer,
                 alloc: allocation,
                 size: info.byte_size,
-                offset: 0,
             }) {
                 Some(handle) => {
                     self.init_buffer(handle, info)?;
