@@ -115,7 +115,7 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::BGRA8 => return vk::Format::B8G8R8A8_SRGB,
         Format::BGRA8Unorm => return vk::Format::B8G8R8A8_SNORM,
         Format::D24S8 => vk::Format::D24_UNORM_S8_UINT,
-        Format::R8 => vk::Format::R8_SINT,
+        Format::R8 => vk::Format::R8_UINT,
     }
 }
 
@@ -993,7 +993,7 @@ impl Context {
         return Ok(DynamicAllocator {
             allocator: offset_alloc::Allocator::new(
                 info.byte_size,
-                self.properties.limits.min_uniform_buffer_offset_alignment as u32,
+                info.num_allocations,
             ),
             pool: buffer,
             ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),

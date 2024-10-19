@@ -18,6 +18,7 @@ pub enum MemoryVisibility {
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BufferUsage {
+    ALL,
     VERTEX,
     INDEX,
     UNIFORM,
@@ -218,6 +219,7 @@ impl<'a> Default for BufferInfo<'a> {
 pub struct DynamicAllocatorInfo<'a> {
     pub debug_name: &'a str,
     pub usage: BufferUsage,
+    pub num_allocations: u32,
     pub byte_size: u32,
 }
 
@@ -227,6 +229,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
             debug_name: "",
             byte_size: 1024 * 1024,
             usage: BufferUsage::UNIFORM,
+            num_allocations: 2048,
         }
     }
 }
