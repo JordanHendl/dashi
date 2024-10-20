@@ -5,7 +5,7 @@ use crate::utils::{
 };
 use ash::*;
 pub use error::*;
-use std::ffi::CString;
+use std::{collections::HashSet, ffi::CString};
 use vk_mem::Alloc;
 
 pub mod structs;
@@ -350,6 +350,12 @@ pub struct Semaphore {
 }
 
 #[derive(Clone, Default, Debug)]
+pub struct ComputePipelineLayout {
+    shader_stage: vk::PipelineShaderStageCreateInfo,
+    layout: vk::PipelineLayout,
+}
+
+#[derive(Clone, Default, Debug)]
 pub struct GraphicsPipelineLayout {
     input_assembly: vk::PipelineInputAssemblyStateCreateInfo,
     shader_stages: Vec<vk::PipelineShaderStageCreateInfo>,
@@ -359,6 +365,12 @@ pub struct GraphicsPipelineLayout {
     vertex_input: vk::VertexInputBindingDescription,
     vertex_attribs: Vec<vk::VertexInputAttributeDescription>,
     layout: vk::PipelineLayout,
+}
+
+#[derive(Clone, Default)]
+pub struct ComputePipeline {
+    raw: vk::Pipeline,
+    layout: Handle<ComputePipelineLayout>,
 }
 
 #[derive(Clone, Default)]
@@ -421,6 +433,8 @@ pub struct Context {
     pub(super) bind_groups: Pool<BindGroup>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
+    pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
+    pub(super) compute_pipelines: Pool<ComputePipeline>,
     pub(super) cmds_to_release: Vec<(CommandList, Fence)>,
 
     #[cfg(feature = "dashi-sdl2")]
@@ -548,6 +562,8 @@ impl Context {
             bind_groups: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
+            compute_pipeline_layouts: Default::default(),
+            compute_pipelines: Default::default(),
             samplers: Default::default(),
 
             #[cfg(debug_assertions)]
@@ -1075,6 +1091,20 @@ impl Context {
         }
     }
 
+    pub fn clean_up(&mut self) {
+        self.buffers.for_each_occupied_mut(|buf| {
+            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+        });
+
+        self.images.for_each_occupied_mut(|img| {
+            unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+        });
+
+        self.image_views.for_each_occupied_mut(|img| {
+            unsafe { self.device.destroy_image_view(img.view, None) };
+        });
+    }
+
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
         let buf = self.buffers.get_mut_ref(handle).unwrap();
         unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
@@ -1090,6 +1120,8 @@ impl Context {
         unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
         self.images.release(handle);
     }
+
+    pub fn destroy_cmd_list(&mut self, list: CommandList) {}
 
     pub fn make_bind_group_layout(
         &mut self,
@@ -1408,6 +1440,26 @@ impl Context {
             })
             .unwrap());
     }
+    pub fn make_compute_pipeline_layout(
+        &mut self,
+        info: &ComputePipelineLayoutInfo,
+    ) -> Result<Handle<ComputePipelineLayout>, GPUError> {
+        let shader_stage = vk::PipelineShaderStageCreateInfo::builder()
+            .stage(vk::ShaderStageFlags::COMPUTE) // HAS to be compute.
+            .module(self.create_shader_module(info.shader.spirv).unwrap())
+            .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
+            .build();
+
+        let layout = self.create_pipeline_layout(info.bg_layout)?;
+
+        return Ok(self
+            .compute_pipeline_layouts
+            .insert(ComputePipelineLayout {
+                layout,
+                shader_stage,
+            })
+            .unwrap());
+    }
 
     pub fn make_graphics_pipeline_layout(
         &mut self,
@@ -1524,6 +1576,32 @@ impl Context {
 
     pub fn release_list_on_next_submit(&mut self, fence: Fence, list: CommandList) {
         self.cmds_to_release.push((list, fence));
+    }
+
+    pub fn make_compute_pipeline(
+        &mut self,
+        info: &ComputePipelineInfo,
+    ) -> Result<Handle<ComputePipeline>, GPUError> {
+        let layout = self.compute_pipeline_layouts.get_ref(info.layout).unwrap();
+
+        let pipeline_info = vk::ComputePipelineCreateInfo::builder()
+            .layout(layout.layout)
+            .stage(layout.shader_stage)
+            .build();
+
+        let compute_pipelines = unsafe {
+            self.device
+                .create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .unwrap()
+        };
+
+        return Ok(self
+            .compute_pipelines
+            .insert(ComputePipeline {
+                raw: compute_pipelines[0],
+                layout: info.layout,
+            })
+            .unwrap());
     }
 
     pub fn make_graphics_pipeline(

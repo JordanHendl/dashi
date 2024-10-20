@@ -77,6 +77,10 @@ impl<T> Pool<T> {
         return p;
     }
 
+    pub fn get_empty(&self) -> &[usize] {
+        &self.empty
+    }
+
     pub fn insert(&mut self, item: T) -> Option<Handle<T>> {
         let empty_slot = self.empty.pop()?;
 
@@ -89,7 +93,30 @@ impl<T> Pool<T> {
         });
     }
 
+    pub fn for_each_occupied<F>(&self, mut func: F)
+    where
+        F: FnMut(&T),
+    {
+        for item in &self.items {
+            if let Some(ref value) = item {
+                func(value);
+            }
+        }
+    }
+
+    pub fn for_each_occupied_mut<F>(&mut self, mut func: F)
+    where
+        F: FnMut(&mut T),
+    {
+        for item in &mut self.items {
+            if let Some(ref mut value) = item {
+                func(value);
+            }
+        }
+    }
+
     pub fn release(&mut self, item: Handle<T>) {
+        self.items[item.slot as usize] = None;
         self.empty.push(item.slot as usize);
     }
 
@@ -109,5 +136,11 @@ impl<T> Pool<T> {
         } else {
             None
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.empty = (0..self.items.len()).collect();
+        self.items.resize_with(self.items.len(), || None);
+        self.generation.fill(0);
     }
 }

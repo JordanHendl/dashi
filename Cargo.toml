@@ -24,4 +24,8 @@ inline-spirv = {version = "0.2.1", optional = true}
 name = "hello_triangle"
 path = "tests/hello_triangle/bin.rs"
 
+[[bin]]
+name = "hello_compute"
+path = "tests/hello_compute/bin.rs"
+
 [lib]

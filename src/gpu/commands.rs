@@ -1,9 +1,9 @@
-use super::RenderPass;
 use super::{
     convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
     DynamicBuffer, Filter, GPUError, GraphicsPipeline, ImageView, Rect2D, Viewport,
 };
 use super::{BindGroup, Handle};
+use super::{ComputePipeline, RenderPass};
 use ash::*;
 
 #[derive(Clone)]
@@ -39,6 +39,25 @@ impl Default for ImageBlit {
             filter: Filter::Nearest,
             src_region: Default::default(),
             dst_region: Default::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Dispatch {
+    pub compute: Handle<ComputePipeline>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub workgroup_size: [u32; 3],
+}
+
+impl Default for Dispatch {
+    fn default() -> Self {
+        Self {
+            compute: Default::default(),
+            dynamic_buffers: Default::default(),
+            bind_groups: Default::default(),
+            workgroup_size: Default::default(),
         }
     }
 }
@@ -122,9 +141,58 @@ pub enum Command {
     DrawIndexedDynamicCommand(DrawIndexedDynamic),
     BlitCommand(ImageBlit),
     ImageBarrierCommand(ImageBarrier),
+    DispatchCommand(Dispatch),
 }
 
 impl CommandList {
+    pub fn dispatch(&mut self, cmd: &Dispatch) {
+        unsafe {
+            let compute = (*self.ctx).compute_pipelines.get_ref(cmd.compute).unwrap();
+            // TODO probably should cache this. But I'm lazy. And this should work for now.
+            //
+
+            let mut dynamic_offsets = Vec::new();
+            for dynamic in cmd.dynamic_buffers {
+                if let Some(buf) = dynamic {
+                    dynamic_offsets.push(buf.alloc.offset);
+                }
+            }
+
+            // TODO dont do this in a loop, collect and send all at once.
+            for opt in &cmd.bind_groups {
+                if let Some(bg) = opt {
+                    let b = (*self.ctx).bind_groups.get_ref(*bg).unwrap();
+                    let pl = (*self.ctx).compute_pipeline_layouts.get_ref(compute.layout).unwrap();
+
+                    (*self.ctx).device.cmd_bind_descriptor_sets(
+                        self.cmd_buf,
+                        vk::PipelineBindPoint::COMPUTE,
+                        pl.layout,
+                        0,
+                        &[b.set],
+                        &dynamic_offsets,
+                    );
+                }
+            }
+            self.curr_pipeline = None;
+            (*self.ctx).device.cmd_bind_pipeline(
+                self.cmd_buf,
+                vk::PipelineBindPoint::COMPUTE,
+                compute.raw,
+            );
+
+            (*self.ctx).device.cmd_dispatch(
+                self.cmd_buf,
+                cmd.workgroup_size[0],
+                cmd.workgroup_size[1],
+                cmd.workgroup_size[2],
+            );
+
+            self.last_op_stage = vk::PipelineStageFlags::COMPUTE_SHADER;
+            self.last_op_access = vk::AccessFlags::SHADER_WRITE;
+        }
+    }
+
     pub fn draw_dynamic_indexed(&mut self, cmd: &DrawIndexedDynamic) {
         self.append(Command::DrawIndexedDynamicCommand(cmd.clone()));
     }
@@ -544,6 +612,7 @@ impl CommandList {
                 self.last_op_stage = vk::PipelineStageFlags::VERTEX_SHADER;
                 self.last_op_access = vk::AccessFlags::VERTEX_ATTRIBUTE_READ;
             },
+            Command::DispatchCommand(_) => todo!(),
         }
         self.dirty = true;
     }

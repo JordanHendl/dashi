@@ -1,12 +1,12 @@
 use super::{
-    BindGroupLayout, Buffer, DynamicAllocator, GraphicsPipelineLayout, Image, ImageView,
-    RenderPass, Sampler,
+    BindGroupLayout, Buffer, ComputePipelineLayout, DynamicAllocator, GraphicsPipelineLayout,
+    Image, ImageView, RenderPass, Sampler,
 };
 use crate::utils::Handle;
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "dashi-serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Hash, Clone, Copy, Debug)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
@@ -458,11 +458,21 @@ pub struct PipelineShaderInfo<'a> {
 }
 
 #[derive(Debug)]
+pub struct ComputePipelineLayoutInfo<'a> {
+    pub bg_layout: Handle<BindGroupLayout>,
+    pub shader: &'a PipelineShaderInfo<'a>,
+}
+
+#[derive(Debug)]
 pub struct GraphicsPipelineLayoutInfo<'a> {
     pub vertex_info: VertexDescriptionInfo<'a>,
     pub bg_layout: Handle<BindGroupLayout>,
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
+}
+
+pub struct ComputePipelineInfo {
+    pub layout: Handle<ComputePipelineLayout>,
 }
 
 pub struct GraphicsPipelineInfo {
