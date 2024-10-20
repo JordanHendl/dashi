@@ -379,12 +379,14 @@ pub enum Topology {
 #[derive(Hash, Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum CullMode {
+    None,
     Back,
 }
 
 #[derive(Hash, Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum VertexOrdering {
+    CounterClockwise,
     Clockwise,
 }
 

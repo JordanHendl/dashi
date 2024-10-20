@@ -1473,9 +1473,11 @@ impl Context {
             .polygon_mode(vk::PolygonMode::FILL)
             .cull_mode(match info.details.culling {
                 CullMode::Back => vk::CullModeFlags::BACK,
+                CullMode::None => vk::CullModeFlags::NONE,
             })
             .front_face(match info.details.front_face {
                 VertexOrdering::Clockwise => vk::FrontFace::CLOCKWISE,
+                VertexOrdering::CounterClockwise => vk::FrontFace::COUNTER_CLOCKWISE,
             })
             .depth_bias_enable(false)
             .line_width(1.0)
@@ -1571,7 +1573,13 @@ impl Context {
         // Step 8: Color Blend State
         let color_blend_attachment = vk::PipelineColorBlendAttachmentState::builder()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(false)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .color_blend_op(vk::BlendOp::ADD)
+            .alpha_blend_op(vk::BlendOp::ADD)
+            .blend_enable(true)
             .build();
 
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
