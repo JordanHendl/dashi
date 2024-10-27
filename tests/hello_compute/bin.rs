@@ -1,5 +1,4 @@
 use dashi::*;
-use sdl2::{event::Event, keyboard::Keycode};
 
 #[cfg(feature = "dashi-tests")]
 fn main() {

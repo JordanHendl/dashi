@@ -10,7 +10,7 @@ pub struct FramedCommandList {
 impl FramedCommandList {
     pub fn new(ctx: &mut Context, name: &str, frame_count: usize) -> Self {
         let mut cmds = Vec::new();
-        for i in 0..frame_count {
+        for _i in 0..frame_count {
             cmds.push(
                 ctx.begin_command_list(&CommandListInfo {
                     debug_name: name,
@@ -34,15 +34,15 @@ impl FramedCommandList {
     where
         T: FnMut(&mut CommandList),
     {
+        if let Some(fence) = self.fences[self.curr as usize].as_mut() {
+            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+        }
+
         self.cmds[self.curr as usize].reset().unwrap();
         record_func(&mut self.cmds[self.curr as usize]);
     }
 
     pub fn submit(&mut self, info: &SubmitInfo) {
-        if let Some(fence) = self.fences[self.curr as usize].as_mut() {
-            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
-        }
-
         self.fences[self.curr as usize] = Some(unsafe {
             (*self.ctx)
                 .submit(&mut self.cmds[self.curr as usize], info)

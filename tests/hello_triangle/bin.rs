@@ -254,6 +254,7 @@ void main() {
 
     timer.start();
     let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 3);
+    let sems = ctx.make_semaphores(2).unwrap();
     'running: loop {
         // Reset the allocator
         allocator.reset();
@@ -271,7 +272,7 @@ void main() {
                 _ => {}
             }
         }
-
+        
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
@@ -326,12 +327,14 @@ void main() {
         // Submit our recorded commands
         framed_list.submit(&SubmitInfo {
             wait_sems: &[sem],
+            signal_sems: &[sems[0], sems[1]],
             ..Default::default()
         });
 
+
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
-        ctx.present_display(&display, &[sem]).unwrap();
+        ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
 }
 

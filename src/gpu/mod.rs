@@ -1,11 +1,11 @@
 mod error;
 use crate::utils::{
-    offset_alloc::{self, NodeIndex},
+    offset_alloc::{self},
     Handle, Pool,
 };
 use ash::*;
 pub use error::*;
-use std::{collections::HashSet, ffi::CString};
+use std::ffi::CString;
 use vk_mem::Alloc;
 
 pub mod structs;
@@ -120,8 +120,8 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::BGRA8 => return vk::Format::B8G8R8A8_SRGB,
         Format::BGRA8Unorm => return vk::Format::B8G8R8A8_SNORM,
         Format::D24S8 => vk::Format::D24_UNORM_S8_UINT,
-        Format::R8_UINT => vk::Format::R8_UINT,
-        Format::R8_SINT => vk::Format::R8_SINT,
+        Format::R8Uint => vk::Format::R8_UINT,
+        Format::R8Sint => vk::Format::R8_SINT,
     }
 }
 
@@ -132,8 +132,8 @@ fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
         vk::Format::R8G8B8A8_SRGB => return Format::RGBA8,
         vk::Format::B8G8R8A8_SRGB => return Format::BGRA8,
         vk::Format::B8G8R8A8_SNORM => return Format::BGRA8Unorm,
-        vk::Format::R8_SINT => return Format::R8_SINT,
-        vk::Format::R8_UINT => return Format::R8_UINT,
+        vk::Format::R8_SINT => return Format::R8Sint,
+        vk::Format::R8_UINT => return Format::R8Uint,
         _ => todo!(),
     }
 }
@@ -143,7 +143,7 @@ fn channel_count(fmt: &Format) -> u32 {
         Format::RGB8 => 3,
         Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA32F => 4,
         Format::D24S8 => 4,
-        Format::R8_SINT | Format::R8_UINT => 1,
+        Format::R8Sint | Format::R8Uint => 1,
     }
 }
 
@@ -153,8 +153,8 @@ fn bytes_per_channel(fmt: &Format) -> u32 {
         | Format::BGRA8
         | Format::BGRA8Unorm
         | Format::RGBA8
-        | Format::R8_SINT
-        | Format::R8_UINT => 1,
+        | Format::R8Sint
+        | Format::R8Uint => 1,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
     }
@@ -294,6 +294,7 @@ pub struct RenderPass {
     pub(super) clear_values: Vec<vk::ClearValue>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BindGroupLayout {
     pool: vk::DescriptorPool,
@@ -301,11 +302,13 @@ pub struct BindGroupLayout {
     variables: Vec<BindGroupVariable>,
 }
 
+#[allow(dead_code)]
 pub struct BindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
 }
 
+#[allow(dead_code)]
 pub struct Display {
     window: std::cell::Cell<sdl2::video::Window>,
     swapchain: ash::vk::SwapchainKHR,
@@ -472,7 +475,7 @@ impl Context {
         let device_prop = unsafe { instance.get_physical_device_properties(pdevice) };
 
         let queue_prop = unsafe { instance.get_physical_device_queue_family_properties(pdevice) };
-        let features = unsafe { instance.get_physical_device_features(pdevice) };
+        let _features = unsafe { instance.get_physical_device_features(pdevice) };
 
         let mut queue_family: u32 = 0;
 
@@ -622,7 +625,7 @@ impl Context {
         let f = unsafe {
             self.device.create_fence(
                 &vk::FenceCreateInfo::builder()
-                    .flags(vk::FenceCreateFlags::SIGNALED)
+                    .flags(vk::FenceCreateFlags::empty())
                     .build(),
                 None,
             )
@@ -656,7 +659,7 @@ impl Context {
             .unwrap();
         self.transition_image(list.cmd_buf, img, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
-        self.wait(fence);
+        self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
     }
 
@@ -678,7 +681,7 @@ impl Context {
             .unwrap();
         self.transition_image(list.cmd_buf, tmp_view, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
-        self.wait(fence);
+        self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
     }
 
@@ -756,6 +759,7 @@ impl Context {
             .into_iter()
             .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
             .collect();
+
         let raw_signal_sems: Vec<vk::Semaphore> = info
             .signal_sems
             .into_iter()
@@ -1008,7 +1012,6 @@ impl Context {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<(), GPUError> {
-        let img_ref = self.images.get_ref(image).unwrap();
         let tmp_view = self.make_image_view(&ImageViewInfo {
             debug_name: "view",
             img: image,
@@ -1982,14 +1985,6 @@ impl Context {
         let mut handles: Vec<Handle<Image>> = Vec::with_capacity(images.len() as usize);
         let mut view_handles: Vec<Handle<ImageView>> = Vec::with_capacity(images.len() as usize);
         for img in images {
-            let sub_range = vk::ImageSubresourceRange::builder()
-                .base_array_layer(0)
-                .base_mip_level(0)
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .layer_count(1)
-                .level_count(1)
-                .build();
-
             match self.images.insert(Image {
                 img,
                 alloc: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
@@ -2011,7 +2006,7 @@ impl Context {
                 Some(handle) => {
                     self.oneshot_transition_image_noview(handle, vk::ImageLayout::PRESENT_SRC_KHR);
                     let h = self.make_image_view(&ImageViewInfo {
-                        debug_name: "",
+                        debug_name: &info.window.title,
                         img: handle,
                         layer: 0,
                         mip_level: 0,

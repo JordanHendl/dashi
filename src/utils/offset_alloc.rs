@@ -165,6 +165,8 @@ impl Allocator {
 
         // Pop the top node of the bin. Bin top = node.next.
         let node_index = self.bin_indices[bin_index as usize];
+
+        #[allow(unused_assignments)]
         let mut node_total_size = 0;
         {
             let node = &mut self.nodes[node_index as usize];
@@ -437,6 +439,8 @@ mod small_float {
     pub const MANTISSA_MASK: u32 = MANTISSA_VALUE - 1;
     pub fn uint_to_float_round_up(size: u32) -> u32 {
         let mut exp = 0;
+
+        #[allow(unused_assignments)]
         let mut mantissa = 0;
 
         if size < MANTISSA_VALUE {
@@ -461,6 +465,7 @@ mod small_float {
 
     pub fn uint_to_float_round_down(size: u32) -> u32 {
         let mut exp = 0;
+        #[allow(unused_assignments)]
         let mut mantissa = 0;
 
         if size < MANTISSA_VALUE {
@@ -480,7 +485,7 @@ mod small_float {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::ring_alloc::*;
+    use crate::utils::offset_alloc::*;
 
     #[test]
     fn test_allocator_creation() {

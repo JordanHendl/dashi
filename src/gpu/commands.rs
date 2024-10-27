@@ -297,7 +297,9 @@ impl CommandList {
                 &vk::CommandBufferBeginInfo::builder().build(),
             )?;
         }
-
+        
+        self.curr_rp = None;
+        self.curr_pipeline = None;
         Ok(())
     }
 
@@ -333,7 +335,6 @@ impl CommandList {
                 unsafe {
                     let view = (*self.ctx).image_views.get_ref(rec.dst).unwrap();
                     let img = (*self.ctx).images.get_ref(view.img).unwrap();
-                    let stage_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
                     let old_layout = img.layout;
                     (*self.ctx).transition_image_stages(
                         self.cmd_buf,
@@ -362,7 +363,7 @@ impl CommandList {
                     (*self.ctx).transition_image_stages(
                         self.cmd_buf,
                         rec.dst,
-                        vk::ImageLayout::GENERAL,
+                        old_layout,
                         vk::PipelineStageFlags::TRANSFER,
                         vk::PipelineStageFlags::TRANSFER,
                         vk::AccessFlags::TRANSFER_WRITE,

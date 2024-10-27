@@ -28,8 +28,8 @@ pub enum BufferUsage {
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
-    R8_SINT,
-    R8_UINT,
+    R8Sint,
+    R8Uint,
     RGB8,
     BGRA8,
     BGRA8Unorm,
