@@ -162,7 +162,10 @@ impl CommandList {
             for opt in &cmd.bind_groups {
                 if let Some(bg) = opt {
                     let b = (*self.ctx).bind_groups.get_ref(*bg).unwrap();
-                    let pl = (*self.ctx).compute_pipeline_layouts.get_ref(compute.layout).unwrap();
+                    let pl = (*self.ctx)
+                        .compute_pipeline_layouts
+                        .get_ref(compute.layout)
+                        .unwrap();
 
                     (*self.ctx).device.cmd_bind_descriptor_sets(
                         self.cmd_buf,
@@ -282,6 +285,22 @@ impl CommandList {
             None => return Err(GPUError::LibraryError()),
         }
     }
+
+    pub fn reset(&mut self) -> Result<(), GPUError> {
+        unsafe {
+            (*self.ctx)
+                .device
+                .reset_command_buffer(self.cmd_buf, vk::CommandBufferResetFlags::empty())?;
+
+            (*self.ctx).device.begin_command_buffer(
+                self.cmd_buf,
+                &vk::CommandBufferBeginInfo::builder().build(),
+            )?;
+        }
+
+        Ok(())
+    }
+
     pub fn append(&mut self, cmd: Command) {
         if self.ctx == std::ptr::null_mut() {
             return;

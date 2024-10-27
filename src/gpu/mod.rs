@@ -12,6 +12,8 @@ pub mod structs;
 pub use structs::*;
 pub mod commands;
 pub use commands::*;
+pub mod framed_cmd_list;
+pub use framed_cmd_list::*;
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -118,7 +120,8 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::BGRA8 => return vk::Format::B8G8R8A8_SRGB,
         Format::BGRA8Unorm => return vk::Format::B8G8R8A8_SNORM,
         Format::D24S8 => vk::Format::D24_UNORM_S8_UINT,
-        Format::R8 => vk::Format::R8_UINT,
+        Format::R8_UINT => vk::Format::R8_UINT,
+        Format::R8_SINT => vk::Format::R8_SINT,
     }
 }
 
@@ -129,6 +132,8 @@ fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
         vk::Format::R8G8B8A8_SRGB => return Format::RGBA8,
         vk::Format::B8G8R8A8_SRGB => return Format::BGRA8,
         vk::Format::B8G8R8A8_SNORM => return Format::BGRA8Unorm,
+        vk::Format::R8_SINT => return Format::R8_SINT,
+        vk::Format::R8_UINT => return Format::R8_UINT,
         _ => todo!(),
     }
 }
@@ -138,13 +143,18 @@ fn channel_count(fmt: &Format) -> u32 {
         Format::RGB8 => 3,
         Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA32F => 4,
         Format::D24S8 => 4,
-        Format::R8 => 1,
+        Format::R8_SINT | Format::R8_UINT => 1,
     }
 }
 
 fn bytes_per_channel(fmt: &Format) -> u32 {
     match fmt {
-        Format::RGB8 | Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::R8 => 1,
+        Format::RGB8
+        | Format::BGRA8
+        | Format::BGRA8Unorm
+        | Format::RGBA8
+        | Format::R8_SINT
+        | Format::R8_UINT => 1,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
     }
@@ -304,43 +314,27 @@ pub struct Display {
     views: Vec<Handle<ImageView>>,
     loader: ash::extensions::khr::Surface,
     sc_loader: ash::extensions::khr::Swapchain,
-    semaphores: Vec<Semaphore>,
-    fences: Vec<Fence>,
+    semaphores: Vec<Handle<Semaphore>>,
+    fences: Vec<Handle<Fence>>,
     frame_idx: u32,
 }
 
 #[derive(Clone)]
 pub struct Fence {
     raw: vk::Fence,
-    device: ash::Device,
 }
 
 impl Default for Fence {
     fn default() -> Self {
         Self {
             raw: Default::default(),
-            device: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
         }
     }
 }
 
 impl Fence {
-    fn new(raw: vk::Fence, device: ash::Device) -> Self {
-        Self { raw, device }
-    }
-
-    pub fn wait(&mut self) -> Result<(), GPUError> {
-        let _res = unsafe {
-            self.device
-                .wait_for_fences(&[self.raw], true, std::u64::MAX)
-        }?;
-
-        Ok(())
-    }
-
-    fn reset(&mut self) -> Result<(), GPUError> {
-        unsafe { self.device.reset_fences(&[self.raw]) }?;
-        Ok(())
+    fn new(raw: vk::Fence) -> Self {
+        Self { raw }
     }
 }
 
@@ -383,8 +377,7 @@ pub struct GraphicsPipeline {
 #[derive(Clone)]
 pub struct CommandList {
     cmd_buf: vk::CommandBuffer,
-    fence: Fence,
-    semaphore: vk::Semaphore,
+    fence: Handle<Fence>,
     dirty: bool,
     ctx: *mut Context,
     curr_rp: Option<Handle<RenderPass>>,
@@ -398,7 +391,6 @@ impl Default for CommandList {
         Self {
             cmd_buf: Default::default(),
             fence: Default::default(),
-            semaphore: Default::default(),
             dirty: false,
             ctx: std::ptr::null_mut(),
             curr_rp: None,
@@ -426,6 +418,8 @@ pub struct Context {
     pub(super) gfx_queue: Queue,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
+    pub(super) semaphores: Pool<Semaphore>,
+    pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
     pub(super) image_views: Pool<ImageView>,
     pub(super) samplers: Pool<Sampler>,
@@ -435,7 +429,7 @@ pub struct Context {
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
     pub(super) compute_pipelines: Pool<ComputePipeline>,
-    pub(super) cmds_to_release: Vec<(CommandList, Fence)>,
+    pub(super) cmds_to_release: Vec<(CommandList, Handle<Fence>)>,
 
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
@@ -553,6 +547,8 @@ impl Context {
             #[cfg(feature = "dashi-sdl2")]
             sdl_video,
 
+            semaphores: Default::default(),
+            fences: Default::default(),
             cmds_to_release: Default::default(),
             buffers: Default::default(),
             render_passes: Default::default(),
@@ -598,6 +594,18 @@ impl Context {
         }
     }
 
+    pub fn wait(&mut self, fence: Handle<Fence>) -> Result<(), GPUError> {
+        let fence = self.fences.get_ref(fence).unwrap();
+        let _res = unsafe {
+            self.device
+                .wait_for_fences(&[fence.raw], true, std::u64::MAX)
+        }?;
+
+        unsafe { self.device.reset_fences(&[fence.raw]) }?;
+
+        Ok(())
+    }
+
     pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
         let cmd = unsafe {
             self.device.allocate_command_buffers(
@@ -626,17 +634,6 @@ impl Context {
             vk::ObjectType::FENCE,
         );
 
-        let s = unsafe {
-            self.device
-                .create_semaphore(&vk::SemaphoreCreateInfo::builder().build(), None)
-        }?;
-
-        self.set_name(
-            s,
-            format!("{}.semaphore", info.debug_name).as_str(),
-            vk::ObjectType::SEMAPHORE,
-        );
-
         unsafe {
             self.device
                 .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
@@ -644,8 +641,7 @@ impl Context {
 
         return Ok(CommandList {
             cmd_buf: cmd[0],
-            fence: Fence::new(f, self.device.clone()),
-            semaphore: s,
+            fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
             ..Default::default()
@@ -659,8 +655,9 @@ impl Context {
             })
             .unwrap();
         self.transition_image(list.cmd_buf, img, layout);
-        let (sem, mut fence) = self.submit(&mut list, None).unwrap();
-        fence.wait().unwrap();
+        let fence = self.submit(&mut list, &Default::default()).unwrap();
+        self.wait(fence);
+        self.destroy_cmd_list(list);
     }
 
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
@@ -680,7 +677,9 @@ impl Context {
             })
             .unwrap();
         self.transition_image(list.cmd_buf, tmp_view, layout);
-        let (sem, fence) = self.submit(&mut list, None).unwrap();
+        let fence = self.submit(&mut list, &Default::default()).unwrap();
+        self.wait(fence);
+        self.destroy_cmd_list(list);
     }
 
     fn transition_image_stages(
@@ -745,52 +744,80 @@ impl Context {
     pub fn submit(
         &mut self,
         cmd: &mut CommandList,
-        wait_sems: Option<&[Semaphore]>,
-    ) -> Result<(Semaphore, Fence), GPUError> {
+        info: &SubmitInfo,
+    ) -> Result<Handle<Fence>, GPUError> {
         if cmd.dirty {
             unsafe { self.device.end_command_buffer(cmd.cmd_buf)? };
             cmd.dirty = false;
         }
 
-        cmd.fence.wait()?;
-        cmd.fence.reset()?;
+        let raw_wait_sems: Vec<vk::Semaphore> = info
+            .wait_sems
+            .into_iter()
+            .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
+            .collect();
+        let raw_signal_sems: Vec<vk::Semaphore> = info
+            .signal_sems
+            .into_iter()
+            .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
+            .collect();
 
-        let mut raw_wait_sems: Vec<vk::Semaphore> = Vec::with_capacity(32);
-        match wait_sems {
-            Some(sems) => {
-                for sem in sems {
-                    raw_wait_sems.push(sem.raw)
-                }
-            }
-            None => {}
-        }
-
-        let stage_masks = &[vk::PipelineStageFlags::ALL_COMMANDS];
+        let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
         unsafe {
             self.device.queue_submit(
                 self.gfx_queue.queue,
                 &[vk::SubmitInfo::builder()
                     .command_buffers(&[cmd.cmd_buf])
-                    .signal_semaphores(&[cmd.semaphore])
-                    .wait_dst_stage_mask(stage_masks)
+                    .signal_semaphores(&raw_signal_sems)
+                    .wait_dst_stage_mask(&stage_masks)
                     .wait_semaphores(&raw_wait_sems)
                     .build()],
-                cmd.fence.raw,
+                self.fences.get_ref(cmd.fence).unwrap().raw.clone(),
             )?
         };
 
-        for (cmd, fence) in &mut self.cmds_to_release {
-            fence.wait()?;
-            unsafe {
-                self.device.destroy_fence(fence.raw, None);
-                self.device.destroy_semaphore(cmd.semaphore, None);
-                self.device.free_command_buffers(self.pool, &[cmd.cmd_buf]);
-            }
+        for (cmd, fence) in self.cmds_to_release.clone() {
+            self.wait(fence.clone())?;
+            self.destroy_cmd_list(cmd);
         }
 
         self.cmds_to_release.clear();
 
-        return Ok((Semaphore { raw: cmd.semaphore }, cmd.fence.clone()));
+        return Ok(cmd.fence.clone());
+    }
+
+    pub fn make_semaphores(&mut self, count: usize) -> Result<Vec<Handle<Semaphore>>, GPUError> {
+        let mut f = Vec::with_capacity(count);
+        for _i in 0..count {
+            f.push(self.make_semaphore()?);
+        }
+
+        Ok(f)
+    }
+
+    pub fn make_semaphore(&mut self) -> Result<Handle<Semaphore>, GPUError> {
+        Ok(self
+            .semaphores
+            .insert(Semaphore {
+                raw: unsafe {
+                    self.device
+                        .create_semaphore(&vk::SemaphoreCreateInfo::builder().build(), None)
+                }?,
+            })
+            .unwrap())
+    }
+
+    pub fn make_fence(&mut self) -> Result<Handle<Fence>, GPUError> {
+        let f = unsafe {
+            self.device.create_fence(
+                &vk::FenceCreateInfo::builder()
+                    .flags(vk::FenceCreateFlags::SIGNALED)
+                    .build(),
+                None,
+            )
+        }?;
+
+        return Ok(self.fences.insert(Fence::new(f)).unwrap());
     }
 
     pub fn make_sampler(&mut self, info: &SamplerInfo) -> Result<Handle<Sampler>, GPUError> {
@@ -965,8 +992,9 @@ impl Context {
                     size: unsafe { info.initial_data.unwrap_unchecked().len() },
                 }));
 
-                let (_sem, mut fence) = self.submit(&mut list, None)?;
-                fence.wait()?;
+                let fence = self.submit(&mut list, &Default::default())?;
+                self.wait(fence.clone())?;
+                self.destroy_cmd_list(list);
                 self.destroy_buffer(staging);
             }
             MemoryVisibility::CpuAndGpu => {
@@ -991,8 +1019,9 @@ impl Context {
         let mut list = self.begin_command_list(&Default::default())?;
         if info.initial_data.is_none() {
             self.transition_image(list.cmd_buf, tmp_view, vk::ImageLayout::GENERAL);
-            let (_sem, mut fence) = self.submit(&mut list, None)?;
-            fence.wait()?;
+            let fence = self.submit(&mut list, &Default::default())?;
+            self.wait(fence)?;
+            self.destroy_cmd_list(list);
             self.destroy_image_view(tmp_view);
             return Ok(());
         }
@@ -1016,8 +1045,9 @@ impl Context {
             src_offset: 0,
         }));
 
-        let (_sem, mut fence) = self.submit(&mut list, None)?;
-        fence.wait()?;
+        let fence = self.submit(&mut list, &Default::default())?;
+        self.wait(fence)?;
+        self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
         self.destroy_image_view(tmp_view);
         return Ok(());
@@ -1111,6 +1141,18 @@ impl Context {
         self.buffers.release(handle);
     }
 
+    pub fn destroy_semaphore(&mut self, handle: Handle<Semaphore>) {
+        let sem = self.semaphores.get_mut_ref(handle).unwrap();
+        unsafe { self.device.destroy_semaphore(sem.raw, None) };
+        self.semaphores.release(handle);
+    }
+
+    pub fn destroy_fence(&mut self, handle: Handle<Fence>) {
+        let fence = self.fences.get_mut_ref(handle).unwrap();
+        unsafe { self.device.destroy_fence(fence.raw, None) };
+        self.fences.release(handle);
+    }
+
     pub fn destroy_image_view(&mut self, handle: Handle<ImageView>) {
         let img = self.image_views.get_mut_ref(handle).unwrap();
         unsafe { self.device.destroy_image_view(img.view, None) };
@@ -1121,7 +1163,10 @@ impl Context {
         self.images.release(handle);
     }
 
-    pub fn destroy_cmd_list(&mut self, list: CommandList) {}
+    pub fn destroy_cmd_list(&mut self, list: CommandList) {
+        unsafe { self.device.free_command_buffers(self.pool, &[list.cmd_buf]) };
+        self.destroy_fence(list.fence);
+    }
 
     pub fn make_bind_group_layout(
         &mut self,
@@ -1189,6 +1234,17 @@ impl Context {
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
 
+        self.set_name(
+            descriptor_set_layout,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_SET_LAYOUT,
+        );
+        self.set_name(
+            descriptor_pool,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_POOL,
+        );
+
         // Step 4: Return the BindGroupLayout
         return Ok(self
             .bind_group_layouts
@@ -1217,6 +1273,12 @@ impl Context {
         let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
 
         let descriptor_set = descriptor_sets[0]; // We are allocating one descriptor set
+
+        self.set_name(
+            descriptor_set,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_SET,
+        );
 
         // Step 2: Prepare the write operations for the descriptor set
         let mut write_descriptor_sets = Vec::new();
@@ -1281,6 +1343,26 @@ impl Context {
                         .dst_set(descriptor_set)
                         .dst_binding(binding_info.binding)
                         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                        .build();
+
+                    write_descriptor_sets.push(write_descriptor_set);
+                }
+                ShaderResource::StorageBuffer(buffer_handle) => {
+                    let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.buf)
+                        .offset(0)
+                        .range(vk::WHOLE_SIZE)
+                        .build();
+
+                    buffer_infos.push(buffer_info);
+
+                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(binding_info.binding)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                         .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
                         .build();
 
@@ -1429,6 +1511,8 @@ impl Context {
         // Create render pass
         let render_pass = unsafe { self.device.create_render_pass(&render_pass_info, None) }?;
 
+        self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
+
         let fbs = self.create_framebuffers(render_pass, info)?;
         return Ok(self
             .render_passes
@@ -1477,7 +1561,7 @@ impl Context {
 
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(stage_flags)
-                    .module(unsafe { self.create_shader_module(shader_info.spirv).unwrap() })
+                    .module(self.create_shader_module(shader_info.spirv).unwrap())
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
                     //                    .specialization_info(None) // Handle specialization constants if needed
                     .build()
@@ -1559,6 +1643,8 @@ impl Context {
         // Step 9: Create Pipeline Layout (assume we have a layout creation function)
         let layout = self.create_pipeline_layout(info.bg_layout)?;
 
+        self.set_name(layout, info.debug_name, vk::ObjectType::PIPELINE_LAYOUT);
+
         return Ok(self
             .gfx_pipeline_layouts
             .insert(GraphicsPipelineLayout {
@@ -1574,7 +1660,7 @@ impl Context {
             .unwrap());
     }
 
-    pub fn release_list_on_next_submit(&mut self, fence: Fence, list: CommandList) {
+    pub fn release_list_on_next_submit(&mut self, fence: Handle<Fence>, list: CommandList) {
         self.cmds_to_release.push((list, fence));
     }
 
@@ -1594,6 +1680,12 @@ impl Context {
                 .create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
                 .unwrap()
         };
+
+        self.set_name(
+            compute_pipelines[0],
+            info.debug_name,
+            vk::ObjectType::PIPELINE,
+        );
 
         return Ok(self
             .compute_pipelines
@@ -1699,6 +1791,12 @@ impl Context {
                 .unwrap()
         };
 
+        self.set_name(
+            graphics_pipelines[0],
+            info.debug_name,
+            vk::ObjectType::PIPELINE,
+        );
+
         return Ok(self
             .gfx_pipelines
             .insert(GraphicsPipeline {
@@ -1779,11 +1877,11 @@ impl Context {
         unsafe { dsp.sc_loader.destroy_swapchain(dsp.swapchain, None) };
         unsafe { dsp.loader.destroy_surface(dsp.surface, None) };
         for sem in dsp.semaphores {
-            unsafe { self.device.destroy_semaphore(sem.raw, None) };
+            self.destroy_semaphore(sem);
         }
 
         for fence in &dsp.fences {
-            unsafe { self.device.destroy_fence(fence.raw, None) };
+            self.destroy_fence(fence.clone());
         }
     }
 
@@ -1926,25 +2024,10 @@ impl Context {
             };
         }
 
-        let mut sems = Vec::with_capacity(handles.len() as usize);
+        let sems = self.make_semaphores(handles.len()).unwrap();
         let mut fences = Vec::with_capacity(handles.len() as usize);
-        for idx in 0..handles.len() {
-            sems.push(Semaphore {
-                raw: unsafe {
-                    self.device
-                        .create_semaphore(&vk::SemaphoreCreateInfo::builder().build(), None)?
-                },
-            });
-            let f = unsafe {
-                self.device.create_fence(
-                    &vk::FenceCreateInfo::builder()
-                        .flags(vk::FenceCreateFlags::SIGNALED)
-                        .build(),
-                    None,
-                )
-            }?;
-
-            fences.push(Fence::new(f, self.device.clone()));
+        for _idx in 0..handles.len() {
+            fences.push(self.make_fence()?);
         }
         return Ok(Display {
             window,
@@ -1961,20 +2044,26 @@ impl Context {
     }
 
     pub fn acquire_new_image(
-        &self,
+        &mut self,
         dsp: &mut Display,
-    ) -> Result<(Handle<ImageView>, Semaphore, u32, bool), GPUError> {
-        let signal_sem = dsp.semaphores[dsp.frame_idx as usize];
-        let fence = &mut dsp.fences[dsp.frame_idx as usize];
+    ) -> Result<(Handle<ImageView>, Handle<Semaphore>, u32, bool), GPUError> {
+        let signal_sem_handle = dsp.semaphores[dsp.frame_idx as usize].clone();
+        let fence = dsp.fences[dsp.frame_idx as usize];
 
-        fence.wait()?;
-        fence.reset()?;
+        self.wait(fence.clone())?;
+
+        let signal_sem = self.semaphores.get_ref(signal_sem_handle).unwrap();
         let res = unsafe {
             dsp.sc_loader.acquire_next_image2(
                 &vk::AcquireNextImageInfoKHR::builder()
                     .swapchain(dsp.swapchain)
                     .semaphore(signal_sem.raw)
-                    .fence(dsp.fences[dsp.frame_idx as usize].raw)
+                    .fence(
+                        self.fences
+                            .get_ref(dsp.fences[dsp.frame_idx as usize])
+                            .unwrap()
+                            .raw,
+                    )
                     .timeout(std::u64::MAX)
                     .device_mask(0x1)
                     .build(),
@@ -1982,17 +2071,17 @@ impl Context {
         }?;
 
         dsp.frame_idx = res.0;
-        return Ok((dsp.views[res.0 as usize], signal_sem, res.0, res.1));
+        return Ok((dsp.views[res.0 as usize], signal_sem_handle, res.0, res.1));
     }
 
     pub fn present_display(
         &mut self,
         dsp: &Display,
-        wait_sems: &[Semaphore],
+        wait_sems: &[Handle<Semaphore>],
     ) -> Result<(), GPUError> {
         let mut raw_wait_sems: Vec<vk::Semaphore> = Vec::with_capacity(32);
         for sem in wait_sems {
-            raw_wait_sems.push(sem.raw);
+            raw_wait_sems.push(self.semaphores.get_ref(sem.clone()).unwrap().raw);
         }
 
         unsafe {

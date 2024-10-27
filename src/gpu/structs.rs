@@ -2,7 +2,7 @@ use super::{
     BindGroupLayout, Buffer, ComputePipelineLayout, DynamicAllocator, GraphicsPipelineLayout,
     Image, ImageView, RenderPass, Sampler,
 };
-use crate::utils::Handle;
+use crate::{utils::Handle, Semaphore};
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "dashi-serde")]
@@ -28,7 +28,8 @@ pub enum BufferUsage {
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
-    R8,
+    R8_SINT,
+    R8_UINT,
     RGB8,
     BGRA8,
     BGRA8Unorm,
@@ -249,6 +250,20 @@ impl<'a> Default for CommandListInfo<'a> {
     }
 }
 
+pub struct SubmitInfo<'a> {
+    pub wait_sems: &'a [Handle<Semaphore>],
+    pub signal_sems: &'a [Handle<Semaphore>],
+}
+
+impl<'a> Default for SubmitInfo<'a> {
+    fn default() -> Self {
+        Self {
+            wait_sems: &[],
+            signal_sems: &[],
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Attachment {
     pub view: Handle<ImageView>,
@@ -321,11 +336,13 @@ pub struct ShaderInfo<'a> {
 
 #[derive(Hash, Clone, Debug)]
 pub struct BindGroupLayoutInfo<'a> {
+    pub debug_name: &'a str,
     pub shaders: &'a [ShaderInfo<'a>],
 }
 
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
+    StorageBuffer(Handle<Buffer>),
     Dynamic(&'a DynamicAllocator),
     SampledImage(Handle<ImageView>, Handle<Sampler>),
 }
@@ -336,6 +353,7 @@ pub struct BindingInfo<'a> {
 }
 
 pub struct BindGroupInfo<'a> {
+    pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
     pub bindings: &'a [BindingInfo<'a>],
     pub set: u32,
@@ -347,6 +365,7 @@ impl<'a> Default for BindGroupInfo<'a> {
             layout: Default::default(),
             bindings: &[],
             set: 0,
+            debug_name: "",
         }
     }
 }
@@ -438,6 +457,7 @@ pub enum VertexRate {
 }
 
 pub struct RenderPassInfo<'a> {
+    pub debug_name: &'a str,
     pub viewport: Viewport,
     pub color_attachments: &'a [Attachment],
     pub depth_stencil_attachment: Option<&'a Attachment>,
@@ -465,17 +485,20 @@ pub struct ComputePipelineLayoutInfo<'a> {
 
 #[derive(Debug)]
 pub struct GraphicsPipelineLayoutInfo<'a> {
+    pub debug_name: &'a str,
     pub vertex_info: VertexDescriptionInfo<'a>,
     pub bg_layout: Handle<BindGroupLayout>,
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
 }
 
-pub struct ComputePipelineInfo {
+pub struct ComputePipelineInfo<'a> {
+    pub debug_name: &'a str,
     pub layout: Handle<ComputePipelineLayout>,
 }
 
-pub struct GraphicsPipelineInfo {
+pub struct GraphicsPipelineInfo<'a> {
+    pub debug_name: &'a str,
     pub layout: Handle<GraphicsPipelineLayout>,
     pub render_pass: Handle<RenderPass>,
 }

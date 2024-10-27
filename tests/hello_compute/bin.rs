@@ -9,6 +9,7 @@ fn main() {
     // Make the bind group layout. This describes the bindings into a shader.
     let bg_layout = ctx
         .make_bind_group_layout(&BindGroupLayoutInfo {
+            debug_name: "Hello Compute",
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
                 variables: &[
@@ -68,6 +69,7 @@ void main() {
     // Make a compute pipeline. This describes a compute pass.
     let pipeline = ctx
         .make_compute_pipeline(&ComputePipelineInfo {
+            debug_name: "Compute",
             layout: pipeline_layout,
         })
         .unwrap();
@@ -99,6 +101,7 @@ void main() {
     // Make bind group what we want to bind to what was described in the Bind Group Layout.
     let bind_group = ctx
         .make_bind_group(&BindGroupInfo {
+            debug_name: "Hello Compute",
             layout: bg_layout,
             bindings: &[
                 BindingInfo {
@@ -137,9 +140,9 @@ void main() {
     });
 
     // Submit our recorded commands
-    let (sem, mut fence) = ctx.submit(&mut list, Some(&[])).unwrap();
+    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
 
-    fence.wait().expect("Error waiting on fence!");
+    ctx.wait(fence).unwrap();
 
     let data = ctx.map_buffer::<f32>(output).unwrap();
     for entry in data {

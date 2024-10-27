@@ -137,6 +137,7 @@ fn main() {
                     binding: 0,
                 }],
             }],
+            debug_name: "Hello Triangle",
         })
         .unwrap();
 
@@ -189,6 +190,7 @@ void main() {
                 },
             ],
             details: Default::default(),
+            debug_name: "Hello Compute",
         })
         .expect("Unable to create GFX Pipeline Layout!");
 
@@ -214,6 +216,7 @@ void main() {
                 ..Default::default()
             }],
             depth_stencil_attachment: None,
+            debug_name: "renderpass",
         })
         .unwrap();
 
@@ -222,6 +225,7 @@ void main() {
         .make_graphics_pipeline(&GraphicsPipelineInfo {
             layout: pipeline_layout,
             render_pass,
+            debug_name: "Pipeline",
         })
         .unwrap();
 
@@ -231,6 +235,7 @@ void main() {
     // Make bind group what we want to bind to what was described in the Bind Group Layout.
     let bind_group = ctx
         .make_bind_group(&BindGroupInfo {
+            debug_name: "Hello Triangle",
             layout: bg_layout,
             bindings: &[BindingInfo {
                 resource: ShaderResource::Dynamic(&allocator),
@@ -248,6 +253,7 @@ void main() {
     let mut timer = Timer::new();
 
     timer.start();
+    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 3);
     'running: loop {
         // Reset the allocator
         allocator.reset();
@@ -269,65 +275,63 @@ void main() {
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
-        // Begin recording commands
-        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+        framed_list.record(|list| {
+            // Begin render pass & bind pipeline
+            list.begin_drawing(&DrawBegin {
+                viewport: Viewport {
+                    area: FRect2D {
+                        w: WIDTH as f32,
+                        h: HEIGHT as f32,
+                        ..Default::default()
+                    },
+                    scissor: Rect2D {
+                        w: WIDTH,
+                        h: HEIGHT,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                pipeline: graphics_pipeline,
+            })
+            .unwrap();
 
-        // Begin render pass & bind pipeline
-        list.begin_drawing(&DrawBegin {
-            viewport: Viewport {
-                area: FRect2D {
-                    w: WIDTH as f32,
-                    h: HEIGHT as f32,
-                    ..Default::default()
-                },
-                scissor: Rect2D {
-                    w: WIDTH,
-                    h: HEIGHT,
-                    ..Default::default()
-                },
+            // Bump alloc some data to write the triangle position to.
+            let mut buf = allocator.bump().unwrap();
+            let pos = &mut buf.slice::<[f32; 2]>()[0];
+            pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
+            pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
+
+            // Append a draw call using our vertices & indices & dynamic buffers
+            list.append(Command::DrawIndexedCommand(DrawIndexed {
+                vertices,
+                indices,
+                index_count: INDICES.len() as u32,
+                bind_groups: [Some(bind_group), None, None, None],
+                dynamic_buffers: [Some(buf), None, None, None],
                 ..Default::default()
-            },
-            pipeline: graphics_pipeline,
-        })
-        .unwrap();
+            }));
 
-        // Bump alloc some data to write the triangle position to.
-        let mut buf = allocator.bump().unwrap();
-        let pos = &mut buf.slice::<[f32; 2]>()[0];
-        pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
-        pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
+            // End drawing.
+            list.end_drawing().expect("Error ending drawing!");
 
-        // Append a draw call using our vertices & indices & dynamic buffers
-        list.append(Command::DrawIndexedCommand(DrawIndexed {
-            vertices,
-            indices,
-            index_count: INDICES.len() as u32,
-            bind_groups: [Some(bind_group), None, None, None],
-            dynamic_buffers: [Some(buf), None, None, None],
-            ..Default::default()
-        }));
-
-        // End drawing.
-        list.end_drawing().expect("Error ending drawing!");
-
-        // Blit the framebuffer to the display's image
-        list.blit(ImageBlit {
-            src: fb_view,
-            dst: img,
-            filter: Filter::Nearest,
-            ..Default::default()
+            // Blit the framebuffer to the display's image
+            list.blit(ImageBlit {
+                src: fb_view,
+                dst: img,
+                filter: Filter::Nearest,
+                ..Default::default()
+            });
         });
 
         // Submit our recorded commands
-        let (sem, fence) = ctx.submit(&mut list, Some(&[sem])).unwrap();
+        framed_list.submit(&SubmitInfo {
+            wait_sems: &[sem],
+            ..Default::default()
+        });
 
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
         ctx.present_display(&display, &[sem]).unwrap();
-
-        // Signal the context to free our command list on the next submit call. This is nice so
-        // that we don't have to manually manage it.
-        ctx.release_list_on_next_submit(fence, list);
     }
 }
 
