@@ -30,12 +30,25 @@ impl FramedCommandList {
         }
     }
 
+    pub fn append<T>(&mut self, mut record_func: T)
+    where
+        T: FnMut(&mut CommandList),
+    {
+        if let Some(fence) = self.fences[self.curr as usize].as_mut() {
+            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            self.fences[self.curr as usize] = None;
+        }
+
+        record_func(&mut self.cmds[self.curr as usize]);
+    }
+
     pub fn record<T>(&mut self, mut record_func: T)
     where
         T: FnMut(&mut CommandList),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            self.fences[self.curr as usize] = None;
         }
 
         self.cmds[self.curr as usize].reset().unwrap();
