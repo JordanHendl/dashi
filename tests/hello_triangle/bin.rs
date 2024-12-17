@@ -117,6 +117,7 @@ fn main() {
             format: Format::RGBA8,
             mip_levels: 1,
             initial_data: None,
+            ..Default::default()
         })
         .unwrap();
 

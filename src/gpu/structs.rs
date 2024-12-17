@@ -173,9 +173,23 @@ pub struct ContextInfo {}
 pub struct ImageInfo<'a> {
     pub debug_name: &'a str,
     pub dim: [u32; 3],
+    pub layers: u32,
     pub format: Format,
     pub mip_levels: u32,
     pub initial_data: Option<&'a [u8]>,
+}
+
+impl<'a> Default for ImageInfo<'a> {
+    fn default() -> Self {
+        Self {
+            debug_name: "",
+            dim: [1280, 1024, 1],
+            layers: 1,
+            format: Format::RGBA8,
+            mip_levels: 1,
+            initial_data: None,
+        }
+    }
 }
 
 pub struct ImageViewInfo<'a> {
