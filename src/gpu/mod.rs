@@ -838,7 +838,7 @@ impl Context {
     pub fn make_image_view(&mut self, info: &ImageViewInfo) -> Result<Handle<ImageView>, GPUError> {
         let img = self.images.get_ref(info.img).unwrap();
         let sub_range = vk::ImageSubresourceRange::builder()
-            .base_array_layer(0)
+            .base_array_layer(info.layer)
             .layer_count(1)
             .base_mip_level(info.mip_level)
             .level_count(1)
@@ -890,7 +890,7 @@ impl Context {
                         height: info.dim[1] as u32,
                         depth: 1,
                     })
-                    .array_layers(info.dim[2] as u32)
+                    .array_layers(info.layers)
                     .format(lib_to_vk_image_format(&info.format))
                     .mip_levels(info.mip_levels as u32)
                     .initial_layout(vk::ImageLayout::UNDEFINED)
@@ -2148,6 +2148,7 @@ fn test_image() {
         format: c_format,
         mip_levels: c_mip_levels,
         initial_data: Some(&initial_data),
+        ..Default::default()
     });
 
     assert!(image_res.is_ok());

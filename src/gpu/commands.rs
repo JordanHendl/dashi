@@ -353,7 +353,12 @@ impl CommandList {
                         img.layout,
                         &[vk::BufferImageCopy {
                             buffer_offset: rec.src_offset as u64,
-                            image_subresource: img.sub_layers,
+                            image_subresource: vk::ImageSubresourceLayers {
+                                aspect_mask: img.sub_layers.aspect_mask,
+                                mip_level: view.range.base_mip_level,
+                                base_array_layer: view.range.base_array_layer,
+                                layer_count: view.range.layer_count,
+                            },
                             image_extent: img.extent,
 
                             ..Default::default()
