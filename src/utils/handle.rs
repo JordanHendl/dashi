@@ -1,6 +1,7 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+#[repr(C)]
 #[derive(Debug)]
 pub struct Handle<T> {
     pub slot: u16,
