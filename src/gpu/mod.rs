@@ -303,6 +303,14 @@ pub struct BindGroupLayout {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
+pub struct BindlessBindGroupLayout {
+    pool: vk::DescriptorPool,
+    layout: vk::DescriptorSetLayout,
+    variables: Vec<BindGroupVariable>,
+}
+
+#[allow(dead_code)]
 pub struct BindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
@@ -427,6 +435,7 @@ pub struct Context {
     pub(super) image_views: Pool<ImageView>,
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
+    pub(super) bindless_bind_group_layouts: Pool<BindlessBindGroupLayout>,
     pub(super) bind_groups: Pool<BindGroup>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
@@ -488,6 +497,27 @@ impl Context {
         }
 
         let priorities = [1.0];
+
+        let mut descriptor_indexing =
+            vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
+
+        let mut features2 = vk::PhysicalDeviceFeatures2::builder()
+            .push_next(&mut descriptor_indexing)
+            .build();
+
+        unsafe { instance.get_physical_device_features2(pdevice, &mut features2) };
+
+        // Bindless enabled
+        if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
+            && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind <= 0
+            && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing <= 0
+            && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind <= 0
+            && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing <= 0
+            && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind <= 0
+        {
+            features2 = Default::default();
+        }
+
         let device = unsafe {
             instance.create_device(
                 pdevice,
@@ -509,6 +539,7 @@ impl Context {
                         .queue_family_index(gfx_queue.family)
                         .queue_priorities(&priorities)
                         .build()])
+                    .push_next(&mut features2)
                     .build(),
                 None,
             )
@@ -558,6 +589,7 @@ impl Context {
             images: Default::default(),
             image_views: Default::default(),
             bind_group_layouts: Default::default(),
+            bindless_bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
@@ -1169,6 +1201,109 @@ impl Context {
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
         unsafe { self.device.free_command_buffers(self.pool, &[list.cmd_buf]) };
         self.destroy_fence(list.fence);
+    }
+
+    pub fn make_bindless_bind_group_layout(
+        &mut self,
+        info: &BindGroupLayoutInfo,
+    ) -> Result<Handle<BindlessBindGroupLayout>, GPUError> {
+        const MAX_DESCRIPTOR_SETS: u32 = 2048;
+
+        let mut flags = Vec::new();
+        let mut bindings = Vec::new();
+        for shader_info in info.shaders.iter() {
+            for variable in shader_info.variables.iter() {
+                let descriptor_type = match variable.var_type {
+                    BindGroupVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                    BindGroupVariableType::DynamicUniform => {
+                        vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
+                    }
+                    BindGroupVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                    BindGroupVariableType::SampledImage => {
+                        vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+                    }
+                    BindGroupVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
+                    BindGroupVariableType::DynamicStorage => {
+                        vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
+                    }
+                };
+
+                let stage_flags = match shader_info.shader_type {
+                    ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
+                    ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
+                    ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
+                };
+
+                flags.push(
+                    vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                        | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND,
+                );
+                let layout_binding = vk::DescriptorSetLayoutBinding::builder()
+                    .binding(variable.binding)
+                    .descriptor_type(descriptor_type)
+                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
+                    .stage_flags(stage_flags)
+                    .build();
+
+                bindings.push(layout_binding);
+            }
+        }
+        let mut layout_binding_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder()
+            .binding_flags(&flags)
+            .build();
+
+        let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&bindings)
+            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
+            .push_next(&mut layout_binding_info)
+            .build();
+
+        let descriptor_set_layout = unsafe {
+            self.device
+                .create_descriptor_set_layout(&layout_info, None)?
+        };
+
+        let pool_sizes = bindings
+            .iter()
+            .map(|binding| {
+                vk::DescriptorPoolSize::builder()
+                    .ty(binding.descriptor_type)
+                    .descriptor_count(1) // Assuming one descriptor per binding
+                    .build()
+            })
+            .collect::<Vec<_>>();
+
+        let pool_info = vk::DescriptorPoolCreateInfo::builder()
+            .pool_sizes(&pool_sizes)
+            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
+            .max_sets(MAX_DESCRIPTOR_SETS);
+
+        let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
+
+        self.set_name(
+            descriptor_set_layout,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_SET_LAYOUT,
+        );
+        self.set_name(
+            descriptor_pool,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_POOL,
+        );
+
+        // Step 4: Return the BindGroupLayout
+        return Ok(self
+            .bindless_bind_group_layouts
+            .insert(BindlessBindGroupLayout {
+                pool: descriptor_pool,
+                layout: descriptor_set_layout,
+                variables: info
+                    .shaders
+                    .iter()
+                    .flat_map(|shader| shader.variables.iter().cloned())
+                    .collect(),
+            })
+            .unwrap());
     }
 
     pub fn make_bind_group_layout(
