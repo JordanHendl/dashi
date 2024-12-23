@@ -354,6 +354,15 @@ pub struct BindGroupLayoutInfo<'a> {
     pub shaders: &'a [ShaderInfo<'a>],
 }
 
+#[derive(Hash, Clone, Debug)]
+pub struct BindlessBindGroupLayoutInfo<'a> {
+    pub debug_name: &'a str,
+    pub sampler_binding: u32,
+    pub const_buffer_binding: u32,
+    pub mutable_buffer_binding: u32,
+}
+
+
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
     StorageBuffer(Handle<Buffer>),
@@ -366,7 +375,37 @@ pub struct BindingInfo<'a> {
     pub binding: u32,
 }
 
+pub struct IndexedBindingInfo<'a> {
+    pub resources: &'a [ShaderResource<'a>],
+    pub binding: u32,
+}
+
+pub struct IndexedBindGroupInfo<'a> {
+    pub debug_name: &'a str,
+    pub layout: Handle<BindGroupLayout>,
+    pub bindings: &'a [IndexedBindingInfo<'a>],
+    pub set: u32,
+}
+
+impl<'a> Default for IndexedBindGroupInfo<'a> {
+    fn default() -> Self {
+        Self {
+            layout: Default::default(),
+            bindings: &[],
+            set: 0,
+            debug_name: "",
+        }
+    }
+}
+
 pub struct BindGroupInfo<'a> {
+    pub debug_name: &'a str,
+    pub layout: Handle<BindGroupLayout>,
+    pub bindings: &'a [BindingInfo<'a>],
+    pub set: u32,
+}
+
+pub struct BindlessBindGroupInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
     pub bindings: &'a [BindingInfo<'a>],
@@ -493,7 +532,7 @@ pub struct PipelineShaderInfo<'a> {
 
 #[derive(Debug)]
 pub struct ComputePipelineLayoutInfo<'a> {
-    pub bg_layout: Handle<BindGroupLayout>,
+    pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     pub shader: &'a PipelineShaderInfo<'a>,
 }
 
@@ -501,7 +540,7 @@ pub struct ComputePipelineLayoutInfo<'a> {
 pub struct GraphicsPipelineLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub vertex_info: VertexDescriptionInfo<'a>,
-    pub bg_layout: Handle<BindGroupLayout>,
+    pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
 }

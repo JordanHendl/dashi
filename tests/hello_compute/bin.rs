@@ -32,7 +32,7 @@ fn main() {
     // Make a pipeline layout. This describes a graphics pipeline's state.
     let pipeline_layout = ctx
         .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
-            bg_layout,
+            bg_layouts: [Some(bg_layout), None, None, None],
             shader: &PipelineShaderInfo {
                 stage: ShaderType::Compute,
                 spirv: inline_spirv::inline_spirv!(

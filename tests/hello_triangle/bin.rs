@@ -154,7 +154,7 @@ fn main() {
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layout,
+            bg_layouts: [Some(bg_layout), None, None, None],
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
@@ -273,7 +273,7 @@ void main() {
                 _ => {}
             }
         }
-        
+
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
@@ -331,7 +331,6 @@ void main() {
             signal_sems: &[sems[0], sems[1]],
             ..Default::default()
         });
-
 
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.

@@ -300,18 +300,17 @@ pub struct BindGroupLayout {
     pool: vk::DescriptorPool,
     layout: vk::DescriptorSetLayout,
     variables: Vec<BindGroupVariable>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct BindlessBindGroupLayout {
-    pool: vk::DescriptorPool,
-    layout: vk::DescriptorSetLayout,
-    variables: Vec<BindGroupVariable>,
+    bindless: bool,
 }
 
 #[allow(dead_code)]
 pub struct BindGroup {
+    set: vk::DescriptorSet,
+    set_id: u32,
+}
+
+#[allow(dead_code)]
+pub struct IndexedBindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
 }
@@ -435,7 +434,7 @@ pub struct Context {
     pub(super) image_views: Pool<ImageView>,
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
-    pub(super) bindless_bind_group_layouts: Pool<BindlessBindGroupLayout>,
+    pub(super) indexed_bind_groups: Pool<IndexedBindGroup>,
     pub(super) bind_groups: Pool<BindGroup>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
@@ -500,8 +499,12 @@ impl Context {
 
         let mut descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
+        let features = vk::PhysicalDeviceFeatures::builder()
+            .shader_clip_distance(true)
+            .build();
 
         let mut features2 = vk::PhysicalDeviceFeatures2::builder()
+            .features(features)
             .push_next(&mut descriptor_indexing)
             .build();
 
@@ -522,11 +525,6 @@ impl Context {
             instance.create_device(
                 pdevice,
                 &vk::DeviceCreateInfo::builder()
-                    .enabled_features(
-                        &vk::PhysicalDeviceFeatures::builder()
-                            .shader_clip_distance(true)
-                            .build(),
-                    )
                     .enabled_extension_names(
                         [
                             ash::extensions::khr::Swapchain::name().as_ptr(),
@@ -571,32 +569,32 @@ impl Context {
             instance,
             pdevice,
             device,
+            properties: device_prop,
             pool,
             allocator,
             gfx_queue,
-            properties: device_prop,
 
-            #[cfg(feature = "dashi-sdl2")]
-            sdl_context,
-            #[cfg(feature = "dashi-sdl2")]
-            sdl_video,
+            buffers: Default::default(),
+            render_passes: Default::default(),
 
             semaphores: Default::default(),
             fences: Default::default(),
-            cmds_to_release: Default::default(),
-            buffers: Default::default(),
-            render_passes: Default::default(),
             images: Default::default(),
             image_views: Default::default(),
+            samplers: Default::default(),
             bind_group_layouts: Default::default(),
-            bindless_bind_group_layouts: Default::default(),
+            indexed_bind_groups: Default::default(),
             bind_groups: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
-            samplers: Default::default(),
+            cmds_to_release: Default::default(),
+            #[cfg(feature = "dashi-sdl2")]
+            sdl_context,
 
+            #[cfg(feature = "dashi-sdl2")]
+            sdl_video,
             #[cfg(debug_assertions)]
             debug_utils,
         });
@@ -1206,7 +1204,7 @@ impl Context {
     pub fn make_bindless_bind_group_layout(
         &mut self,
         info: &BindGroupLayoutInfo,
-    ) -> Result<Handle<BindlessBindGroupLayout>, GPUError> {
+    ) -> Result<Handle<BindGroupLayout>, GPUError> {
         const MAX_DESCRIPTOR_SETS: u32 = 2048;
 
         let mut flags = Vec::new();
@@ -1291,10 +1289,10 @@ impl Context {
             vk::ObjectType::DESCRIPTOR_POOL,
         );
 
-        // Step 4: Return the BindGroupLayout
+        // Step 4: Return the BindlessBindGroupLayout
         return Ok(self
-            .bindless_bind_group_layouts
-            .insert(BindlessBindGroupLayout {
+            .bind_group_layouts
+            .insert(BindGroupLayout {
                 pool: descriptor_pool,
                 layout: descriptor_set_layout,
                 variables: info
@@ -1302,6 +1300,7 @@ impl Context {
                     .iter()
                     .flat_map(|shader| shader.variables.iter().cloned())
                     .collect(),
+                bindless: true,
             })
             .unwrap());
     }
@@ -1394,8 +1393,142 @@ impl Context {
                     .iter()
                     .flat_map(|shader| shader.variables.iter().cloned())
                     .collect(),
+                bindless: false,
             })
             .unwrap());
+    }
+
+    pub fn make_indexed_bind_group(
+        &mut self,
+        info: &IndexedBindGroupInfo,
+    ) -> Result<Handle<BindGroup>, GPUError> {
+        // Retrieve the BindGroupLayout from the handle
+        let layout = self.bind_group_layouts.get_ref(info.layout).unwrap();
+
+        // Step 1: Allocate Descriptor Set
+        let alloc_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(layout.pool)
+            .set_layouts(&[layout.layout])
+            .build();
+
+        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
+
+        let descriptor_set = descriptor_sets[0]; // We are allocating one descriptor set
+
+        self.set_name(
+            descriptor_set,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_SET,
+        );
+
+        // Step 2: Prepare the write operations for the descriptor set
+        let mut write_descriptor_sets = Vec::new();
+        let mut buffer_infos = Vec::new();
+        let mut image_infos = Vec::new();
+
+        for binding_info in info.bindings.iter() {
+            for res in binding_info.resources {
+                match &res {
+                    ShaderResource::Buffer(buffer_handle) => {
+                        let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(vk::WHOLE_SIZE)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .dst_array_element(buffer_handle.slot as u32)
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::SampledImage(image_handle, sampler) => {
+                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                        let sampler = self.samplers.get_ref(*sampler).unwrap();
+
+                        let image_info = vk::DescriptorImageInfo::builder()
+                            .image_view(image.view)
+                            .image_layout(vk::ImageLayout::GENERAL)
+                            .sampler(sampler.sampler)
+                            .build();
+
+                        image_infos.push(image_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER) // Assuming a sampled image
+                            .dst_array_element(image_handle.slot as u32)
+                            .image_info(&image_infos[image_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::Dynamic(alloc) => {
+                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(alloc.min_alloc_size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::StorageBuffer(buffer_handle) => {
+                        let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(vk::WHOLE_SIZE)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .dst_array_element(buffer_handle.slot as u32)
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            self.device
+                .update_descriptor_sets(&write_descriptor_sets, &[]);
+        }
+
+        // Step 4: Create the BindGroup and return a handle
+        let bind_group = BindGroup {
+            set: descriptor_set,
+            set_id: info.set,
+        };
+
+        Ok(self.bind_groups.insert(bind_group).unwrap())
     }
 
     pub fn make_bind_group(&mut self, info: &BindGroupInfo) -> Result<Handle<BindGroup>, GPUError> {
@@ -1525,16 +1658,17 @@ impl Context {
 
     fn create_pipeline_layout(
         &self,
-        bind_group_layout_handle: Handle<BindGroupLayout>,
+        bind_group_layout_handle: &[Option<Handle<BindGroupLayout>>],
     ) -> Result<vk::PipelineLayout, GPUError> {
-        let bg = self
-            .bind_group_layouts
-            .get_ref(bind_group_layout_handle)
-            .unwrap();
-        let bind_group_layouts = vec![bg.layout]; // Assuming value is the Vulkan handle
+        let mut bgs = Vec::new();
+        for bg in bind_group_layout_handle {
+            if let Some(b) = bg {
+                bgs.push(self.bind_group_layouts.get_ref(*b).unwrap().layout);
+            }
+        }
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&bind_group_layouts)
+            .set_layouts(&bgs)
             .push_constant_ranges(&[]) // Add push constant ranges if needed
             .build();
 
@@ -1672,7 +1806,7 @@ impl Context {
             .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
             .build();
 
-        let layout = self.create_pipeline_layout(info.bg_layout)?;
+        let layout = self.create_pipeline_layout(&info.bg_layouts)?;
 
         return Ok(self
             .compute_pipeline_layouts
@@ -1779,7 +1913,7 @@ impl Context {
         };
 
         // Step 9: Create Pipeline Layout (assume we have a layout creation function)
-        let layout = self.create_pipeline_layout(info.bg_layout)?;
+        let layout = self.create_pipeline_layout(&info.bg_layouts)?;
 
         self.set_name(layout, info.debug_name, vk::ObjectType::PIPELINE_LAYOUT);
 

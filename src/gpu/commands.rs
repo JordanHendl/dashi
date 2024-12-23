@@ -1,3 +1,5 @@
+use crate::IndexedBindGroup;
+
 use super::{
     convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
     DynamicBuffer, Filter, GPUError, GraphicsPipeline, ImageView, Rect2D, Viewport,
@@ -100,6 +102,12 @@ impl Default for DrawIndexedDynamic {
         }
     }
 }
+
+#[derive(Clone)]
+pub struct BindIndexedBG {
+    pub bind_groups: [Option<Handle<IndexedBindGroup>>; 4],
+}
+
 #[derive(Clone)]
 pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
@@ -123,6 +131,13 @@ impl Default for DrawIndexed {
             dynamic_buffers: [None, None, None, None],
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct BindPipeline {
+    pub gfx: Option<Handle<GraphicsPipeline>>,
+    pub compute: Option<Handle<ComputePipeline>>,
+    pub bg: Handle<BindGroup>,
 }
 
 #[derive(Clone, Copy)]
@@ -159,21 +174,27 @@ impl CommandList {
             }
 
             // TODO dont do this in a loop, collect and send all at once.
-            for opt in &cmd.bind_groups {
+            for (i, opt) in cmd.bind_groups.iter().enumerate() {
                 if let Some(bg) = opt {
                     let b = (*self.ctx).bind_groups.get_ref(*bg).unwrap();
                     let pl = (*self.ctx)
                         .compute_pipeline_layouts
                         .get_ref(compute.layout)
                         .unwrap();
+                    
+                    let dyn_buff = if let Some(d) = cmd.dynamic_buffers[i] {
+                       vec![d.alloc.offset]
+                    } else {
+                        vec![]
+                    };
 
                     (*self.ctx).device.cmd_bind_descriptor_sets(
                         self.cmd_buf,
                         vk::PipelineBindPoint::COMPUTE,
                         pl.layout,
-                        0,
+                        b.set_id,
                         &[b.set],
-                        &dynamic_offsets,
+                        &dyn_buff,
                     );
                 }
             }
@@ -213,6 +234,37 @@ impl CommandList {
 
     pub fn image_barrier(&mut self, barrier: &ImageBarrier) {
         self.append(Command::ImageBarrierCommand(barrier.clone()));
+    }
+
+    pub fn bind_pipeline(&mut self, info: &BindPipeline) {
+        unsafe {
+            let b = (*self.ctx).bind_groups.get_ref(info.bg).unwrap();
+
+            let mut layout = Default::default();
+            if let Some(gfx) = info.gfx {
+                let p = (*self.ctx).gfx_pipelines.get_ref(gfx).unwrap();
+                let pl = (*self.ctx).gfx_pipeline_layouts.get_ref(p.layout).unwrap();
+                layout = pl.layout;
+            } else if let Some(cpt) = info.compute {
+                let p = (*self.ctx).compute_pipelines.get_ref(cpt).unwrap();
+                let pl = (*self.ctx)
+                    .compute_pipeline_layouts
+                    .get_ref(p.layout)
+                    .unwrap();
+                layout = pl.layout;
+            } else {
+                return;
+            }
+
+            (*self.ctx).device.cmd_bind_descriptor_sets(
+                self.cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                layout,
+                b.set_id,
+                &[b.set],
+                &[],
+            );
+        }
     }
 
     fn begin_render_pass<'a>(
@@ -297,7 +349,7 @@ impl CommandList {
                 &vk::CommandBufferBeginInfo::builder().build(),
             )?;
         }
-        
+
         self.curr_rp = None;
         self.curr_pipeline = None;
         Ok(())
