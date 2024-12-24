@@ -1167,6 +1167,11 @@ impl Context {
             unsafe { self.device.destroy_image_view(img.view, None) };
         });
     }
+    
+    pub fn destroy_dynamic_allocator(& mut self, alloc: DynamicAllocator) {
+        self.unmap_buffer(alloc.pool).unwrap();
+        self.destroy_buffer(alloc.pool);
+    }
 
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
         let buf = self.buffers.get_mut_ref(handle).unwrap();
@@ -1397,7 +1402,7 @@ impl Context {
             })
             .unwrap());
     }
-
+    
     pub fn make_indexed_bind_group(
         &mut self,
         info: &IndexedBindGroupInfo,

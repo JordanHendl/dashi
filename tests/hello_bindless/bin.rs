@@ -171,12 +171,18 @@ void main() {
 
     ctx.wait(fence).unwrap();
 
-    //    let data = ctx.map_buffer::<f32>(output).unwrap();
-    //    for entry in data {
-    //        assert!(*entry == 5.0);
-    //    }
-    //
-//    ctx.unmap_buffer(output).unwrap();
+    for out in outputs {
+        match out {
+            ShaderResource::StorageBuffer(b) => {
+                let data = ctx.map_buffer::<f32>(b).unwrap();
+                assert!(data[0] == 5.0);
+                ctx.unmap_buffer(b).unwrap();
+            }
+            _ => {}
+        }
+    }
+    
+    ctx.destroy_dynamic_allocator(allocator);
     ctx.clean_up();
 }
 
