@@ -9,6 +9,13 @@ pub struct Handle<T> {
     phantom: PhantomData<T>,
 }
 
+
+impl<T> Handle<T> {
+    pub fn valid(&self) -> bool {
+        return self.slot != std::u16::MAX && self.generation != std::u16::MAX;
+    }
+}
+
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.slot == other.slot && self.generation == other.generation
@@ -37,8 +44,8 @@ impl<T> Copy for Handle<T> {}
 impl<T> Default for Handle<T> {
     fn default() -> Self {
         Self {
-            slot: Default::default(),
-            generation: Default::default(),
+            slot: std::u16::MAX,
+            generation: std::u16::MAX,
             phantom: Default::default(),
         }
     }
