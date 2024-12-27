@@ -170,6 +170,27 @@ pub struct FRect2D {
 #[derive(Hash, Default)]
 pub struct ContextInfo {}
 
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IndirectCommand {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: i32,
+    pub first_instance: u32,
+}
+
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IndexedIndirectCommand {
+    pub index_count: u32,
+    pub instance_count: u32,
+    pub first_index: u32,
+    pub vertex_offset: i32,
+    pub first_instance: u32,
+}
+
 pub struct ImageInfo<'a> {
     pub debug_name: &'a str,
     pub dim: [u32; 3],

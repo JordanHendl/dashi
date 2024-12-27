@@ -1,4 +1,4 @@
-use crate::IndexedBindGroup;
+use crate::{IndexedBindGroup, IndexedIndirectCommand, IndirectCommand};
 
 use super::{
     convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
@@ -133,6 +133,52 @@ impl Default for DrawIndexed {
     }
 }
 
+#[derive(Clone)]
+pub struct DrawIndexedIndirect {
+    pub draw_params: Handle<Buffer>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub offset: u32,
+    pub draw_count: u32,
+    pub stride: u32,
+}
+
+impl Default for DrawIndexedIndirect {
+    fn default() -> Self {
+        Self {
+            draw_params: Default::default(),
+            bind_groups: [None, None, None, None],
+            dynamic_buffers: [None, None, None, None],
+            offset: 0,
+            draw_count: 0,
+            stride: std::mem::size_of::<IndexedIndirectCommand>() as u32,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DrawIndirect {
+    pub draw_params: Handle<Buffer>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub offset: u32,
+    pub draw_count: u32,
+    pub stride: u32,
+}
+
+impl Default for DrawIndirect {
+    fn default() -> Self {
+        Self {
+            draw_params: Default::default(),
+            bind_groups: [None, None, None, None],
+            dynamic_buffers: [None, None, None, None],
+            offset: 0,
+            draw_count: 0,
+            stride: std::mem::size_of::<IndirectCommand>() as u32,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct BindPipeline {
     pub gfx: Option<Handle<GraphicsPipeline>>,
@@ -181,9 +227,9 @@ impl CommandList {
                         .compute_pipeline_layouts
                         .get_ref(compute.layout)
                         .unwrap();
-                    
+
                     let dyn_buff = if let Some(d) = cmd.dynamic_buffers[i] {
-                       vec![d.alloc.offset]
+                        vec![d.alloc.offset]
                     } else {
                         vec![]
                     };
@@ -222,6 +268,40 @@ impl CommandList {
     }
     pub fn draw_indexed(&mut self, cmd: &DrawIndexed) {
         self.append(Command::DrawIndexedCommand(cmd.clone()));
+    }
+
+    pub fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) {
+        unsafe {
+            static DEVICE_SIZES: vk::DeviceSize = vk::DeviceSize::MIN;
+            let buff = (*self.ctx).buffers.get_ref(cmd.draw_params).unwrap();
+            (*self.ctx).device.cmd_draw_indexed_indirect(
+                self.cmd_buf,
+                buff.buf,
+                cmd.offset as u64,
+                cmd.draw_count,
+                cmd.stride,
+            );
+
+            self.last_op_stage = vk::PipelineStageFlags::VERTEX_SHADER;
+            self.last_op_access = vk::AccessFlags::VERTEX_ATTRIBUTE_READ;
+        }
+    }
+
+    pub fn draw_indirect(&mut self, cmd: &DrawIndirect) {
+        unsafe {
+            static DEVICE_SIZES: vk::DeviceSize = vk::DeviceSize::MIN;
+            let buff = (*self.ctx).buffers.get_ref(cmd.draw_params).unwrap();
+            (*self.ctx).device.cmd_draw_indirect(
+                self.cmd_buf,
+                buff.buf,
+                cmd.offset as u64,
+                cmd.draw_count,
+                cmd.stride,
+            );
+
+            self.last_op_stage = vk::PipelineStageFlags::VERTEX_SHADER;
+            self.last_op_access = vk::AccessFlags::VERTEX_ATTRIBUTE_READ;
+        }
     }
 
     pub fn blit(&mut self, cmd: ImageBlit) {
