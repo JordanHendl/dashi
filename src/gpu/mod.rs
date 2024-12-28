@@ -1167,8 +1167,8 @@ impl Context {
             unsafe { self.device.destroy_image_view(img.view, None) };
         });
     }
-    
-    pub fn destroy_dynamic_allocator(& mut self, alloc: DynamicAllocator) {
+
+    pub fn destroy_dynamic_allocator(&mut self, alloc: DynamicAllocator) {
         self.unmap_buffer(alloc.pool).unwrap();
         self.destroy_buffer(alloc.pool);
     }
@@ -1402,7 +1402,7 @@ impl Context {
             })
             .unwrap());
     }
-    
+
     pub fn make_indexed_bind_group(
         &mut self,
         info: &IndexedBindGroupInfo,
@@ -1701,87 +1701,94 @@ impl Context {
     ) -> Result<Handle<RenderPass>, GPUError> {
         let mut attachments = Vec::new();
         let mut color_attachment_refs = Vec::new();
-        let mut depth_stencil_attachment_ref = None;
         let mut clear_values = Vec::new();
-        for (index, color_attachment) in info.color_attachments.iter().enumerate() {
-            let view = self.image_views.get_ref(color_attachment.view).unwrap();
-            let img = self.images.get_ref(view.img).unwrap();
-            let attachment_desc = vk::AttachmentDescription {
-                format: lib_to_vk_image_format(&img.format),
-                samples: convert_sample_count(color_attachment.samples),
-                load_op: convert_load_op(color_attachment.load_op),
-                store_op: convert_store_op(color_attachment.store_op),
-                stencil_load_op: convert_load_op(color_attachment.stencil_load_op),
-                stencil_store_op: convert_store_op(color_attachment.stencil_store_op),
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                ..Default::default()
-            };
-            attachments.push(attachment_desc);
+        let mut subpasses = Vec::new();
 
-            let c = color_attachment.clear_color;
-            clear_values.push(vk::ClearValue {
-                color: vk::ClearColorValue { float32: c },
+        for subpass in info.subpasses {
+            let mut depth_stencil_attachment_ref = None;
+            let attachment_offset = attachments.len();
+            let color_offset = color_attachment_refs.len();
+            let clear_value_offset = clear_values.len();
+
+            for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
+                let view = self.image_views.get_ref(color_attachment.view).unwrap();
+                let img = self.images.get_ref(view.img).unwrap();
+                let attachment_desc = vk::AttachmentDescription {
+                    format: lib_to_vk_image_format(&img.format),
+                    samples: convert_sample_count(color_attachment.samples),
+                    load_op: convert_load_op(color_attachment.load_op),
+                    store_op: convert_store_op(color_attachment.store_op),
+                    stencil_load_op: convert_load_op(color_attachment.stencil_load_op),
+                    stencil_store_op: convert_store_op(color_attachment.stencil_store_op),
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    ..Default::default()
+                };
+                attachments.push(attachment_desc);
+
+                let c = color_attachment.clear_color;
+                clear_values.push(vk::ClearValue {
+                    color: vk::ClearColorValue { float32: c },
+                });
+
+                let attachment_ref = vk::AttachmentReference {
+                    attachment: index as u32,
+                    layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                };
+                color_attachment_refs.push(attachment_ref);
+            }
+
+            // Process depth-stencil attachment
+            if let Some(depth_stencil_attachment) = subpass.depth_stencil_attachment {
+                let view = self
+                    .image_views
+                    .get_ref(depth_stencil_attachment.view)
+                    .unwrap();
+                let img = self.images.get_ref(view.img).unwrap();
+                let depth_attachment_desc = vk::AttachmentDescription {
+                    format: lib_to_vk_image_format(&img.format),
+                    samples: convert_sample_count(depth_stencil_attachment.samples),
+                    load_op: convert_load_op(depth_stencil_attachment.load_op),
+                    store_op: convert_store_op(depth_stencil_attachment.store_op),
+                    stencil_load_op: convert_load_op(depth_stencil_attachment.stencil_load_op),
+                    stencil_store_op: convert_store_op(depth_stencil_attachment.stencil_store_op),
+                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    ..Default::default()
+                };
+                attachments.push(depth_attachment_desc);
+                let c = depth_stencil_attachment.clear_color;
+                clear_values.push(vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: c[0],
+                        stencil: c[1] as u32,
+                    },
+                });
+                depth_stencil_attachment_ref = Some(vk::AttachmentReference {
+                    attachment: (attachments.len() - 1) as u32,
+                    layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                });
+            }
+
+            // Create subpass description
+            subpasses.push(match depth_stencil_attachment_ref.as_ref() {
+                Some(d) => vk::SubpassDescription::builder()
+                    .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                    .color_attachments(&color_attachment_refs[color_offset..])
+                    .depth_stencil_attachment(d)
+                    .build(),
+                None => vk::SubpassDescription::builder()
+                    .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                    .color_attachments(&color_attachment_refs[color_offset..])
+                    .build(),
             });
-
-            let attachment_ref = vk::AttachmentReference {
-                attachment: index as u32,
-                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            };
-            color_attachment_refs.push(attachment_ref);
         }
-
-        // Process depth-stencil attachment
-        if let Some(depth_stencil_attachment) = info.depth_stencil_attachment {
-            let view = self
-                .image_views
-                .get_ref(depth_stencil_attachment.view)
-                .unwrap();
-            let img = self.images.get_ref(view.img).unwrap();
-            let depth_attachment_desc = vk::AttachmentDescription {
-                format: lib_to_vk_image_format(&img.format),
-                samples: convert_sample_count(depth_stencil_attachment.samples),
-                load_op: convert_load_op(depth_stencil_attachment.load_op),
-                store_op: convert_store_op(depth_stencil_attachment.store_op),
-                stencil_load_op: convert_load_op(depth_stencil_attachment.stencil_load_op),
-                stencil_store_op: convert_store_op(depth_stencil_attachment.stencil_store_op),
-                initial_layout: vk::ImageLayout::UNDEFINED,
-                final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                ..Default::default()
-            };
-            attachments.push(depth_attachment_desc);
-            let c = depth_stencil_attachment.clear_color;
-            clear_values.push(vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: c[0],
-                    stencil: c[1] as u32,
-                },
-            });
-            depth_stencil_attachment_ref = Some(vk::AttachmentReference {
-                attachment: (attachments.len() - 1) as u32,
-                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            });
-        }
-
-        // Create subpass description
-        let subpass_desc = match depth_stencil_attachment_ref.as_ref() {
-            Some(d) => vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&color_attachment_refs)
-                .depth_stencil_attachment(d)
-                .build(),
-            None => vk::SubpassDescription::builder()
-                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                .color_attachments(&color_attachment_refs)
-                .build(),
-        };
-
         // Create the render pass info
         let render_pass_info = vk::RenderPassCreateInfo {
             attachment_count: attachments.len() as u32,
             p_attachments: attachments.as_ptr(),
-            subpass_count: 1,
-            p_subpasses: &subpass_desc,
+            subpass_count: subpasses.len() as u32,
+            p_subpasses: subpasses.as_ptr(),
             ..Default::default()
         };
 
@@ -2094,58 +2101,63 @@ impl Context {
         let mut height = std::u32::MAX;
         // Loop through each subpass and create a framebuffer
         let mut attachments = Vec::new();
-        let mut created_images = Vec::new();
 
-        // Collect the image views for color attachments
-        for color_attachment in render_pass_begin.color_attachments.iter() {
-            let created_image_handle = color_attachment.view;
-            self.oneshot_transition_image(
-                color_attachment.view,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let view = self.image_views.get_ref(created_image_handle).unwrap();
-            let image = self.images.get_ref(view.img).unwrap();
-            let color_view = view.view;
+        for subpass in render_pass_begin.subpasses {
+            let mut created_images = Vec::new();
+            // Collect the image views for color attachments
+            for color_attachment in subpass.color_attachments.iter() {
+                let created_image_handle = color_attachment.view;
+                self.oneshot_transition_image(
+                    color_attachment.view,
+                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                );
+                let view = self.image_views.get_ref(created_image_handle).unwrap();
+                let image = self.images.get_ref(view.img).unwrap();
+                let color_view = view.view;
 
-            width = std::cmp::min(image.dim[0], width);
-            height = std::cmp::min(image.dim[1], height);
-            attachments.push(color_view);
-            created_images.push(view.img);
+                width = std::cmp::min(image.dim[0], width);
+                height = std::cmp::min(image.dim[1], height);
+                attachments.push(color_view);
+                created_images.push(view.img);
+            }
+
+            // Collect the image view for depth/stencil attachment if present
+            if let Some(depth_stencil_attachment) = subpass.depth_stencil_attachment {
+                let view = depth_stencil_attachment.view;
+                self.oneshot_transition_image(
+                    view,
+                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                );
+                let depth_view_info = self.image_views.get_ref(view).unwrap();
+                let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
+                let depth_view = depth_view_info.view;
+                width = std::cmp::min(depth_img.dim[0], width);
+                height = std::cmp::min(depth_img.dim[1], height);
+
+                attachments.push(depth_view);
+                created_images.push(depth_view_info.img);
+            }
+
+            // Create framebuffer
+            let framebuffer_info = vk::FramebufferCreateInfo {
+                render_pass,
+                attachment_count: attachments.len() as u32,
+                p_attachments: attachments.as_ptr(),
+                width,
+                height,
+                layers: 1,
+                ..Default::default()
+            };
+
+            let framebuffer = unsafe {
+                self.device
+                    .create_framebuffer(&framebuffer_info, None)
+                    .expect("Failed to create framebuffer")
+            };
+
+            // Store the framebuffer and the associated images
+            framebuffers_with_images.push((framebuffer, created_images));
         }
-
-        // Collect the image view for depth/stencil attachment if present
-        if let Some(depth_stencil_attachment) = render_pass_begin.depth_stencil_attachment {
-            let view = depth_stencil_attachment.view;
-            self.oneshot_transition_image(view, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-            let depth_view_info = self.image_views.get_ref(view).unwrap();
-            let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
-            let depth_view = depth_view_info.view;
-            width = std::cmp::min(depth_img.dim[0], width);
-            height = std::cmp::min(depth_img.dim[1], height);
-
-            attachments.push(depth_view);
-            created_images.push(depth_view_info.img);
-        }
-
-        // Create framebuffer
-        let framebuffer_info = vk::FramebufferCreateInfo {
-            render_pass,
-            attachment_count: attachments.len() as u32,
-            p_attachments: attachments.as_ptr(),
-            width,
-            height,
-            layers: 1,
-            ..Default::default()
-        };
-
-        let framebuffer = unsafe {
-            self.device
-                .create_framebuffer(&framebuffer_info, None)
-                .expect("Failed to create framebuffer")
-        };
-
-        // Store the framebuffer and the associated images
-        framebuffers_with_images.push((framebuffer, created_images));
 
         Ok(framebuffers_with_images)
     }

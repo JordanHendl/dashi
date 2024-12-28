@@ -170,7 +170,6 @@ pub struct FRect2D {
 #[derive(Hash, Default)]
 pub struct ContextInfo {}
 
-
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IndirectCommand {
@@ -179,7 +178,6 @@ pub struct IndirectCommand {
     pub first_vertex: i32,
     pub first_instance: u32,
 }
-
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -383,7 +381,6 @@ pub struct BindlessBindGroupLayoutInfo<'a> {
     pub mutable_buffer_binding: u32,
 }
 
-
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
     StorageBuffer(Handle<Buffer>),
@@ -530,11 +527,22 @@ pub enum VertexRate {
     Vertex,
 }
 
+pub struct SubpassDependency {
+    subpass_id: u32,
+    attachment_id: u32,
+    depth_id: u32,
+}
+
+pub struct Subpass<'a> {
+    pub color_attachments: &'a [Attachment],
+    pub depth_stencil_attachment: Option<&'a Attachment>,
+    pub subpass_dependencies: &'a [SubpassDependency],
+}
+
 pub struct RenderPassInfo<'a> {
     pub debug_name: &'a str,
     pub viewport: Viewport,
-    pub color_attachments: &'a [Attachment],
-    pub depth_stencil_attachment: Option<&'a Attachment>,
+    pub subpasses: &'a [Subpass<'a>],
 }
 
 #[derive(Hash, Debug)]

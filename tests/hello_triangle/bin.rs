@@ -211,12 +211,15 @@ void main() {
                 },
                 ..Default::default()
             },
-            color_attachments: &[Attachment {
-                view: fb_view,
-                clear_color: [0.0, 0.0, 0.0, 1.0],
-                ..Default::default()
+            subpasses: &[Subpass {
+                color_attachments: &[Attachment {
+                    view: fb_view,
+                    clear_color: [0.0, 0.0, 0.0, 1.0],
+                    ..Default::default()
+                }],
+                depth_stencil_attachment: None,
+                subpass_dependencies: &[],
             }],
-            depth_stencil_attachment: None,
             debug_name: "renderpass",
         })
         .unwrap();
