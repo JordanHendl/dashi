@@ -1699,11 +1699,11 @@ impl Context {
         &mut self,
         info: &RenderPassInfo,
     ) -> Result<Handle<RenderPass>, GPUError> {
-        let mut attachments = Vec::new();
-        let mut color_attachment_refs = Vec::new();
-        let mut clear_values = Vec::new();
-        let mut subpasses = Vec::new();
-
+        let mut attachments = Vec::with_capacity(256);
+        let mut color_attachment_refs = Vec::with_capacity(256);
+        let mut clear_values = Vec::with_capacity(256);
+        let mut subpasses = Vec::with_capacity(256);
+        let mut deps = Vec::with_capacity(256);
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
             let attachment_offset = attachments.len();
@@ -1782,6 +1782,18 @@ impl Context {
                     .color_attachments(&color_attachment_refs[color_offset..])
                     .build(),
             });
+
+            for dep in subpass.subpass_dependencies {
+                deps.push(vk::SubpassDependency {
+                    src_subpass: dep.subpass_id,
+                    dst_subpass: subpasses.len() as u32,
+                    src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: vk::PipelineStageFlags::VERTEX_SHADER,
+                    src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: vk::AccessFlags::SHADER_READ,
+                    dependency_flags: vk::DependencyFlags::empty(),
+                });
+            }
         }
         // Create the render pass info
         let render_pass_info = vk::RenderPassCreateInfo {

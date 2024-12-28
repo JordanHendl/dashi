@@ -528,9 +528,9 @@ pub enum VertexRate {
 }
 
 pub struct SubpassDependency {
-    subpass_id: u32,
-    attachment_id: u32,
-    depth_id: u32,
+    pub subpass_id: u32,
+    pub attachment_id: u32,
+    pub depth_id: u32,
 }
 
 pub struct Subpass<'a> {
