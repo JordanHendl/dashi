@@ -87,34 +87,41 @@ void main() {
 
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    const BUFF_SIZE: u32 = 2048 * std::mem::size_of::<f32>() as u32;
+    const BUFF_SIZE: u32 = std::mem::size_of::<f32>() as u32;
     let initial_data = vec![0; BUFF_SIZE as usize];
 
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
+    
+    const NUM_BUFFS: u32 = 256;
+    for i in 0..NUM_BUFFS {
+        inputs.push(IndexedResource {
+            resource: ShaderResource::StorageBuffer(
+                ctx.make_buffer(&BufferInfo {
+                    debug_name: "input_test",
+                    byte_size: BUFF_SIZE,
+                    visibility: MemoryVisibility::Gpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: Some(&initial_data),
+                })
+                .unwrap(),
+            ),
+            slot: i,
+        });
 
-    for i in 0..256 {
-        inputs.push(ShaderResource::StorageBuffer(
-            ctx.make_buffer(&BufferInfo {
-                debug_name: "input_test",
-                byte_size: BUFF_SIZE,
-                visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::STORAGE,
-                initial_data: Some(&initial_data),
-            })
-            .unwrap(),
-        ));
-
-        outputs.push(ShaderResource::StorageBuffer(
-            ctx.make_buffer(&BufferInfo {
-                debug_name: "output_test",
-                byte_size: BUFF_SIZE,
-                visibility: MemoryVisibility::CpuAndGpu,
-                usage: BufferUsage::STORAGE,
-                initial_data: Some(&initial_data),
-            })
-            .unwrap(),
-        ));
+        outputs.push(IndexedResource {
+            resource: ShaderResource::StorageBuffer(
+                ctx.make_buffer(&BufferInfo {
+                    debug_name: "input_test",
+                    byte_size: BUFF_SIZE,
+                    visibility: MemoryVisibility::CpuAndGpu,
+                    usage: BufferUsage::STORAGE,
+                    initial_data: Some(&initial_data),
+                })
+                .unwrap(),
+            ),
+            slot: i,
+        });
     }
 
     // Make bind group what we want to bind to what was described in the Bind Group Layout.
@@ -160,7 +167,7 @@ void main() {
     buf.slice::<f32>()[0] = 5.0;
     list.dispatch(&Dispatch {
         compute: pipeline,
-        workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
+        workgroup_size: [NUM_BUFFS as u32, 1, 1],
         bind_groups: [Some(bind_group), Some(dynamic_bind_group), None, None],
         dynamic_buffers: [None, Some(buf), None, None],
         ..Default::default()
@@ -172,7 +179,7 @@ void main() {
     ctx.wait(fence).unwrap();
 
     for out in outputs {
-        match out {
+        match out.resource {
             ShaderResource::StorageBuffer(b) => {
                 let data = ctx.map_buffer::<f32>(b).unwrap();
                 assert!(data[0] == 5.0);
@@ -181,7 +188,7 @@ void main() {
             _ => {}
         }
     }
-    
+
     ctx.destroy_dynamic_allocator(allocator);
     ctx.clean_up();
 }

@@ -17,6 +17,17 @@ pub struct BufferCopy {
     pub size: usize,
 }
 
+impl Default for BufferCopy {
+    fn default() -> Self {
+        Self {
+            src: Default::default(),
+            dst: Default::default(),
+            src_offset: 0,
+            dst_offset: 0,
+            size: 0,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct BufferImageCopy {
     pub src: Handle<Buffer>,

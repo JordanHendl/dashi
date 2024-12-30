@@ -2,7 +2,7 @@ use super::{
     BindGroupLayout, Buffer, ComputePipelineLayout, DynamicAllocator, GraphicsPipelineLayout,
     Image, ImageView, RenderPass, Sampler,
 };
-use crate::{utils::Handle, Semaphore};
+use crate::{utils::Handle, BindGroup, Semaphore};
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "dashi-serde")]
@@ -377,8 +377,26 @@ pub struct BindGroupLayoutInfo<'a> {
 pub struct BindlessBindGroupLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub sampler_binding: u32,
+    pub sampler_length: u32,
     pub const_buffer_binding: u32,
+    pub const_buffer_length: u32,
     pub mutable_buffer_binding: u32,
+    pub mutable_buffer_length: u32,
+}
+
+impl<'a> Default for BindlessBindGroupLayoutInfo<'a> {
+    fn default() -> Self {
+        const DEFAULT_BINDLESS_LEN: u32 = 2048;
+        Self {
+            debug_name: "Default",
+            sampler_binding: 0,
+            sampler_length: DEFAULT_BINDLESS_LEN,
+            const_buffer_binding: 1,
+            const_buffer_length: DEFAULT_BINDLESS_LEN,
+            mutable_buffer_binding: 2,
+            mutable_buffer_length: DEFAULT_BINDLESS_LEN,
+        }
+    }
 }
 
 pub enum ShaderResource<'a> {
@@ -393,9 +411,27 @@ pub struct BindingInfo<'a> {
     pub binding: u32,
 }
 
+pub struct IndexedResource<'a> {
+    pub resource: ShaderResource<'a>,
+    pub slot: u32,
+}
 pub struct IndexedBindingInfo<'a> {
-    pub resources: &'a [ShaderResource<'a>],
+    pub resources: &'a [IndexedResource<'a>],
     pub binding: u32,
+}
+
+impl<'a> Default for IndexedBindingInfo<'a> {
+    fn default() -> Self {
+        Self {
+            resources: Default::default(),
+            binding: Default::default(),
+        }
+    }
+}
+
+pub struct BindGroupUpdateInfo<'a> {
+    pub bg: Handle<BindGroup>,
+    pub bindings: &'a [IndexedBindingInfo<'a>],
 }
 
 pub struct IndexedBindGroupInfo<'a> {
