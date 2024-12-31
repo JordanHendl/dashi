@@ -1235,6 +1235,7 @@ impl Context {
                     ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
                     ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
                     ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
+                    ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
                 flags.push(
@@ -1338,6 +1339,7 @@ impl Context {
                     ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
                     ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
                     ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
+                    ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
@@ -1863,6 +1865,7 @@ impl Context {
                 let stage_flags = match shader_info.stage {
                     ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
                     ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
+                    ShaderType::All => vk::ShaderStageFlags::ALL,
                     _ => todo!(),
                 };
 

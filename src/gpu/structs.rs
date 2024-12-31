@@ -352,6 +352,7 @@ pub enum ShaderType {
     Vertex,
     Fragment,
     Compute,
+    All,
 }
 
 #[derive(Hash, Clone, Debug)]
