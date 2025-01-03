@@ -5,7 +5,7 @@ use crate::utils::{
 };
 use ash::*;
 pub use error::*;
-use std::ffi::CString;
+use std::{collections::HashMap, ffi::CString};
 use vk_mem::Alloc;
 
 pub mod structs;
@@ -22,6 +22,73 @@ impl From<Filter> for vk::Filter {
             Filter::Nearest => vk::Filter::NEAREST,
             Filter::Linear => vk::Filter::LINEAR,
         }
+    }
+}
+
+impl From<BlendFactor> for vk::BlendFactor {
+    fn from(op: BlendFactor) -> Self {
+        match op {
+            BlendFactor::One => vk::BlendFactor::ONE,
+            BlendFactor::Zero => vk::BlendFactor::ZERO,
+            BlendFactor::SrcColor => vk::BlendFactor::SRC_COLOR,
+            BlendFactor::InvSrcColor => vk::BlendFactor::ONE_MINUS_SRC_COLOR,
+            BlendFactor::SrcAlpha => vk::BlendFactor::SRC_ALPHA,
+            BlendFactor::InvSrcAlpha => vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
+            BlendFactor::DstAlpha => vk::BlendFactor::DST_ALPHA,
+            BlendFactor::InvDstAlpha => vk::BlendFactor::ONE_MINUS_DST_ALPHA,
+            BlendFactor::DstColor => vk::BlendFactor::DST_COLOR,
+            BlendFactor::InvDstColor => vk::BlendFactor::ONE_MINUS_DST_COLOR,
+            BlendFactor::BlendFactor => vk::BlendFactor::CONSTANT_ALPHA,
+        }
+    }
+}
+
+impl From<BlendOp> for vk::BlendOp {
+    fn from(op: BlendOp) -> Self {
+        match op {
+            BlendOp::Add => vk::BlendOp::ADD,
+            BlendOp::Subtract => vk::BlendOp::SUBTRACT,
+            BlendOp::InvSubtract => vk::BlendOp::REVERSE_SUBTRACT,
+            BlendOp::Min => vk::BlendOp::MIN,
+            BlendOp::Max => vk::BlendOp::MAX,
+        }
+    }
+}
+
+impl From<WriteMask> for vk::ColorComponentFlags {
+    fn from(op: WriteMask) -> Self {
+        let mut flags = vk::ColorComponentFlags::empty();
+
+        if op.r {
+            flags |= vk::ColorComponentFlags::R;
+        }
+        if op.g {
+            flags |= vk::ColorComponentFlags::G;
+        }
+        if op.b {
+            flags |= vk::ColorComponentFlags::B;
+        }
+        if op.a {
+            flags |= vk::ColorComponentFlags::A;
+        }
+
+        flags
+    }
+}
+
+impl From<ColorBlendState> for vk::PipelineColorBlendAttachmentState {
+    fn from(state: ColorBlendState) -> Self {
+        // Step 8: Color Blend State
+        vk::PipelineColorBlendAttachmentState::builder()
+            .color_write_mask(state.write_mask.into())
+            .src_color_blend_factor(state.src_blend.into())
+            .dst_color_blend_factor(state.dst_blend.into())
+            .src_alpha_blend_factor(state.src_alpha_blend.into())
+            .dst_alpha_blend_factor(state.dst_alpha_blend.into())
+            .color_blend_op(state.blend_op.into())
+            .alpha_blend_op(state.alpha_blend_op.into())
+            .blend_enable(state.enable)
+            .build()
     }
 }
 
@@ -287,11 +354,18 @@ pub struct ImageView {
 }
 
 #[derive(Clone, Default)]
+pub(super) struct SubpassContainer {
+    pub(super) colors: Vec<Attachment>,
+    pub(super) depth: Option<Attachment>,
+    pub(super) fb: vk::Framebuffer,
+    pub(super) clear_values: Vec<vk::ClearValue>,
+}
+
+#[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) viewport: Viewport,
-    pub(super) fb: Vec<(vk::Framebuffer, Vec<Handle<Image>>)>,
-    pub(super) clear_values: Vec<vk::ClearValue>,
+    pub(super) subpasses: HashMap<u64, SubpassContainer>,
 }
 
 #[allow(dead_code)]
@@ -367,6 +441,7 @@ pub struct GraphicsPipelineLayout {
     multisample: vk::PipelineMultisampleStateCreateInfo,
     rasterizer: vk::PipelineRasterizationStateCreateInfo,
     vertex_input: vk::VertexInputBindingDescription,
+    color_blend_states: Vec<vk::PipelineColorBlendAttachmentState>,
     vertex_attribs: Vec<vk::VertexInputAttributeDescription>,
     layout: vk::PipelineLayout,
 }
@@ -453,7 +528,7 @@ pub struct Context {
 impl Context {
     pub fn new(_info: &ContextInfo) -> Result<Self, GPUError> {
         let app_info = vk::ApplicationInfo {
-            api_version: vk::make_api_version(0, 1, 2, 0),
+            api_version: vk::make_api_version(0, 1, 3, 0),
             ..Default::default()
         };
 
@@ -1714,20 +1789,16 @@ impl Context {
     ) -> Result<Handle<RenderPass>, GPUError> {
         let mut attachments = Vec::with_capacity(256);
         let mut color_attachment_refs = Vec::with_capacity(256);
-        let mut clear_values = Vec::with_capacity(256);
         let mut subpasses = Vec::with_capacity(256);
         let mut deps = Vec::with_capacity(256);
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
             let attachment_offset = attachments.len();
             let color_offset = color_attachment_refs.len();
-            let clear_value_offset = clear_values.len();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
-                let view = self.image_views.get_ref(color_attachment.view).unwrap();
-                let img = self.images.get_ref(view.img).unwrap();
                 let attachment_desc = vk::AttachmentDescription {
-                    format: lib_to_vk_image_format(&img.format),
+                    format: lib_to_vk_image_format(&color_attachment.format),
                     samples: convert_sample_count(color_attachment.samples),
                     load_op: convert_load_op(color_attachment.load_op),
                     store_op: convert_store_op(color_attachment.store_op),
@@ -1739,11 +1810,6 @@ impl Context {
                 };
                 attachments.push(attachment_desc);
 
-                let c = color_attachment.clear_color;
-                clear_values.push(vk::ClearValue {
-                    color: vk::ClearColorValue { float32: c },
-                });
-
                 let attachment_ref = vk::AttachmentReference {
                     attachment: index as u32,
                     layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -1753,13 +1819,8 @@ impl Context {
 
             // Process depth-stencil attachment
             if let Some(depth_stencil_attachment) = subpass.depth_stencil_attachment {
-                let view = self
-                    .image_views
-                    .get_ref(depth_stencil_attachment.view)
-                    .unwrap();
-                let img = self.images.get_ref(view.img).unwrap();
                 let depth_attachment_desc = vk::AttachmentDescription {
-                    format: lib_to_vk_image_format(&img.format),
+                    format: lib_to_vk_image_format(&depth_stencil_attachment.format),
                     samples: convert_sample_count(depth_stencil_attachment.samples),
                     load_op: convert_load_op(depth_stencil_attachment.load_op),
                     store_op: convert_store_op(depth_stencil_attachment.store_op),
@@ -1770,13 +1831,6 @@ impl Context {
                     ..Default::default()
                 };
                 attachments.push(depth_attachment_desc);
-                let c = depth_stencil_attachment.clear_color;
-                clear_values.push(vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: c[0],
-                        stencil: c[1] as u32,
-                    },
-                });
                 depth_stencil_attachment_ref = Some(vk::AttachmentReference {
                     attachment: (attachments.len() - 1) as u32,
                     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -1822,14 +1876,13 @@ impl Context {
 
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
-        let fbs = self.create_framebuffers(render_pass, info)?;
+        //        let fbs = self.create_framebuffers(render_pass, info)?;
         return Ok(self
             .render_passes
             .insert(RenderPass {
                 raw: render_pass,
-                fb: fbs,
-                clear_values,
                 viewport: info.viewport,
+                subpasses: Default::default(),
             })
             .unwrap());
     }
@@ -1936,18 +1989,17 @@ impl Context {
             .build();
 
         // Step 7: Depth and Stencil State (depth testing)
-        let depth_stencil_state = if info.details.depth_test {
-            Some(
+        let depth_stencil_state = match info.details.depth_test {
+            Some(depth) => Some(
                 vk::PipelineDepthStencilStateCreateInfo::builder()
-                    .depth_test_enable(true)
-                    .depth_write_enable(true)
+                    .depth_test_enable(depth.should_test)
+                    .depth_write_enable(depth.should_write)
                     .min_depth_bounds(0.0)
                     .max_depth_bounds(1.0)
                     .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
                     .build(),
-            )
-        } else {
-            None
+            ),
+            None => None,
         };
 
         // Step 9: Create Pipeline Layout (assume we have a layout creation function)
@@ -1955,17 +2007,25 @@ impl Context {
 
         self.set_name(layout, info.debug_name, vk::ObjectType::PIPELINE_LAYOUT);
 
+        let color_blends: Vec<vk::PipelineColorBlendAttachmentState> = info
+            .details
+            .color_blend_states
+            .iter()
+            .map(|c| c.clone().into())
+            .collect();
+
         return Ok(self
             .gfx_pipeline_layouts
             .insert(GraphicsPipelineLayout {
                 layout,
-                shader_stages: shader_stages,
+                shader_stages,
                 vertex_input: vertex_binding_description,
                 vertex_attribs: vertex_attribute_descriptions,
-                rasterizer: rasterizer,
+                rasterizer,
                 multisample: multisampling,
                 depth_stencil: depth_stencil_state,
-                input_assembly: input_assembly,
+                input_assembly,
+                color_blend_states: color_blends,
             })
             .unwrap());
     }
@@ -2011,7 +2071,9 @@ impl Context {
         info: &GraphicsPipelineInfo,
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
-        let rp = self.render_passes.get_ref(info.render_pass).unwrap().raw;
+        let rp_ref = self.render_passes.get_ref(info.render_pass).unwrap();
+        let rp = rp_ref.raw;
+
         let rp_viewport = self
             .render_passes
             .get_ref(info.render_pass)
@@ -2049,21 +2111,9 @@ impl Context {
             .viewports(&[viewport])
             .scissors(&[scissor])
             .build();
-
-        // Step 8: Color Blend State
-        let color_blend_attachment = vk::PipelineColorBlendAttachmentState::builder()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .color_blend_op(vk::BlendOp::ADD)
-            .alpha_blend_op(vk::BlendOp::ADD)
-            .blend_enable(true)
-            .build();
-
+        
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-            .attachments(&[color_blend_attachment])
+            .attachments(&layout.color_blend_states)
             .build();
 
         // Step 10: Create Graphics Pipeline
@@ -2117,75 +2167,64 @@ impl Context {
             .unwrap());
     }
 
-    pub(super) fn create_framebuffers(
+    pub(super) fn make_framebuffer(
         &mut self,
-        render_pass: vk::RenderPass,
-        render_pass_begin: &RenderPassInfo,
-    ) -> Result<Vec<(vk::Framebuffer, Vec<Handle<Image>>)>, GPUError> {
-        let mut framebuffers_with_images = Vec::new();
+        info: &RenderPassBegin,
+    ) -> Result<vk::Framebuffer, GPUError> {
+        //    ) -> Result<Vec<(vk::Framebuffer, Vec<Handle<Image>>)>, GPUError> {
         let mut width = std::u32::MAX;
         let mut height = std::u32::MAX;
         // Loop through each subpass and create a framebuffer
         let mut attachments = Vec::new();
 
-        for subpass in render_pass_begin.subpasses {
-            let mut created_images = Vec::new();
-            // Collect the image views for color attachments
-            for color_attachment in subpass.color_attachments.iter() {
-                let created_image_handle = color_attachment.view;
-                self.oneshot_transition_image(
-                    color_attachment.view,
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                );
-                let view = self.image_views.get_ref(created_image_handle).unwrap();
-                let image = self.images.get_ref(view.img).unwrap();
-                let color_view = view.view;
+        let mut created_images = Vec::new();
+        // Collect the image views for color attachments
+        for color_attachment in info.subpass.colors.iter() {
+            let created_image_handle = color_attachment.img;
+            self.oneshot_transition_image(
+                color_attachment.img,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            let view = self.image_views.get_ref(created_image_handle).unwrap();
+            let image = self.images.get_ref(view.img).unwrap();
+            let color_view = view.view;
 
-                width = std::cmp::min(image.dim[0], width);
-                height = std::cmp::min(image.dim[1], height);
-                attachments.push(color_view);
-                created_images.push(view.img);
-            }
+            width = std::cmp::min(image.dim[0], width);
+            height = std::cmp::min(image.dim[1], height);
+            attachments.push(color_view);
+            created_images.push(view.img);
+        }
+        // Collect the image view for depth/stencil attachment if present
+        if let Some(depth_stencil_attachment) = &info.subpass.depth {
+            let view = depth_stencil_attachment.img;
+            self.oneshot_transition_image(view, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+            let depth_view_info = self.image_views.get_ref(view).unwrap();
+            let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
+            let depth_view = depth_view_info.view;
+            width = std::cmp::min(depth_img.dim[0], width);
+            height = std::cmp::min(depth_img.dim[1], height);
 
-            // Collect the image view for depth/stencil attachment if present
-            if let Some(depth_stencil_attachment) = subpass.depth_stencil_attachment {
-                let view = depth_stencil_attachment.view;
-                self.oneshot_transition_image(
-                    view,
-                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                );
-                let depth_view_info = self.image_views.get_ref(view).unwrap();
-                let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
-                let depth_view = depth_view_info.view;
-                width = std::cmp::min(depth_img.dim[0], width);
-                height = std::cmp::min(depth_img.dim[1], height);
-
-                attachments.push(depth_view);
-                created_images.push(depth_view_info.img);
-            }
-
-            // Create framebuffer
-            let framebuffer_info = vk::FramebufferCreateInfo {
-                render_pass,
-                attachment_count: attachments.len() as u32,
-                p_attachments: attachments.as_ptr(),
-                width,
-                height,
-                layers: 1,
-                ..Default::default()
-            };
-
-            let framebuffer = unsafe {
-                self.device
-                    .create_framebuffer(&framebuffer_info, None)
-                    .expect("Failed to create framebuffer")
-            };
-
-            // Store the framebuffer and the associated images
-            framebuffers_with_images.push((framebuffer, created_images));
+            attachments.push(depth_view);
+            created_images.push(depth_view_info.img);
         }
 
-        Ok(framebuffers_with_images)
+        let rp = self.render_passes.get_ref(info.render_pass).unwrap();
+        // Create framebuffer
+        let framebuffer_info = vk::FramebufferCreateInfo {
+            render_pass: rp.raw,
+            attachment_count: attachments.len() as u32,
+            p_attachments: attachments.as_ptr(),
+            width,
+            height,
+            layers: 1,
+            ..Default::default()
+        };
+
+        return Ok(unsafe {
+            self.device
+                .create_framebuffer(&framebuffer_info, None)
+                .expect("Failed to create framebuffer")
+        });
     }
 
     pub fn destroy_display(&mut self, dsp: Display) {

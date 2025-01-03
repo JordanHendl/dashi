@@ -211,10 +211,8 @@ void main() {
                 },
                 ..Default::default()
             },
-            subpasses: &[Subpass {
-                color_attachments: &[Attachment {
-                    view: fb_view,
-                    clear_color: [0.0, 0.0, 0.0, 1.0],
+            subpasses: &[SubpassDescription {
+                color_attachments: &[AttachmentDescription {
                     ..Default::default()
                 }],
                 depth_stencil_attachment: None,
@@ -230,6 +228,7 @@ void main() {
             layout: pipeline_layout,
             render_pass,
             debug_name: "Pipeline",
+            ..Default::default()
         })
         .unwrap();
 
@@ -297,6 +296,13 @@ void main() {
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
+                subpass: Subpass {
+                    colors: &[Attachment {
+                        img: fb_view,
+                        clear_color: [0.0, 0.0, 0.0, 1.0],
+                    }],
+                    depth: None,
+                },
             })
             .unwrap();
 

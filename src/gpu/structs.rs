@@ -45,6 +45,34 @@ pub enum WindowBuffering {
     Triple,
 }
 
+#[derive(Hash, Debug, Copy, Clone, Default)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum BlendFactor {
+    One,
+    Zero,
+    SrcColor,
+    InvSrcColor,
+    #[default]
+    SrcAlpha,
+    InvSrcAlpha,
+    DstAlpha,
+    InvDstAlpha,
+    DstColor,
+    InvDstColor,
+    BlendFactor,
+}
+
+#[derive(Hash, Debug, Copy, Clone, Default)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum BlendOp {
+    #[default]
+    Add,
+    Subtract,
+    InvSubtract,
+    Min,
+    Max,
+}
+
 #[derive(Hash, Debug, Copy, Clone)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum LoadOp {
@@ -298,40 +326,34 @@ impl<'a> Default for SubmitInfo<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub struct Attachment {
-    pub view: Handle<ImageView>,
+pub struct AttachmentDescription {
+    pub format: Format,
     pub samples: SampleCount,
     pub load_op: LoadOp,
     pub store_op: StoreOp,
     pub stencil_load_op: LoadOp,
     pub stencil_store_op: StoreOp,
-    pub clear_color: [f32; 4],
 }
 
-impl Hash for Attachment {
+impl Hash for AttachmentDescription {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.view.hash(state);
+        self.format.hash(state);
         self.samples.hash(state);
         self.load_op.hash(state);
         self.store_op.hash(state);
         self.stencil_load_op.hash(state);
         self.stencil_store_op.hash(state);
-
-        for p in self.clear_color {
-            (p as u32).hash(state);
-        }
     }
 }
-impl Default for Attachment {
+impl Default for AttachmentDescription {
     fn default() -> Self {
         Self {
-            view: Default::default(),
             samples: SampleCount::S1,
             load_op: LoadOp::Clear,
             store_op: StoreOp::Store,
             stencil_load_op: LoadOp::DontCare,
             stencil_store_op: StoreOp::DontCare,
-            clear_color: [1.0, 1.0, 1.0, 1.0],
+            format: Format::RGBA8,
         }
     }
 }
@@ -517,13 +539,68 @@ pub enum VertexOrdering {
     Clockwise,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub struct DepthInfo {
+    pub should_test: bool,
+    pub should_write: bool,
+}
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub struct WriteMask {
+    pub r: bool,
+    pub g: bool,
+    pub b: bool,
+    pub a: bool,
+}
+
+impl Default for WriteMask {
+    fn default() -> Self {
+        Self {
+            r: true,
+            g: true,
+            b: true,
+            a: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub struct ColorBlendState {
+    pub enable: bool,
+    pub src_blend: BlendFactor,
+    pub dst_blend: BlendFactor,
+    pub blend_op: BlendOp,
+    pub src_alpha_blend: BlendFactor,
+    pub dst_alpha_blend: BlendFactor,
+    pub alpha_blend_op: BlendOp,
+    pub write_mask: WriteMask,
+}
+
+impl Default for ColorBlendState {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            src_blend: BlendFactor::SrcAlpha,
+            dst_blend: BlendFactor::InvSrcAlpha,
+            blend_op: BlendOp::Add,
+            src_alpha_blend: BlendFactor::SrcAlpha,
+            dst_alpha_blend: BlendFactor::InvSrcAlpha,
+            alpha_blend_op: BlendOp::Add,
+            write_mask: Default::default(),
+        }
+    }
+}
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct GraphicsPipelineDetails {
+    pub color_blend_states: Vec<ColorBlendState>,
     pub topology: Topology,
     pub culling: CullMode,
     pub front_face: VertexOrdering,
-    pub depth_test: bool,
+    pub depth_test: Option<DepthInfo>,
 }
 
 impl Default for GraphicsPipelineDetails {
@@ -532,7 +609,8 @@ impl Default for GraphicsPipelineDetails {
             topology: Topology::TriangleList,
             culling: CullMode::Back,
             front_face: VertexOrdering::Clockwise,
-            depth_test: false,
+            depth_test: None,
+            color_blend_states: vec![Default::default()],
         }
     }
 }
@@ -570,16 +648,48 @@ pub struct SubpassDependency {
     pub depth_id: u32,
 }
 
-pub struct Subpass<'a> {
-    pub color_attachments: &'a [Attachment],
-    pub depth_stencil_attachment: Option<&'a Attachment>,
+pub struct SubpassDescription<'a> {
+    pub color_attachments: &'a [AttachmentDescription],
+    pub depth_stencil_attachment: Option<&'a AttachmentDescription>,
     pub subpass_dependencies: &'a [SubpassDependency],
+}
+
+#[derive(Clone, PartialEq)]
+pub struct Attachment {
+    pub img: Handle<ImageView>,
+    pub clear_color: [f32; 4],
+}
+
+impl Default for Attachment {
+    fn default() -> Self {
+        Self {
+            img: Default::default(),
+            clear_color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+impl Eq for Attachment {}
+
+impl Hash for Attachment {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.img.hash(state);
+        for color in self.clear_color {
+            (color as i32).hash(state);
+        }
+    }
+}
+
+#[derive(Clone, Default, Hash, PartialEq, Eq)]
+pub struct Subpass<'a> {
+    pub colors: &'a [Attachment],
+    pub depth: Option<Attachment>,
 }
 
 pub struct RenderPassInfo<'a> {
     pub debug_name: &'a str,
     pub viewport: Viewport,
-    pub subpasses: &'a [Subpass<'a>],
+    pub subpasses: &'a [SubpassDescription<'a>],
 }
 
 #[derive(Hash, Debug)]
@@ -620,6 +730,18 @@ pub struct GraphicsPipelineInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<GraphicsPipelineLayout>,
     pub render_pass: Handle<RenderPass>,
+    pub subpass_id: u8,
+}
+
+impl<'a> Default for GraphicsPipelineInfo<'a> {
+    fn default() -> Self {
+        Self {
+            debug_name: Default::default(),
+            layout: Default::default(),
+            render_pass: Default::default(),
+            subpass_id: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

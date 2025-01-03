@@ -1,4 +1,8 @@
-use crate::{IndexedBindGroup, IndexedIndirectCommand, IndirectCommand};
+use std::hash::{DefaultHasher, Hash, Hasher};
+
+use crate::{
+    Context, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Subpass, SubpassContainer,
+};
 
 use super::{
     convert_barrier_point_vk, convert_rect2d_to_vulkan, BarrierPoint, Buffer, CommandList,
@@ -76,9 +80,10 @@ impl Default for Dispatch {
 }
 
 #[derive(Clone)]
-pub struct DrawBegin {
+pub struct DrawBegin<'a> {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
+    pub subpass: Subpass<'a>,
 }
 
 #[derive(Clone)]
@@ -117,6 +122,13 @@ impl Default for DrawIndexedDynamic {
 #[derive(Clone)]
 pub struct BindIndexedBG {
     pub bind_groups: [Option<Handle<IndexedBindGroup>>; 4],
+}
+
+#[derive(Clone, Default)]
+pub struct RenderPassBegin<'a> {
+    pub render_pass: Handle<RenderPass>,
+    pub viewport: Viewport,
+    pub subpass: Subpass<'a>,
 }
 
 #[derive(Clone)]
@@ -358,32 +370,72 @@ impl CommandList {
         }
     }
 
-    fn begin_render_pass<'a>(
-        &mut self,
-        render_pass: Handle<RenderPass>,
-        viewport: &Viewport,
-    ) -> Result<(), GPUError> {
+    fn get_ctx(&mut self) -> &mut Context {
+        unsafe { &mut *(self.ctx) }
+    }
+
+    fn begin_render_pass<'a>(&mut self, info: &RenderPassBegin) -> Result<(), GPUError> {
         if let Some(curr_rp) = self.curr_rp {
-            if curr_rp == render_pass {
+            if curr_rp == info.render_pass {
                 return Ok(());
             } else {
                 self.end_drawing()?;
             }
         }
 
-        self.curr_rp = Some(render_pass);
+        self.curr_rp = Some(info.render_pass);
         unsafe {
             let rp = (*self.ctx)
                 .render_passes
-                .get_ref(self.curr_rp.unwrap())
+                .get_mut_ref(self.curr_rp.unwrap())
                 .unwrap();
+
+            let mut fb = Default::default();
+            let mut clear_values: &[vk::ClearValue] = &[];
+            let mut hasher = DefaultHasher::new();
+            info.subpass.hash(&mut hasher);
+            let hash = hasher.finish();
+            if let Some(entry) = rp.subpasses.get(&hash) {
+                fb = entry.fb.clone();
+                clear_values = &entry.clear_values;
+            } else {
+                fb = self.get_ctx().make_framebuffer(&info)?;
+                let mut cv = Vec::new();
+                for color in info.subpass.colors {
+                    cv.push(vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: color.clear_color,
+                        },
+                    });
+                }
+                if let Some(c) = &info.subpass.depth {
+                    cv.push(vk::ClearValue {
+                        depth_stencil: vk::ClearDepthStencilValue {
+                            depth: c.clear_color[0],
+                            stencil: c.clear_color[1] as u32,
+                        },
+                    });
+                }
+
+                rp.subpasses.insert(
+                    hash,
+                    SubpassContainer {
+                        colors: info.subpass.colors.to_vec(),
+                        depth: info.subpass.depth.clone(),
+                        fb,
+                        clear_values: cv,
+                    },
+                );
+                clear_values = &rp.subpasses.get(&hash).unwrap().clear_values;
+            }
+
             (*self.ctx).device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp.raw)
-                    .framebuffer(rp.fb[0].0)
-                    .clear_values(&rp.clear_values)
-                    .render_area(convert_rect2d_to_vulkan(viewport.scissor))
+                    .framebuffer(fb)
+                    .clear_values(&clear_values)
+                    .render_area(convert_rect2d_to_vulkan(info.viewport.scissor))
                     .build(),
                 vk::SubpassContents::INLINE,
             );
@@ -406,7 +458,11 @@ impl CommandList {
         unsafe {
             self.curr_pipeline = Some(pipeline);
             let gfx = (*self.ctx).gfx_pipelines.get_ref(pipeline).unwrap();
-            self.begin_render_pass(gfx.render_pass, &info.viewport)?;
+            self.begin_render_pass(&RenderPassBegin {
+                render_pass: gfx.render_pass,
+                viewport: info.viewport,
+                subpass: info.subpass.clone(),
+            })?;
             (*self.ctx).device.cmd_bind_pipeline(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
