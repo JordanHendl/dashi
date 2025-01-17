@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
@@ -63,7 +63,7 @@ impl<T> ItemList<T> {
         unsafe {
             let byte_size = len as usize * std::mem::size_of::<T>();
             let layout = Layout::from_size_align(byte_size, 1).unwrap();
-            let ptr = alloc(layout);
+            let ptr = alloc_zeroed(layout);
             Self {
                 items: ptr as *mut T,
                 end: (ptr as *mut T).offset(len as isize),
@@ -100,7 +100,7 @@ impl<T> ItemList<T> {
             unsafe {
                 let byte_size = len as usize * std::mem::size_of::<T>();
                 let layout = Layout::from_size_align(byte_size, 1).unwrap();
-                let ptr = alloc(layout);
+                let ptr = alloc_zeroed(layout);
 
                 let src = std::slice::from_raw_parts(self.items as *const u8, self.byte_size());
                 let dst = std::slice::from_raw_parts_mut(ptr, byte_size);
@@ -235,7 +235,7 @@ impl<T> Default for Pool<T> {
             generation: vec![0; INITIAL_SIZE],
         };
 
-        p.empty = (0..INITIAL_SIZE as u32).collect();
+        p.empty = (0..(INITIAL_SIZE) as u32).collect();
         return p;
     }
 }
@@ -247,7 +247,7 @@ impl<T> Pool<T> {
             generation: vec![0; initial_size],
         };
 
-        p.empty = (0..initial_size as u32).collect();
+        p.empty = (0..(initial_size) as u32).collect();
         return p;
     }
 
@@ -258,7 +258,7 @@ impl<T> Pool<T> {
             generation: vec![0; len],
         };
 
-        p.empty = (0..len as u32).collect();
+        p.empty = (0..(len) as u32).collect();
         return p;
     }
 
@@ -298,7 +298,7 @@ impl<T> Pool<T> {
         println!("Expanded: {} -> {}", old_len, self.items.len());
         if self.items.len() > old_len {
             self.generation.resize_with(self.items.len(), || 0);
-            for i in old_len..self.items.len() {
+            for i in old_len..(self.items.len()) {
                 self.empty.push(i as u32);
             }
         }
@@ -337,6 +337,7 @@ impl<T> Pool<T> {
     }
 
     pub fn get_ref(&self, item: Handle<T>) -> Option<&T> {
+        assert!(item.valid());
         let slot = item.slot as u32;
         if self.generation[slot as usize] == item.generation {
             return Some(&self.items[slot as usize]);
@@ -346,6 +347,7 @@ impl<T> Pool<T> {
     }
 
     pub fn get_mut_ref(&mut self, item: Handle<T>) -> Option<&mut T> {
+        assert!(item.valid());
         let slot = item.slot as usize;
         if self.generation[slot] == item.generation {
             return Some(&mut self.items[slot as usize]);
@@ -355,7 +357,7 @@ impl<T> Pool<T> {
     }
 
     pub fn clear(&mut self) {
-        self.empty = (0..self.items.len() as u32).collect();
+        self.empty = (0..(self.items.len()) as u32).collect();
         self.generation.fill(0);
     }
 }
@@ -393,7 +395,7 @@ fn test_pool_imported() {
     }
     let byte_size = TEST_AMT as usize * std::mem::size_of::<S>();
     let layout = Layout::from_size_align(byte_size, 1).unwrap();
-    let ptr = unsafe { alloc(layout) };
+    let ptr = unsafe { alloc_zeroed(layout) };
 
     let mut pool: Pool<S> = Pool::new_preallocated(ptr, TEST_AMT);
     assert!(pool.items.len() == TEST_AMT);

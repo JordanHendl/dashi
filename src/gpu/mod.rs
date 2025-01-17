@@ -308,11 +308,23 @@ impl DynamicBuffer {
     }
 }
 
+#[derive(Clone)]
 pub struct DynamicAllocator {
     allocator: offset_alloc::Allocator,
     ptr: *mut u8,
     min_alloc_size: u32,
     pool: Handle<Buffer>,
+}
+
+impl Default for DynamicAllocator {
+    fn default() -> Self {
+        Self {
+            allocator: Default::default(),
+            ptr: std::ptr::null_mut(),
+            min_alloc_size: Default::default(),
+            pool: Default::default(),
+        }
+    }
 }
 
 impl DynamicAllocator {
@@ -603,6 +615,10 @@ impl Context {
                     .enabled_extension_names(
                         [
                             ash::extensions::khr::Swapchain::name().as_ptr(),
+                            ::std::ffi::CStr::from_bytes_with_nul_unchecked(
+                                b"VK_GOOGLE_user_type\0",
+                            )
+                            .as_ptr(),
                             #[cfg(any(target_os = "macos", target_os = "ios"))]
                             KhrPortabilitySubsetFn::name().as_ptr(),
                         ]
@@ -1390,8 +1406,7 @@ impl Context {
         &mut self,
         info: &BindGroupLayoutInfo,
     ) -> Result<Handle<BindGroupLayout>, GPUError> {
-        const MAX_DESCRIPTOR_SETS: u32 = 2048;
-
+        let mut MAX_DESCRIPTOR_SETS: u32 = 2048;
         let mut bindings = Vec::new();
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
@@ -1417,10 +1432,19 @@ impl Context {
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
+                match variable.var_type {
+                    BindGroupVariableType::DynamicUniform => {
+                        MAX_DESCRIPTOR_SETS = 1;
+                    }
+                    BindGroupVariableType::DynamicStorage => {
+                        MAX_DESCRIPTOR_SETS = 1;
+                    }
+                    _ => {}
+                }
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
-                    .descriptor_count(1) // Assuming one per binding
+                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
                     .stage_flags(stage_flags)
                     .build();
 
@@ -1430,6 +1454,7 @@ impl Context {
 
         let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
             .bindings(&bindings)
+            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
             .build();
 
         let descriptor_set_layout = unsafe {
@@ -1442,13 +1467,14 @@ impl Context {
             .map(|binding| {
                 vk::DescriptorPoolSize::builder()
                     .ty(binding.descriptor_type)
-                    .descriptor_count(1) // Assuming one descriptor per binding
+                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
                     .build()
             })
             .collect::<Vec<_>>();
 
         let pool_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
+            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(MAX_DESCRIPTOR_SETS);
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
@@ -2111,7 +2137,7 @@ impl Context {
             .viewports(&[viewport])
             .scissors(&[scissor])
             .build();
-        
+
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
             .attachments(&layout.color_blend_states)
             .build();
