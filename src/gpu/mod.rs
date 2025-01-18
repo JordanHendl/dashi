@@ -1188,12 +1188,13 @@ impl Context {
             visibility: MemoryVisibility::CpuAndGpu,
             ..Default::default()
         })?;
-
+        
+        let min_alloc_size = info.allocation_size + (info.allocation_size % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
         return Ok(DynamicAllocator {
             allocator: offset_alloc::Allocator::new(info.byte_size, info.num_allocations),
             pool: buffer,
             ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),
-            min_alloc_size: self.properties.limits.min_uniform_buffer_offset_alignment as u32,
+            min_alloc_size,
         });
     }
 

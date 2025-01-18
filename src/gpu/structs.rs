@@ -283,6 +283,7 @@ pub struct DynamicAllocatorInfo<'a> {
     pub usage: BufferUsage,
     pub num_allocations: u32,
     pub byte_size: u32,
+    pub allocation_size: u32,
 }
 
 impl<'a> Default for DynamicAllocatorInfo<'a> {
@@ -292,6 +293,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
             byte_size: 1024 * 1024,
             usage: BufferUsage::UNIFORM,
             num_allocations: 2048,
+            allocation_size: 256,
         }
     }
 }
