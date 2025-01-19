@@ -5,7 +5,10 @@ use crate::utils::{
 };
 use ash::*;
 pub use error::*;
-use std::{collections::HashMap, ffi::CString};
+use std::{
+    collections::HashMap,
+    ffi::{c_char, CStr, CString},
+};
 use vk_mem::Alloc;
 
 pub mod structs;
@@ -566,7 +569,7 @@ impl Context {
             )
         }?;
 
-        let pdevice = unsafe { instance.enumerate_physical_devices()?[0] };
+        let pdevice = unsafe { instance.enumerate_physical_devices()?[1] };
         let device_prop = unsafe { instance.get_physical_device_properties(pdevice) };
 
         let queue_prop = unsafe { instance.get_physical_device_queue_family_properties(pdevice) };
@@ -608,22 +611,48 @@ impl Context {
             features2 = Default::default();
         }
 
+        println!("Device name: {}", unsafe {
+            CStr::from_ptr(device_prop.device_name.as_ptr())
+                .to_str()
+                .unwrap()
+        });
+
+        let enabled_extensions =
+            unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
+
+        let wanted_extensions: Vec<*const c_char> = vec![
+            ash::extensions::khr::Swapchain::name().as_ptr(),
+            unsafe {
+                std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
+            },
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            KhrPortabilitySubsetFn::name().as_ptr(),
+        ];
+
+        let extensions_to_enable: Vec<*const c_char> = wanted_extensions
+            .into_iter()
+            .filter(|a| {
+                return enabled_extensions
+                    .iter()
+                    .find(|ext| {
+                        let astr = unsafe { CStr::from_ptr(ext.extension_name.as_ptr()).to_str() }
+                            .unwrap()
+                            .to_string();
+                        let bstr = unsafe { CStr::from_ptr(*(a)).to_str() }
+                            .unwrap()
+                            .to_string();
+
+                        return astr == bstr;
+                    })
+                    .is_some();
+            })
+            .collect();
+
         let device = unsafe {
             instance.create_device(
                 pdevice,
                 &vk::DeviceCreateInfo::builder()
-                    .enabled_extension_names(
-                        [
-                            ash::extensions::khr::Swapchain::name().as_ptr(),
-                            ::std::ffi::CStr::from_bytes_with_nul_unchecked(
-                                b"VK_GOOGLE_user_type\0",
-                            )
-                            .as_ptr(),
-                            #[cfg(any(target_os = "macos", target_os = "ios"))]
-                            KhrPortabilitySubsetFn::name().as_ptr(),
-                        ]
-                        .as_ref(),
-                    )
+                    .enabled_extension_names(&extensions_to_enable)
                     .queue_create_infos(&[vk::DeviceQueueCreateInfo::builder()
                         .queue_family_index(gfx_queue.family)
                         .queue_priorities(&priorities)
@@ -1188,8 +1217,10 @@ impl Context {
             visibility: MemoryVisibility::CpuAndGpu,
             ..Default::default()
         })?;
-        
-        let min_alloc_size = info.allocation_size + (info.allocation_size % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
+
+        let min_alloc_size = info.allocation_size
+            + (info.allocation_size
+                % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
         return Ok(DynamicAllocator {
             allocator: offset_alloc::Allocator::new(info.byte_size, info.num_allocations),
             pool: buffer,
