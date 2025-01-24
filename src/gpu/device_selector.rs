@@ -35,7 +35,7 @@ impl From<vk::PhysicalDeviceProperties> for DeviceInfo {
             name: unsafe {
                 CStr::from_ptr(value.device_name.as_ptr())
                     .to_str()
-                    .unwrap()
+                    .unwrap_or("UNKNOWN")
                     .to_string()
             },
             kind: value.device_type.into(),
@@ -54,7 +54,7 @@ pub struct SelectedDevice {
 
 impl std::fmt::Display for SelectedDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-       write!(f, "[{} -- Driver Ver {} -- ID {}]", self.info.name, self.info.driver_version, self.device_id) 
+       write!(f, "[Name {} -- Driver Ver {} -- ID {}]", self.info.name, self.info.driver_version, self.device_id) 
     }
 }
 impl Default for SelectedDevice {
