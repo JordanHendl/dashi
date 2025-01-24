@@ -11,6 +11,8 @@ use std::{
 };
 use vk_mem::Alloc;
 
+pub mod device_selector;
+pub use device_selector::*;
 pub mod structs;
 pub use structs::*;
 pub mod commands;
@@ -541,7 +543,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(_info: &ContextInfo) -> Result<Self, GPUError> {
+    pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
         let app_info = vk::ApplicationInfo {
             api_version: vk::make_api_version(0, 1, 3, 0),
             ..Default::default()
@@ -569,7 +571,7 @@ impl Context {
             )
         }?;
 
-        let pdevice = unsafe { instance.enumerate_physical_devices()?[1] };
+        let pdevice = unsafe { instance.enumerate_physical_devices()?[info.device.device_id] };
         let device_prop = unsafe { instance.get_physical_device_properties(pdevice) };
 
         let queue_prop = unsafe { instance.get_physical_device_queue_family_properties(pdevice) };
@@ -611,11 +613,6 @@ impl Context {
             features2 = Default::default();
         }
 
-        println!("Device name: {}", unsafe {
-            CStr::from_ptr(device_prop.device_name.as_ptr())
-                .to_str()
-                .unwrap()
-        });
 
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;

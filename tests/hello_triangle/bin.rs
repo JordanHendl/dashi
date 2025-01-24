@@ -72,8 +72,15 @@ impl Timer {
 
 #[cfg(feature = "dashi-tests")]
 fn main() {
+    let device = DeviceSelector::new()
+        .unwrap()
+        .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+        .unwrap_or_default();
+    
+    println!("Using device {}", device);
+
     // The GPU context that holds all the data.
-    let mut ctx = gpu::Context::new(&Default::default()).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
 
     const WIDTH: u32 = 1280;
     const HEIGHT: u32 = 1024;

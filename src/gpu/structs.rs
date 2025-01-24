@@ -1,6 +1,6 @@
 use super::{
     BindGroupLayout, Buffer, ComputePipelineLayout, DynamicAllocator, GraphicsPipelineLayout,
-    Image, ImageView, RenderPass, Sampler,
+    Image, ImageView, RenderPass, Sampler, SelectedDevice,
 };
 use crate::{utils::Handle, BindGroup, Semaphore};
 use std::hash::{Hash, Hasher};
@@ -195,8 +195,10 @@ pub struct FRect2D {
     pub h: f32,
 }
 
-#[derive(Hash, Default)]
-pub struct ContextInfo {}
+#[derive(Default)]
+pub struct ContextInfo {
+    pub device: SelectedDevice,
+}
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
