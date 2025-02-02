@@ -1,6 +1,6 @@
 use super::GPUError;
 use ash::*;
-use std::ffi::{c_char, CStr};
+use std::ffi::CStr;
 
 #[derive(Default, Clone, Copy, PartialEq)]
 pub enum DeviceType {

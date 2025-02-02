@@ -1,4 +1,4 @@
-use crate::{Buffer, BufferCopy, BufferInfo, CommandList, Context, MemoryVisibility, SubmitInfo};
+use crate::{Buffer, BufferCopy, BufferInfo, CommandList, Context, MemoryVisibility};
 
 use super::{Handle, Pool};
 
@@ -57,7 +57,7 @@ impl<T> GPUPool<T> {
         return self.pool.insert(item);
     }
 
-    pub fn for_each_occupied<F>(&self, mut func: F)
+    pub fn for_each_occupied<F>(&self, func: F)
     where
         F: FnMut(&T),
     {
@@ -68,7 +68,7 @@ impl<T> GPUPool<T> {
         return self.pool.len();
     }
 
-    pub fn for_each_occupied_mut<F>(&mut self, mut func: F)
+    pub fn for_each_occupied_mut<F>(&mut self, func: F)
     where
         F: FnMut(&mut T),
     {
