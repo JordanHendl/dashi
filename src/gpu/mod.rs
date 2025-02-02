@@ -600,6 +600,10 @@ impl Context {
             .build();
 
         unsafe { instance.get_physical_device_features2(pdevice, &mut features2) };
+    
+        let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::builder()
+            .uniform_and_storage_buffer16_bit_access(true)
+            .build();
 
         // Bindless enabled
         if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
@@ -643,7 +647,7 @@ impl Context {
                     .is_some();
             })
             .collect();
-
+        
         let device = unsafe {
             instance.create_device(
                 pdevice,
@@ -654,6 +658,7 @@ impl Context {
                         .queue_priorities(&priorities)
                         .build()])
                     .push_next(&mut features2)
+                    .push_next(&mut features16bit)
                     .build(),
                 None,
             )
@@ -2004,6 +2009,7 @@ impl Context {
                     .format(match entry.format {
                         ShaderPrimitiveType::Vec4 => vk::Format::R32G32B32A32_SFLOAT,
                         ShaderPrimitiveType::Vec2 => vk::Format::R32G32_SFLOAT,
+                        ShaderPrimitiveType::IVec4 => vk::Format::R32G32B32A32_SINT,
                     })
                     .offset(entry.offset as u32)
                     .build()

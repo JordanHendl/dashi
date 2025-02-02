@@ -42,6 +42,20 @@ impl FramedCommandList {
         record_func(&mut self.cmds[self.curr as usize]);
     }
 
+    pub fn record_enumerated<T>(&mut self, mut record_func: T)
+    where
+        T: FnMut(&mut CommandList, u16),
+    {
+        if let Some(fence) = self.fences[self.curr as usize].as_mut() {
+            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            self.fences[self.curr as usize] = None;
+        }
+
+        self.cmds[self.curr as usize].reset().unwrap();
+        record_func(&mut self.cmds[self.curr as usize], self.curr);
+    }
+
+
     pub fn record<T>(&mut self, mut record_func: T)
     where
         T: FnMut(&mut CommandList),
@@ -66,6 +80,6 @@ impl FramedCommandList {
     }
 
     fn advance(&mut self) {
-        self.curr = (self.curr + 1) % self.cmds.len() as u16;
+        self.curr = (self.curr + 1) % (self.cmds.len() - 1)as u16;
     }
 }

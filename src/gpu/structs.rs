@@ -630,6 +630,7 @@ pub struct SpecializationInfo<'a> {
 pub enum ShaderPrimitiveType {
     Vec2,
     Vec4,
+    IVec4,
 }
 
 #[derive(Hash, Debug)]
