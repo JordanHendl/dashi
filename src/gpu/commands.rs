@@ -295,7 +295,6 @@ impl CommandList {
 
     pub fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) {
         unsafe {
-            static DEVICE_SIZES: vk::DeviceSize = vk::DeviceSize::MIN;
             let buff = (*self.ctx).buffers.get_ref(cmd.draw_params).unwrap();
             (*self.ctx).device.cmd_draw_indexed_indirect(
                 self.cmd_buf,
@@ -312,7 +311,6 @@ impl CommandList {
 
     pub fn draw_indirect(&mut self, cmd: &DrawIndirect) {
         unsafe {
-            static DEVICE_SIZES: vk::DeviceSize = vk::DeviceSize::MIN;
             let buff = (*self.ctx).buffers.get_ref(cmd.draw_params).unwrap();
             (*self.ctx).device.cmd_draw_indirect(
                 self.cmd_buf,
@@ -343,18 +341,18 @@ impl CommandList {
         unsafe {
             let b = (*self.ctx).bind_groups.get_ref(info.bg).unwrap();
 
-            let mut layout = Default::default();
+            let mut _layout = Default::default();
             if let Some(gfx) = info.gfx {
                 let p = (*self.ctx).gfx_pipelines.get_ref(gfx).unwrap();
                 let pl = (*self.ctx).gfx_pipeline_layouts.get_ref(p.layout).unwrap();
-                layout = pl.layout;
+                _layout = pl.layout;
             } else if let Some(cpt) = info.compute {
                 let p = (*self.ctx).compute_pipelines.get_ref(cpt).unwrap();
                 let pl = (*self.ctx)
                     .compute_pipeline_layouts
                     .get_ref(p.layout)
                     .unwrap();
-                layout = pl.layout;
+                _layout = pl.layout;
             } else {
                 return;
             }
@@ -362,7 +360,7 @@ impl CommandList {
             (*self.ctx).device.cmd_bind_descriptor_sets(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                layout,
+                _layout,
                 b.set_id,
                 &[b.set],
                 &[],
@@ -390,16 +388,16 @@ impl CommandList {
                 .get_mut_ref(self.curr_rp.unwrap())
                 .unwrap();
 
-            let mut fb = Default::default();
-            let mut clear_values: &[vk::ClearValue] = &[];
+            let mut _fb = Default::default();
+            let mut _clear_values: &[vk::ClearValue] = &[];
             let mut hasher = DefaultHasher::new();
             info.subpass.hash(&mut hasher);
             let hash = hasher.finish();
             if let Some(entry) = rp.subpasses.get(&hash) {
-                fb = entry.fb.clone();
-                clear_values = &entry.clear_values;
+                _fb = entry.fb.clone();
+                _clear_values = &entry.clear_values;
             } else {
-                fb = self.get_ctx().make_framebuffer(&info)?;
+                _fb = self.get_ctx().make_framebuffer(&info)?;
                 let mut cv = Vec::new();
                 for color in info.subpass.colors {
                     cv.push(vk::ClearValue {
@@ -420,21 +418,21 @@ impl CommandList {
                 rp.subpasses.insert(
                     hash,
                     SubpassContainer {
-                        colors: info.subpass.colors.to_vec(),
-                        depth: info.subpass.depth.clone(),
-                        fb,
+                        _colors: info.subpass.colors.to_vec(),
+                        _depth: info.subpass.depth.clone(),
+                        fb: _fb,
                         clear_values: cv,
                     },
                 );
-                clear_values = &rp.subpasses.get(&hash).unwrap().clear_values;
+                _clear_values = &rp.subpasses.get(&hash).unwrap().clear_values;
             }
 
             (*self.ctx).device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp.raw)
-                    .framebuffer(fb)
-                    .clear_values(&clear_values)
+                    .framebuffer(_fb)
+                    .clear_values(&_clear_values)
                     .render_area(convert_rect2d_to_vulkan(info.viewport.scissor))
                     .build(),
                 vk::SubpassContents::INLINE,

@@ -1,4 +1,4 @@
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{alloc_zeroed, Layout};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
@@ -90,13 +90,13 @@ impl<T> ItemList<T> {
         return self.len() * std::mem::size_of::<T>();
     }
 
-    fn as_slice(&self) -> &[T] {
-        return unsafe { std::slice::from_raw_parts(self.items, self.len()) };
-    }
-
-    fn as_slice_mut(&self) -> &mut [T] {
-        return unsafe { std::slice::from_raw_parts_mut(self.items, self.len()) };
-    }
+//    fn as_slice(&self) -> &[T] {
+//        return unsafe { std::slice::from_raw_parts(self.items, self.len()) };
+//    }
+//
+//    fn as_slice_mut(&self) -> &mut [T] {
+//        return unsafe { std::slice::from_raw_parts_mut(self.items, self.len()) };
+//    }
 
     fn expand(&mut self, amt: usize) {
         if !self.imported {
@@ -121,13 +121,13 @@ impl<T> ItemList<T> {
         return unsafe { self.end.offset_from(self.items) as usize };
     }
 
-    fn free(&self) {
-        if !self.imported {
-            let byte_size = self.len() as usize * std::mem::size_of::<T>();
-            let layout = Layout::from_size_align(byte_size, std::mem::size_of::<T>()).unwrap();
-            unsafe { dealloc(self.items as *mut u8, layout) };
-        }
-    }
+//    fn free(&self) {
+//        if !self.imported {
+//            let byte_size = self.len() as usize * std::mem::size_of::<T>();
+//            let layout = Layout::from_size_align(byte_size, std::mem::size_of::<T>()).unwrap();
+//            unsafe { dealloc(self.items as *mut u8, layout) };
+//        }
+//    }
 
     fn iter(&self) -> ItemListRef<'_, T> {
         ItemListRef {

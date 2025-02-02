@@ -6,7 +6,7 @@ pub struct GPUPool<T> {
     buffer: Handle<Buffer>,
     staging: Handle<Buffer>,
     pool: Pool<T>,
-    ctx: *mut Context,
+    _ctx: *mut Context,
 }
 
 impl<T> GPUPool<T> {
@@ -29,7 +29,7 @@ impl<T> GPUPool<T> {
             buffer,
             staging,
             pool,
-            ctx,
+            _ctx: ctx,
         }
     }
 

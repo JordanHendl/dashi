@@ -372,8 +372,8 @@ pub struct ImageView {
 
 #[derive(Clone, Default)]
 pub(super) struct SubpassContainer {
-    pub(super) colors: Vec<Attachment>,
-    pub(super) depth: Option<Attachment>,
+    pub(super) _colors: Vec<Attachment>,
+    pub(super) _depth: Option<Attachment>,
     pub(super) fb: vk::Framebuffer,
     pub(super) clear_values: Vec<vk::ClearValue>,
 }
@@ -526,7 +526,6 @@ pub struct Context {
     pub(super) image_views: Pool<ImageView>,
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
-    pub(super) indexed_bind_groups: Pool<IndexedBindGroup>,
     pub(super) bind_groups: Pool<BindGroup>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
@@ -700,7 +699,6 @@ impl Context {
             image_views: Default::default(),
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
-            indexed_bind_groups: Default::default(),
             bind_groups: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
@@ -1435,7 +1433,7 @@ impl Context {
         &mut self,
         info: &BindGroupLayoutInfo,
     ) -> Result<Handle<BindGroupLayout>, GPUError> {
-        let mut MAX_DESCRIPTOR_SETS: u32 = 2048;
+        let mut max_descriptor_sets: u32 = 2048;
         let mut bindings = Vec::new();
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
@@ -1463,17 +1461,17 @@ impl Context {
 
                 match variable.var_type {
                     BindGroupVariableType::DynamicUniform => {
-                        MAX_DESCRIPTOR_SETS = 1;
+                        max_descriptor_sets = 1;
                     }
                     BindGroupVariableType::DynamicStorage => {
-                        MAX_DESCRIPTOR_SETS = 1;
+                        max_descriptor_sets = 1;
                     }
                     _ => {}
                 }
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
-                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
+                    .descriptor_count(max_descriptor_sets) // Assuming one per binding
                     .stage_flags(stage_flags)
                     .build();
 
@@ -1496,7 +1494,7 @@ impl Context {
             .map(|binding| {
                 vk::DescriptorPoolSize::builder()
                     .ty(binding.descriptor_type)
-                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
+                    .descriptor_count(max_descriptor_sets) // Assuming one per binding
                     .build()
             })
             .collect::<Vec<_>>();
@@ -1504,7 +1502,7 @@ impl Context {
         let pool_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
             .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
-            .max_sets(MAX_DESCRIPTOR_SETS);
+            .max_sets(max_descriptor_sets);
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
 
@@ -1848,7 +1846,7 @@ impl Context {
         let mut deps = Vec::with_capacity(256);
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
-            let attachment_offset = attachments.len();
+            let _attachment_offset = attachments.len();
             let color_offset = color_attachment_refs.len();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
