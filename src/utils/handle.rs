@@ -16,6 +16,10 @@ impl<T> Handle<T> {
     }
 }
 
+impl<T> Eq for Handle<T> {
+}
+
+
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {
         self.slot == other.slot && self.generation == other.generation
@@ -236,6 +240,7 @@ impl<T> Default for Pool<T> {
         };
 
         p.empty = (0..(INITIAL_SIZE) as u32).collect();
+        assert!(!p.generation.is_empty());
         return p;
     }
 }
@@ -247,6 +252,7 @@ impl<T> Pool<T> {
             generation: vec![0; initial_size],
         };
 
+        assert!(!p.generation.is_empty());
         p.empty = (0..(initial_size) as u32).collect();
         return p;
     }
@@ -271,6 +277,7 @@ impl<T> Pool<T> {
         if let Some(empty_slot) = self.empty.pop() {
             self.items[empty_slot as usize] = item;
 
+            assert!(!self.generation.is_empty());
             return Some(Handle {
                 slot: empty_slot as u16,
                 generation: self.generation[empty_slot as usize],
@@ -281,6 +288,7 @@ impl<T> Pool<T> {
             if let Some(empty_slot) = self.empty.pop() {
                 self.items[empty_slot as usize] = item;
 
+                assert!(!self.generation.is_empty());
                 return Some(Handle {
                     slot: empty_slot as u16,
                     generation: self.generation[empty_slot as usize],
@@ -303,7 +311,7 @@ impl<T> Pool<T> {
             }
         }
     }
-    
+
     pub fn len(&self) -> usize {
         return self.items.len();
     }
@@ -338,6 +346,8 @@ impl<T> Pool<T> {
 
     pub fn get_ref(&self, item: Handle<T>) -> Option<&T> {
         assert!(item.valid());
+        assert!(self.items.len() != 0);
+        assert!(!self.generation.is_empty());
         let slot = item.slot as u32;
         if self.generation[slot as usize] == item.generation {
             return Some(&self.items[slot as usize]);
@@ -348,6 +358,7 @@ impl<T> Pool<T> {
 
     pub fn get_mut_ref(&mut self, item: Handle<T>) -> Option<&mut T> {
         assert!(item.valid());
+        assert!(!self.generation.is_empty());
         let slot = item.slot as usize;
         if self.generation[slot] == item.generation {
             return Some(&mut self.items[slot as usize]);
@@ -359,6 +370,7 @@ impl<T> Pool<T> {
     pub fn clear(&mut self) {
         self.empty = (0..(self.items.len()) as u32).collect();
         self.generation.fill(0);
+        assert!(self.generation.is_empty());
     }
 }
 
@@ -377,10 +389,10 @@ fn test_pool() {
     for _it in 0..TEST_AMT + 1 {
         p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
     }
-    
+
     assert!(pool.items.len() > TEST_AMT);
 
-    pool.for_each_occupied_mut(|f| { 
+    pool.for_each_occupied_mut(|f| {
         f._big_data[0] = 5;
         println!("{}", f._big_data[0]);
     });
