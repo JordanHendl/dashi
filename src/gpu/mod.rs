@@ -600,7 +600,7 @@ impl Context {
             .build();
 
         unsafe { instance.get_physical_device_features2(pdevice, &mut features2) };
-    
+
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::builder()
             .uniform_and_storage_buffer16_bit_access(true)
             .build();
@@ -616,7 +616,6 @@ impl Context {
             features2 = Default::default();
         }
 
-
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
 
@@ -625,6 +624,7 @@ impl Context {
             unsafe {
                 std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
             },
+            vk::GoogleHlslFunctionality1Fn::name().as_ptr(),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             KhrPortabilitySubsetFn::name().as_ptr(),
         ];
@@ -647,7 +647,7 @@ impl Context {
                     .is_some();
             })
             .collect();
-        
+
         let device = unsafe {
             instance.create_device(
                 pdevice,
@@ -1613,6 +1613,27 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
+                    ShaderResource::DynamicStorage(alloc) => {
+                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(alloc.min_alloc_size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+
                     ShaderResource::StorageBuffer(buffer_handle) => {
                         let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
 
@@ -1765,6 +1786,26 @@ impl Context {
                         .dst_set(descriptor_set)
                         .dst_binding(binding_info.binding)
                         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                        .build();
+
+                    write_descriptor_sets.push(write_descriptor_set);
+                }
+                ShaderResource::DynamicStorage(alloc) => {
+                    let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.buf)
+                        .offset(0)
+                        .range(alloc.min_alloc_size as u64)
+                        .build();
+
+                    buffer_infos.push(buffer_info);
+
+                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(binding_info.binding)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
                         .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
                         .build();
 

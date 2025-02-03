@@ -9,6 +9,17 @@ pub struct GPUPool<T> {
     _ctx: *mut Context,
 }
 
+impl<T> Default for GPUPool<T> {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+            staging: Default::default(),
+            pool: Default::default(),
+            _ctx: std::ptr::null_mut(),
+        }
+    }
+}
+
 impl<T> GPUPool<T> {
     pub fn new(ctx: &mut Context, info: &BufferInfo) -> Self {
         let len = info.byte_size as usize / std::mem::size_of::<T>();
@@ -31,6 +42,10 @@ impl<T> GPUPool<T> {
             pool,
             _ctx: ctx,
         }
+    }
+    
+    pub fn get_gpu_handle(&self) -> Handle<Buffer> {
+        return self.buffer;
     }
 
     pub fn sync_down(&mut self, list: &mut CommandList) {
@@ -63,7 +78,7 @@ impl<T> GPUPool<T> {
     {
         self.pool.for_each_occupied(func);
     }
-    
+
     pub fn len(&self) -> usize {
         return self.pool.len();
     }
@@ -102,13 +117,16 @@ fn test_gpu_pool() {
 
     let mut ctx = Context::new(&Default::default()).unwrap();
 
-    let mut pool = GPUPool::new(&mut ctx, &BufferInfo {
-        debug_name: "Test Buffer",
-        byte_size: (std::mem::size_of::<S>() * TEST_AMT) as u32,
-        visibility: MemoryVisibility::CpuAndGpu,
-        initial_data: None,
-        ..Default::default()
-    });
+    let mut pool = GPUPool::new(
+        &mut ctx,
+        &BufferInfo {
+            debug_name: "Test Buffer",
+            byte_size: (std::mem::size_of::<S>() * TEST_AMT) as u32,
+            visibility: MemoryVisibility::CpuAndGpu,
+            initial_data: None,
+            ..Default::default()
+        },
+    );
 
     assert!(pool.len() == TEST_AMT);
 
@@ -123,8 +141,8 @@ fn test_gpu_pool() {
     }
     assert!(pool.len() == TEST_AMT);
 
-
     let mut list = ctx.begin_command_list(&Default::default()).unwrap();
     pool.sync_up(&mut list);
-    ctx.submit(&mut list, &Default::default()).expect("ASSERT: Should be able to sync data up");
+    ctx.submit(&mut list, &Default::default())
+        .expect("ASSERT: Should be able to sync data up");
 }

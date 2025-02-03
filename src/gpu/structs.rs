@@ -430,6 +430,7 @@ pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
     StorageBuffer(Handle<Buffer>),
     Dynamic(&'a DynamicAllocator),
+    DynamicStorage(&'a DynamicAllocator),
     SampledImage(Handle<ImageView>, Handle<Sampler>),
 }
 
