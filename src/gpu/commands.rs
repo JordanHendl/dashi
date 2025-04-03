@@ -32,7 +32,15 @@ impl Default for BufferCopy {
         }
     }
 }
-#[derive(Clone)]
+
+#[derive(Clone, Default)]
+pub struct ImageBufferCopy {
+    pub src: Handle<ImageView>,
+    pub dst: Handle<Buffer>,
+    pub dst_offset: usize,
+}
+
+#[derive(Clone, Default)]
 pub struct BufferImageCopy {
     pub src: Handle<Buffer>,
     pub dst: Handle<ImageView>,
@@ -331,6 +339,104 @@ impl CommandList {
 
     pub fn copy_buffers(&mut self, info: &BufferCopy) {
         self.append(Command::BufferCopyCommand(info.clone()));
+    }
+
+    pub fn copy_buffer_to_image(&mut self, rec: &BufferImageCopy) {
+        unsafe {
+            let view = (*self.ctx).image_views.get_ref(rec.dst).unwrap();
+            let img = (*self.ctx).images.get_ref(view.img).unwrap();
+            let old_layout = img.layout;
+            (*self.ctx).transition_image_stages(
+                self.cmd_buf,
+                rec.dst,
+                vk::ImageLayout::GENERAL,
+                self.last_op_stage,
+                vk::PipelineStageFlags::TRANSFER,
+                self.last_op_access,
+                vk::AccessFlags::TRANSFER_WRITE,
+            );
+
+            (*self.ctx).device.cmd_copy_buffer_to_image(
+                self.cmd_buf,
+                (*self.ctx).buffers.get_ref(rec.src).unwrap().buf,
+                img.img,
+                img.layout,
+                &[vk::BufferImageCopy {
+                    buffer_offset: rec.src_offset as u64,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: img.sub_layers.aspect_mask,
+                        mip_level: view.range.base_mip_level,
+                        base_array_layer: view.range.base_array_layer,
+                        layer_count: view.range.layer_count,
+                    },
+                    image_extent: img.extent,
+
+                    ..Default::default()
+                }],
+            );
+
+            (*self.ctx).transition_image_stages(
+                self.cmd_buf,
+                rec.dst,
+                old_layout,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::TRANSFER_READ,
+            );
+
+            self.last_op_stage = vk::PipelineStageFlags::TRANSFER;
+            self.last_op_access = vk::AccessFlags::MEMORY_WRITE;
+        };
+    }
+
+    pub fn copy_image_to_buffer(&mut self, rec: &ImageBufferCopy) {
+        unsafe {
+            let view = (*self.ctx).image_views.get_ref(rec.src).unwrap();
+            let img = (*self.ctx).images.get_ref(view.img).unwrap();
+            let old_layout = img.layout;
+            (*self.ctx).transition_image_stages(
+                self.cmd_buf,
+                rec.src,
+                vk::ImageLayout::GENERAL,
+                self.last_op_stage,
+                vk::PipelineStageFlags::TRANSFER,
+                self.last_op_access,
+                vk::AccessFlags::TRANSFER_READ,
+            );
+
+            (*self.ctx).device.cmd_copy_image_to_buffer(
+                self.cmd_buf,
+                img.img,
+                img.layout,
+                (*self.ctx).buffers.get_ref(rec.dst).unwrap().buf,
+                &[vk::BufferImageCopy {
+                    buffer_offset: rec.dst_offset as u64,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: img.sub_layers.aspect_mask,
+                        mip_level: view.range.base_mip_level,
+                        base_array_layer: view.range.base_array_layer,
+                        layer_count: view.range.layer_count,
+                    },
+                    image_extent: img.extent,
+
+                    ..Default::default()
+                }],
+            );
+
+            (*self.ctx).transition_image_stages(
+                self.cmd_buf,
+                rec.src,
+                old_layout,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::TRANSFER_READ,
+                vk::AccessFlags::TRANSFER_READ,
+            );
+
+            self.last_op_stage = vk::PipelineStageFlags::TRANSFER;
+            self.last_op_access = vk::AccessFlags::MEMORY_WRITE;
+        };
     }
 
     pub fn image_barrier(&mut self, barrier: &ImageBarrier) {

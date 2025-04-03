@@ -210,7 +210,7 @@ fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
     }
 }
 
-fn channel_count(fmt: &Format) -> u32 {
+pub fn channel_count(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8 => 3,
         Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA32F => 4,
@@ -219,7 +219,7 @@ fn channel_count(fmt: &Format) -> u32 {
     }
 }
 
-fn bytes_per_channel(fmt: &Format) -> u32 {
+pub fn bytes_per_channel(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8
         | Format::BGRA8
