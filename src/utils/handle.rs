@@ -316,6 +316,40 @@ impl<T> Pool<T> {
         return self.items.len();
     }
 
+    pub fn for_each_occupied_handle<F>(&self, func: F)
+    where
+        F: Fn(Handle<T>),
+    {
+        for (i, _) in self.items.iter().enumerate() {
+            let c = i as u32;
+            if !self.empty.contains(&c) {
+                let h = Handle::<T> {
+                    slot: i as u16,
+                    generation: self.generation[i],
+                    phantom: Default::default(),
+                };
+                func(h);
+            }
+        }
+    }
+
+    pub fn for_each_occupied_handle_mut<F>(&self, mut func: F)
+    where
+        F: FnMut(Handle<T>),
+    {
+        for (i, _) in self.items.iter().enumerate() {
+            let c = i as u32;
+            if !self.empty.contains(&c) {
+                let h = Handle::<T> {
+                    slot: i as u16,
+                    generation: self.generation[i],
+                    phantom: Default::default(),
+                };
+                func(h);
+            }
+        }
+    }
+
     pub fn for_each_occupied<F>(&self, mut func: F)
     where
         F: FnMut(&T),

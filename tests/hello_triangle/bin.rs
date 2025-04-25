@@ -76,7 +76,7 @@ fn main() {
         .unwrap()
         .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
         .unwrap_or_default();
-    
+
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
@@ -303,13 +303,10 @@ void main() {
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                subpass: Subpass {
-                    colors: &[Attachment {
-                        img: fb_view,
-                        clear_color: [0.0, 0.0, 0.0, 1.0],
-                    }],
-                    depth: None,
-                },
+                attachments: &[Attachment {
+                    img: fb_view,
+                    clear: ClearValue::Color([0.0, 0.0, 0.0, 1.0]),
+                }],
             })
             .unwrap();
 

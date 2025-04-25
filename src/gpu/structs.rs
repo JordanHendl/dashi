@@ -73,24 +73,27 @@ pub enum BlendOp {
     Max,
 }
 
-#[derive(Hash, Debug, Copy, Clone)]
+#[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum LoadOp {
     Load,
     Clear,
+    #[default]
     DontCare,
 }
 
-#[derive(Hash, Debug, Copy, Clone)]
+#[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum StoreOp {
     Store,
+    #[default]
     DontCare,
 }
 
-#[derive(Hash, Debug, Copy, Clone)]
+#[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
+    #[default]
     S1,
     S2,
 }
@@ -241,11 +244,22 @@ impl<'a> Default for ImageInfo<'a> {
     }
 }
 
+#[derive(Hash, Clone, Debug, Default, Copy)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum AspectMask {
+  #[default]
+  Color,
+  Depth,
+  Stencil,
+  DepthStencil,
+}
+
 pub struct ImageViewInfo<'a> {
     pub debug_name: &'a str,
     pub img: Handle<Image>,
     pub layer: u32,
     pub mip_level: u32,
+    pub aspect: AspectMask,
 }
 
 impl<'a> Default for ImageViewInfo<'a> {
@@ -255,6 +269,7 @@ impl<'a> Default for ImageViewInfo<'a> {
             img: Default::default(),
             layer: 0,
             mip_level: 0,
+            aspect: Default::default(),
         }
     }
 }
@@ -601,6 +616,7 @@ impl Default for ColorBlendState {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct GraphicsPipelineDetails {
+    pub subpass: u8,
     pub color_blend_states: Vec<ColorBlendState>,
     pub topology: Topology,
     pub culling: CullMode,
@@ -616,11 +632,12 @@ impl Default for GraphicsPipelineDetails {
             front_face: VertexOrdering::Clockwise,
             depth_test: None,
             color_blend_states: vec![Default::default()],
+            subpass: 0,
         }
     }
 }
 
-#[derive(Hash, Debug)]
+#[derive(Hash, Debug, Clone)]
 pub struct SpecializationInfo<'a> {
     pub slot: usize,
     pub data: &'a [u8], // ConstSlice in Rust can be a reference slice
@@ -630,11 +647,12 @@ pub struct SpecializationInfo<'a> {
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderPrimitiveType {
     Vec2,
+    Vec3,
     Vec4,
     IVec4,
 }
 
-#[derive(Hash, Debug)]
+#[derive(Hash, Debug, Clone)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct VertexEntryInfo {
     pub format: ShaderPrimitiveType,
@@ -660,37 +678,73 @@ pub struct SubpassDescription<'a> {
     pub subpass_dependencies: &'a [SubpassDependency],
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
+pub enum ClearValue {
+    Color([f32; 4]),
+    IntColor([i32; 4]),
+    UintColor([u32; 4]),
+    DepthStencil { depth: f32, stencil: u32 },
+}
+
+impl Hash for ClearValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            ClearValue::Color(vals) => {
+                0u8.hash(state); // variant tag
+                for v in vals {
+                    v.to_bits().hash(state); // preserve NaNs and -0.0 vs 0.0
+                }
+            }
+            ClearValue::IntColor(vals) => {
+                1u8.hash(state);
+                vals.hash(state);
+            }
+            ClearValue::UintColor(vals) => {
+                2u8.hash(state);
+                vals.hash(state);
+            }
+            ClearValue::DepthStencil { depth, stencil } => {
+                3u8.hash(state);
+                depth.to_bits().hash(state);
+                stencil.hash(state);
+            }
+        }
+    }
+}
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum AttachmentType {
+    Color,
+    Depth,
+}
+
+#[derive(Clone, Copy)]
 pub struct Attachment {
     pub img: Handle<ImageView>,
-    pub clear_color: [f32; 4],
+    pub clear: ClearValue,
 }
 
 impl Default for Attachment {
     fn default() -> Self {
         Self {
             img: Default::default(),
-            clear_color: [1.0, 1.0, 1.0, 1.0],
+            clear: ClearValue::Color([0.0, 0.0, 0.0, 1.0]),
         }
     }
 }
-
-impl Eq for Attachment {}
 
 impl Hash for Attachment {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.img.hash(state);
-        for color in self.clear_color {
-            (color as i32).hash(state);
-        }
+        self.clear.hash(state);
     }
 }
 
-#[derive(Clone, Default, Hash, PartialEq, Eq)]
-pub struct Subpass<'a> {
-    pub colors: &'a [Attachment],
-    pub depth: Option<Attachment>,
-}
+//#[derive(Clone, Default, Hash, PartialEq, Eq)]
+//pub struct Subpass<'a> {
+//    pub colors: &'a [Attachment],
+//    pub depth: Option<Attachment>,
+//}
 
 pub struct RenderPassInfo<'a> {
     pub debug_name: &'a str,
@@ -698,14 +752,14 @@ pub struct RenderPassInfo<'a> {
     pub subpasses: &'a [SubpassDescription<'a>],
 }
 
-#[derive(Hash, Debug)]
+#[derive(Hash, Debug, Clone)]
 pub struct VertexDescriptionInfo<'a> {
     pub entries: &'a [VertexEntryInfo], // ConstSlice in Rust can be a reference slice
     pub stride: usize,
     pub rate: VertexRate,
 }
 
-#[derive(Hash, Debug)]
+#[derive(Hash, Debug, Clone)]
 pub struct PipelineShaderInfo<'a> {
     pub stage: ShaderType,
     pub spirv: &'a [u32], // ConstSlice in Rust can be a reference slice

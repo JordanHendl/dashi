@@ -48,6 +48,17 @@ impl From<BlendFactor> for vk::BlendFactor {
     }
 }
 
+impl From<AspectMask> for vk::ImageAspectFlags {
+    fn from(value: AspectMask) -> Self {
+        match value {
+            AspectMask::Color => vk::ImageAspectFlags::COLOR,
+            AspectMask::Depth => vk::ImageAspectFlags::DEPTH,
+            AspectMask::Stencil => vk::ImageAspectFlags::STENCIL,
+            AspectMask::DepthStencil => vk::ImageAspectFlags::STENCIL | vk::ImageAspectFlags::DEPTH,
+        }
+    }
+}
+
 impl From<BlendOp> for vk::BlendOp {
     fn from(op: BlendOp) -> Self {
         match op {
@@ -258,9 +269,20 @@ fn convert_sample_count(sample_count: SampleCount) -> vk::SampleCountFlags {
 pub struct Buffer {
     buf: vk::Buffer,
     alloc: vk_mem::Allocation,
+    offset: u32,
     size: u32,
 }
 
+impl Clone for Buffer {
+    fn clone(&self) -> Self {
+        Self {
+            buf: self.buf.clone(),
+            alloc: unsafe { std::mem::transmute_copy(&self.alloc) },
+            offset: self.offset.clone(),
+            size: self.size.clone(),
+        }
+    }
+}
 impl Handle<Buffer> {
     pub fn to_unmapped_dynamic(&self, byte_offset: u32) -> DynamicBuffer {
         return DynamicBuffer {
@@ -372,8 +394,7 @@ pub struct ImageView {
 
 #[derive(Clone, Default)]
 pub(super) struct SubpassContainer {
-    pub(super) _colors: Vec<Attachment>,
-    pub(super) _depth: Option<Attachment>,
+    pub(super) attachments: Vec<Attachment>,
     pub(super) fb: vk::Framebuffer,
     pub(super) clear_values: Vec<vk::ClearValue>,
 }
@@ -820,6 +841,7 @@ impl Context {
                 img: img,
                 layer: 0,
                 mip_level: 0,
+                ..Default::default()
             })
             .unwrap();
 
@@ -987,12 +1009,15 @@ impl Context {
 
     pub fn make_image_view(&mut self, info: &ImageViewInfo) -> Result<Handle<ImageView>, GPUError> {
         let img = self.images.get_ref(info.img).unwrap();
+
+        let aspect: vk::ImageAspectFlags = info.aspect.into();
+
         let sub_range = vk::ImageSubresourceRange::builder()
             .base_array_layer(info.layer)
             .layer_count(1)
             .base_mip_level(info.mip_level)
             .level_count(1)
-            .aspect_mask(img.sub_layers.aspect_mask)
+            .aspect_mask(aspect)
             .build();
 
         let view = unsafe {
@@ -1167,6 +1192,16 @@ impl Context {
             img: image,
             layer: 0,
             mip_level: 0,
+            aspect: match info.format {
+                Format::R8Sint |
+                Format::R8Uint |
+                Format::RGB8 |
+                Format::BGRA8 |
+                Format::BGRA8Unorm |
+                Format::RGBA8 |
+                Format::RGBA32F => AspectMask::Color,
+                Format::D24S8 => AspectMask::DepthStencil,
+            }
         })?;
 
         let mut list = self.begin_command_list(&Default::default())?;
@@ -1229,6 +1264,29 @@ impl Context {
         });
     }
 
+    pub fn suballoc_from(
+        &mut self,
+        parent: Handle<Buffer>,
+        offset: u32,
+        size: u32,
+    ) -> Option<Handle<Buffer>> {
+        let src = self.buffers.get_ref(parent).unwrap();
+        let mut cpy = src.clone();
+
+        if src.size - cpy.offset + offset < size {
+            return None;
+        }
+
+        cpy.size = size;
+        cpy.offset += offset;
+        match self.buffers.insert(cpy) {
+            Some(handle) => {
+                return Some(handle);
+            }
+            None => return None,
+        }
+    }
+
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
         let usage = vk::BufferUsageFlags::INDEX_BUFFER
             | vk::BufferUsageFlags::VERTEX_BUFFER
@@ -1267,6 +1325,7 @@ impl Context {
                 buf: buffer,
                 alloc: allocation,
                 size: info.byte_size,
+                offset: 0,
             }) {
                 Some(handle) => {
                     self.init_buffer(handle, info)?;
@@ -1289,6 +1348,113 @@ impl Context {
         self.image_views.for_each_occupied_mut(|img| {
             unsafe { self.device.destroy_image_view(img.view, None) };
         });
+    }
+
+    pub fn destroy(mut self) {
+        // Drain and destroy any pending command lists
+        //        for (cmd, fence) in self.cmds_to_release.drain(..) {
+        //            let _ = self.wait(fence.clone());
+        //            unsafe { self.device.free_command_buffers(self.pool, &[cmd.cmd_buf]) };
+        //            let fence = self.fences.get_mut_ref(fence).unwrap();
+        //            unsafe { self.device.destroy_fence(fence.raw, None) };
+        //        }
+
+        //        // Bind groups
+        //        self.bind_groups.for_each_occupied_mut(|bg| unsafe {
+        //            self.device.free_descriptor_sets(bg.set, &[bg.set]).ok();
+        //        });
+
+        // Bind group layouts
+        self.bind_group_layouts
+            .for_each_occupied_mut(|layout| unsafe {
+                self.device
+                    .destroy_descriptor_set_layout(layout.layout, None);
+                self.device.destroy_descriptor_pool(layout.pool, None);
+            });
+
+        // Semaphores
+        self.semaphores.for_each_occupied_mut(|s| {
+            unsafe { self.device.destroy_semaphore(s.raw, None) };
+        });
+
+        // Fences
+        self.fences.for_each_occupied_mut(|f| {
+            unsafe { self.device.destroy_fence(f.raw, None) };
+        });
+
+        // Samplers
+        self.samplers.for_each_occupied_mut(|s| {
+            unsafe { self.device.destroy_sampler(s.sampler, None) };
+        });
+
+        // Image views
+        self.image_views.for_each_occupied_mut(|view| {
+            unsafe { self.device.destroy_image_view(view.view, None) };
+        });
+
+        // Images
+        self.images.for_each_occupied_mut(|img| {
+            unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+        });
+
+        // Buffers
+        self.buffers.for_each_occupied_mut(|buf| {
+            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+        });
+
+        // Render passes
+        self.render_passes.for_each_occupied_mut(|rp| {
+            for (_, subpass) in &rp.subpasses {
+                unsafe { self.device.destroy_framebuffer(subpass.fb, None) };
+            }
+            unsafe { self.device.destroy_render_pass(rp.raw, None) };
+        });
+
+        // Graphics pipeline layouts
+        self.gfx_pipeline_layouts.for_each_occupied_mut(|layout| {
+            for stage in &layout.shader_stages {
+                unsafe {
+                    self.device.destroy_shader_module(stage.module, None);
+                }
+            }
+            unsafe { self.device.destroy_pipeline_layout(layout.layout, None) };
+        });
+
+        // Graphics pipelines
+        self.gfx_pipelines.for_each_occupied_mut(|pipeline| unsafe {
+            self.device.destroy_pipeline(pipeline.raw, None);
+        });
+
+        // Compute pipeline layouts
+        self.compute_pipeline_layouts
+            .for_each_occupied_mut(|layout| unsafe {
+                self.device
+                    .destroy_shader_module(layout.shader_stage.module, None);
+                self.device.destroy_pipeline_layout(layout.layout, None);
+            });
+
+        // Compute pipelines
+        self.compute_pipelines
+            .for_each_occupied_mut(|pipeline| unsafe {
+                self.device.destroy_pipeline(pipeline.raw, None);
+            });
+
+        // Command pool
+        unsafe {
+            self.device.destroy_command_pool(self.pool, None);
+        }
+
+        // Allocator cleanup handled separately
+        //        self.allocator.cleanup().ok(); // optional: wrap in Result if needed
+        //
+        
+        drop(self.allocator);
+
+        // Device and instance
+        unsafe {
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
+        }
     }
 
     pub fn destroy_dynamic_allocator(&mut self, alloc: DynamicAllocator) {
@@ -1317,11 +1483,21 @@ impl Context {
     pub fn destroy_image_view(&mut self, handle: Handle<ImageView>) {
         let img = self.image_views.get_mut_ref(handle).unwrap();
         unsafe { self.device.destroy_image_view(img.view, None) };
+        self.image_views.release(handle);
     }
     pub fn destroy_image(&mut self, handle: Handle<Image>) {
         let img = self.images.get_mut_ref(handle).unwrap();
         unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
         self.images.release(handle);
+    }
+
+    pub fn destroy_render_pass(&mut self, handle: Handle<RenderPass>) {
+        let rp = self.render_passes.get_ref(handle).unwrap();
+        for (id, sb) in &rp.subpasses {
+            unsafe { self.device.destroy_framebuffer(sb.fb, None) };
+        }
+
+        unsafe { self.device.destroy_render_pass(rp.raw, None) };
     }
 
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
@@ -1740,7 +1916,7 @@ impl Context {
                         .build();
 
                     buffer_infos.push(buffer_info);
-
+                        println!("a");
                     let write_descriptor_set = vk::WriteDescriptorSet::builder()
                         .dst_set(descriptor_set)
                         .dst_binding(binding_info.binding)
@@ -1760,6 +1936,7 @@ impl Context {
                         .sampler(sampler.sampler)
                         .build();
 
+                        println!("b");
                     image_infos.push(image_info);
 
                     let write_descriptor_set = vk::WriteDescriptorSet::builder()
@@ -1892,7 +2069,7 @@ impl Context {
         let mut deps = Vec::with_capacity(256);
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
-            let _attachment_offset = attachments.len();
+            let attachment_offset = attachments.len();
             let color_offset = color_attachment_refs.len();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
@@ -1907,12 +2084,13 @@ impl Context {
                     final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                     ..Default::default()
                 };
-                attachments.push(attachment_desc);
 
                 let attachment_ref = vk::AttachmentReference {
-                    attachment: index as u32,
+                    attachment: attachment_offset as u32 + index as u32,
                     layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 };
+
+                attachments.push(attachment_desc);
                 color_attachment_refs.push(attachment_ref);
             }
 
@@ -1936,16 +2114,22 @@ impl Context {
                 });
             }
 
+            let colors = if color_attachment_refs.is_empty() {
+                &[]
+            } else {
+                &color_attachment_refs[color_offset..]
+            };
+
             // Create subpass description
             subpasses.push(match depth_stencil_attachment_ref.as_ref() {
                 Some(d) => vk::SubpassDescription::builder()
                     .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                    .color_attachments(&color_attachment_refs[color_offset..])
+                    .color_attachments(colors)
                     .depth_stencil_attachment(d)
                     .build(),
                 None => vk::SubpassDescription::builder()
                     .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-                    .color_attachments(&color_attachment_refs[color_offset..])
+                    .color_attachments(colors)
                     .build(),
             });
 
@@ -2049,6 +2233,7 @@ impl Context {
                     .binding(0) // Binding 0 for now
                     .format(match entry.format {
                         ShaderPrimitiveType::Vec4 => vk::Format::R32G32B32A32_SFLOAT,
+                        ShaderPrimitiveType::Vec3 => vk::Format::R32G32B32_SFLOAT,
                         ShaderPrimitiveType::Vec2 => vk::Format::R32G32_SFLOAT,
                         ShaderPrimitiveType::IVec4 => vk::Format::R32G32B32A32_SINT,
                     })
@@ -2229,7 +2414,7 @@ impl Context {
                 .color_blend_state(&color_blend_state)
                 .layout(layout.layout)
                 .render_pass(rp)
-                .subpass(0)
+                .subpass(info.subpass_id as u32)
                 .build(),
             None => vk::GraphicsPipelineCreateInfo::builder()
                 .stages(&layout.shader_stages)
@@ -2241,7 +2426,7 @@ impl Context {
                 .color_blend_state(&color_blend_state)
                 .layout(layout.layout)
                 .render_pass(rp)
-                .subpass(0)
+                .subpass(info.subpass_id as u32)
                 .build(),
         };
 
@@ -2279,33 +2464,42 @@ impl Context {
 
         let mut created_images = Vec::new();
         // Collect the image views for color attachments
-        for color_attachment in info.subpass.colors.iter() {
-            let created_image_handle = color_attachment.img;
-            self.oneshot_transition_image(
-                color_attachment.img,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let view = self.image_views.get_ref(created_image_handle).unwrap();
-            let image = self.images.get_ref(view.img).unwrap();
-            let color_view = view.view;
+        for attachment in info.attachments.iter() {
+            match attachment.clear {
+                ClearValue::Color(_) | ClearValue::IntColor(_) | ClearValue::UintColor(_) => {
+                    let created_image_handle = attachment.img;
+                    self.oneshot_transition_image(
+                        attachment.img,
+                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    );
+                    let view = self.image_views.get_ref(created_image_handle).unwrap();
+                    let image = self.images.get_ref(view.img).unwrap();
+                    let color_view = view.view;
 
-            width = std::cmp::min(image.dim[0], width);
-            height = std::cmp::min(image.dim[1], height);
-            attachments.push(color_view);
-            created_images.push(view.img);
-        }
-        // Collect the image view for depth/stencil attachment if present
-        if let Some(depth_stencil_attachment) = &info.subpass.depth {
-            let view = depth_stencil_attachment.img;
-            self.oneshot_transition_image(view, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-            let depth_view_info = self.image_views.get_ref(view).unwrap();
-            let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
-            let depth_view = depth_view_info.view;
-            width = std::cmp::min(depth_img.dim[0], width);
-            height = std::cmp::min(depth_img.dim[1], height);
+                    width = std::cmp::min(image.dim[0], width);
+                    height = std::cmp::min(image.dim[1], height);
+                    attachments.push(color_view);
+                    created_images.push(view.img);
+                }
+                ClearValue::DepthStencil {
+                    depth: _,
+                    stencil: _,
+                } => {
+                    let view = attachment.img;
+                    self.oneshot_transition_image(
+                        view,
+                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    );
+                    let depth_view_info = self.image_views.get_ref(view).unwrap();
+                    let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
+                    let depth_view = depth_view_info.view;
+                    width = std::cmp::min(depth_img.dim[0], width);
+                    height = std::cmp::min(depth_img.dim[1], height);
 
-            attachments.push(depth_view);
-            created_images.push(depth_view_info.img);
+                    attachments.push(depth_view);
+                    created_images.push(depth_view_info.img);
+                }
+            }
         }
 
         let rp = self.render_passes.get_ref(info.render_pass).unwrap();
@@ -2461,6 +2655,7 @@ impl Context {
                         img: handle,
                         layer: 0,
                         mip_level: 0,
+                        ..Default::default()
                     })?;
 
                     view_handles.push(h);

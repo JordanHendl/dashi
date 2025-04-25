@@ -1,7 +1,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::{
-    Context, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Subpass, SubpassContainer,
+    Attachment, AttachmentType, Context, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand,
+    SubpassContainer,
 };
 
 use super::{
@@ -91,10 +92,10 @@ impl Default for Dispatch {
 pub struct DrawBegin<'a> {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub subpass: Subpass<'a>,
+    pub attachments: &'a [Attachment],
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Draw {
     pub vertices: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
@@ -136,7 +137,7 @@ pub struct BindIndexedBG {
 pub struct RenderPassBegin<'a> {
     pub render_pass: Handle<RenderPass>,
     pub viewport: Viewport,
-    pub subpass: Subpass<'a>,
+    pub attachments: &'a [Attachment],
 }
 
 #[derive(Clone)]
@@ -497,7 +498,10 @@ impl CommandList {
             let mut _fb = Default::default();
             let mut _clear_values: &[vk::ClearValue] = &[];
             let mut hasher = DefaultHasher::new();
-            info.subpass.hash(&mut hasher);
+            for attach in info.attachments {
+                attach.hash(&mut hasher);
+            }
+
             let hash = hasher.finish();
             if let Some(entry) = rp.subpasses.get(&hash) {
                 _fb = entry.fb.clone();
@@ -505,27 +509,34 @@ impl CommandList {
             } else {
                 _fb = self.get_ctx().make_framebuffer(&info)?;
                 let mut cv = Vec::new();
-                for color in info.subpass.colors {
-                    cv.push(vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: color.clear_color,
-                        },
-                    });
+                for a in info.attachments {
+                    match a.clear {
+                        crate::ClearValue::Color(c) => {
+                            cv.push(vk::ClearValue {
+                                color: vk::ClearColorValue { float32: c },
+                            });
+                        }
+                        crate::ClearValue::IntColor(c) => {
+                            cv.push(vk::ClearValue {
+                                color: vk::ClearColorValue { int32: c },
+                            });
+                        }
+                        crate::ClearValue::UintColor(c) => {
+                            cv.push(vk::ClearValue {
+                                color: vk::ClearColorValue { uint32: c },
+                            });
+                        }
+                        crate::ClearValue::DepthStencil { depth, stencil } => {
+                            cv.push(vk::ClearValue {
+                                depth_stencil: vk::ClearDepthStencilValue { depth, stencil },
+                            });
+                        }
+                    }
                 }
-                if let Some(c) = &info.subpass.depth {
-                    cv.push(vk::ClearValue {
-                        depth_stencil: vk::ClearDepthStencilValue {
-                            depth: c.clear_color[0],
-                            stencil: c.clear_color[1] as u32,
-                        },
-                    });
-                }
-
                 rp.subpasses.insert(
                     hash,
                     SubpassContainer {
-                        _colors: info.subpass.colors.to_vec(),
-                        _depth: info.subpass.depth.clone(),
+                        attachments: info.attachments.to_vec(),
                         fb: _fb,
                         clear_values: cv,
                     },
@@ -565,7 +576,7 @@ impl CommandList {
             self.begin_render_pass(&RenderPassBegin {
                 render_pass: gfx.render_pass,
                 viewport: info.viewport,
-                subpass: info.subpass.clone(),
+                attachments: info.attachments,
             })?;
             (*self.ctx).device.cmd_bind_pipeline(
                 self.cmd_buf,
@@ -603,6 +614,23 @@ impl CommandList {
 
         self.curr_rp = None;
         self.curr_pipeline = None;
+        Ok(())
+    }
+
+    pub fn next_subpass(&mut self) -> Result<(), GPUError> {
+        if self.curr_rp.is_none() {
+            return Err(GPUError::LibraryError());
+        }
+
+        unsafe {
+            (*self.ctx)
+                .device
+                .cmd_next_subpass(self.cmd_buf, vk::SubpassContents::INLINE);
+        }
+
+        self.last_op_stage = vk::PipelineStageFlags::NONE;
+        self.last_op_access = vk::AccessFlags::NONE;
+
         Ok(())
     }
 
