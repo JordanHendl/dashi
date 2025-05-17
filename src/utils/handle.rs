@@ -16,9 +16,7 @@ impl<T> Handle<T> {
     }
 }
 
-impl<T> Eq for Handle<T> {
-}
-
+impl<T> Eq for Handle<T> {}
 
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -90,13 +88,13 @@ impl<T> ItemList<T> {
         return self.len() * std::mem::size_of::<T>();
     }
 
-//    fn as_slice(&self) -> &[T] {
-//        return unsafe { std::slice::from_raw_parts(self.items, self.len()) };
-//    }
-//
-//    fn as_slice_mut(&self) -> &mut [T] {
-//        return unsafe { std::slice::from_raw_parts_mut(self.items, self.len()) };
-//    }
+    //    fn as_slice(&self) -> &[T] {
+    //        return unsafe { std::slice::from_raw_parts(self.items, self.len()) };
+    //    }
+    //
+    //    fn as_slice_mut(&self) -> &mut [T] {
+    //        return unsafe { std::slice::from_raw_parts_mut(self.items, self.len()) };
+    //    }
 
     fn expand(&mut self, amt: usize) {
         if !self.imported {
@@ -121,13 +119,13 @@ impl<T> ItemList<T> {
         return unsafe { self.end.offset_from(self.items) as usize };
     }
 
-//    fn free(&self) {
-//        if !self.imported {
-//            let byte_size = self.len() as usize * std::mem::size_of::<T>();
-//            let layout = Layout::from_size_align(byte_size, std::mem::size_of::<T>()).unwrap();
-//            unsafe { dealloc(self.items as *mut u8, layout) };
-//        }
-//    }
+    //    fn free(&self) {
+    //        if !self.imported {
+    //            let byte_size = self.len() as usize * std::mem::size_of::<T>();
+    //            let layout = Layout::from_size_align(byte_size, std::mem::size_of::<T>()).unwrap();
+    //            unsafe { dealloc(self.items as *mut u8, layout) };
+    //        }
+    //    }
 
     fn iter(&self) -> ItemListRef<'_, T> {
         ItemListRef {
@@ -408,52 +406,60 @@ impl<T> Pool<T> {
     }
 }
 
-#[test]
-fn test_pool() {
-    const TEST_AMT: usize = 2048;
-    #[derive(Default, Debug)]
-    struct S {
-        _big_data: [u32; 16],
-    }
-    let mut pool: Pool<S> = Pool::new(TEST_AMT);
-    assert!(pool.items.len() == TEST_AMT);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
 
-    let mut p = Vec::new();
+    #[test]
+    #[serial]
+    fn test_pool() {
+        const TEST_AMT: usize = 2048;
+        #[derive(Default, Debug)]
+        struct S {
+            _big_data: [u32; 16],
+        }
+        let mut pool: Pool<S> = Pool::new(TEST_AMT);
+        assert!(pool.items.len() == TEST_AMT);
 
-    for _it in 0..TEST_AMT + 1 {
-        p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
-    }
+        let mut p = Vec::new();
 
-    assert!(pool.items.len() > TEST_AMT);
+        for _it in 0..TEST_AMT + 1 {
+            p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
+        }
 
-    pool.for_each_occupied_mut(|f| {
-        f._big_data[0] = 5;
-        println!("{}", f._big_data[0]);
-    });
-}
+        assert!(pool.items.len() > TEST_AMT);
 
-#[test]
-fn test_pool_imported() {
-    const TEST_AMT: usize = 2048;
-    #[derive(Default)]
-    struct S {
-        _big_data: [u32; 16],
-    }
-    let byte_size = TEST_AMT as usize * std::mem::size_of::<S>();
-    let layout = Layout::from_size_align(byte_size, 1).unwrap();
-    let ptr = unsafe { alloc_zeroed(layout) };
-
-    let mut pool: Pool<S> = Pool::new_preallocated(ptr, TEST_AMT);
-    assert!(pool.items.len() == TEST_AMT);
-
-    let mut p = Vec::new();
-
-    for _it in 0..TEST_AMT {
-        p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
+        pool.for_each_occupied_mut(|f| {
+            f._big_data[0] = 5;
+            println!("{}", f._big_data[0]);
+        });
     }
 
-    for _it in 0..TEST_AMT {
-        assert!(pool.insert(S::default()) == None);
+    #[test]
+    #[serial]
+    fn test_pool_imported() {
+        const TEST_AMT: usize = 2048;
+        #[derive(Default)]
+        struct S {
+            _big_data: [u32; 16],
+        }
+        let byte_size = TEST_AMT as usize * std::mem::size_of::<S>();
+        let layout = Layout::from_size_align(byte_size, 1).unwrap();
+        let ptr = unsafe { alloc_zeroed(layout) };
+
+        let mut pool: Pool<S> = Pool::new_preallocated(ptr, TEST_AMT);
+        assert!(pool.items.len() == TEST_AMT);
+
+        let mut p = Vec::new();
+
+        for _it in 0..TEST_AMT {
+            p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
+        }
+
+        for _it in 0..TEST_AMT {
+            assert!(pool.insert(S::default()) == None);
+        }
+        assert!(pool.items.len() == TEST_AMT);
     }
-    assert!(pool.items.len() == TEST_AMT);
 }

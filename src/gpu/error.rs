@@ -24,6 +24,7 @@ pub enum GPUError {
     LoadingError(ash::LoadingError),
     LibraryError(),
     SlotError(),
+    HeadlessDisplayNotSupported,
 }
 
 //impl From<SlotError> for GPUError {

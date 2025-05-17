@@ -15,6 +15,7 @@ pub mod device_selector;
 pub use device_selector::*;
 pub mod structs;
 pub use structs::*;
+pub mod builders;
 pub mod commands;
 pub use commands::*;
 pub mod framed_cmd_list;
@@ -416,12 +417,14 @@ pub struct BindGroupLayout {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct BindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct IndexedBindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
@@ -557,13 +560,40 @@ pub struct Context {
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
     #[cfg(feature = "dashi-sdl2")]
-    pub(super) sdl_video: sdl2::VideoSubsystem,
+    pub(super) sdl_video: Option<sdl2::VideoSubsystem>,
     #[cfg(debug_assertions)]
     pub(super) debug_utils: ash::extensions::ext::DebugUtils,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new(&ContextInfo::default()).unwrap()
+    }
+}
+
+impl std::panic::UnwindSafe for Context {}
+
 impl Context {
-    pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
+    fn init_core(
+        info: &ContextInfo,
+        windowed: bool,
+    ) -> Result<
+        (
+            ash::Entry,
+            ash::Instance,
+            vk::PhysicalDevice,
+            ash::Device,
+            ash::vk::PhysicalDeviceProperties,
+            vk::CommandPool,
+            vk_mem::Allocator,
+            Queue,
+        ),
+        GPUError,
+    > {
+        // === copy the first ~150 lines of Context::new up through
+        //     command-pool + allocator creation + queue setup + debug_utils
+        //
+        //     then return all of those out.
         let app_info = vk::ApplicationInfo {
             api_version: vk::make_api_version(0, 1, 3, 0),
             ..Default::default()
@@ -571,21 +601,24 @@ impl Context {
 
         // Create instance
         let entry = unsafe { Entry::load() }?;
-        let requested_instance_extensions = [
-            #[cfg(debug_assertions)]
-            ash::extensions::ext::DebugUtils::name().as_ptr(),
-            ash::extensions::khr::Surface::name().as_ptr(),
+        let mut inst_exts = Vec::new();
+        #[cfg(debug_assertions)]
+        inst_exts.push(ash::extensions::ext::DebugUtils::name().as_ptr());
+
+        if windowed {
+            // only pull in surface‐extensions when we actually need a window
+            inst_exts.push(ash::extensions::khr::Surface::name().as_ptr());
             #[cfg(target_os = "linux")]
-            ash::extensions::khr::XlibSurface::name().as_ptr(),
+            inst_exts.push(ash::extensions::khr::XlibSurface::name().as_ptr());
             #[cfg(target_os = "windows")]
-            ash::extensions::khr::Win32Surface::name().as_ptr(),
-        ];
+            inst_exts.push(ash::extensions::khr::Win32Surface::name().as_ptr());
+        }
 
         let instance = unsafe {
             entry.create_instance(
                 &vk::InstanceCreateInfo::builder()
                     .application_info(&app_info)
-                    .enabled_extension_names(&requested_instance_extensions)
+                    .enabled_extension_names(&inst_exts)
                     .build(),
                 None,
             )
@@ -640,15 +673,21 @@ impl Context {
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
 
-        let wanted_extensions: Vec<*const c_char> = vec![
-            ash::extensions::khr::Swapchain::name().as_ptr(),
-            unsafe {
+        let wanted_extensions: Vec<*const c_char> = if windowed {
+            vec![
+                ash::extensions::khr::Swapchain::name().as_ptr(),
+                unsafe {
+                    std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
+                },
+                vk::GoogleHlslFunctionality1Fn::name().as_ptr(),
+                #[cfg(any(target_os = "macos", target_os = "ios"))]
+                KhrPortabilitySubsetFn::name().as_ptr(),
+            ]
+        } else {
+            vec![unsafe {
                 std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
-            },
-            vk::GoogleHlslFunctionality1Fn::name().as_ptr(),
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            KhrPortabilitySubsetFn::name().as_ptr(),
-        ];
+            }]
+        };
 
         let extensions_to_enable: Vec<*const c_char> = wanted_extensions
             .into_iter()
@@ -701,24 +740,37 @@ impl Context {
             )
         }?;
 
-        #[cfg(debug_assertions)]
-        let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-
-        let sdl_context = sdl2::init().unwrap();
-        let sdl_video = sdl_context.video().unwrap();
-        return Ok(Context {
+        return Ok((
             entry,
             instance,
             pdevice,
             device,
-            properties: device_prop,
+            device_prop,
+            pool,
+            allocator,
+            gfx_queue,
+        ));
+    }
+
+    pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
+        let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
+            Self::init_core(info, false)?;
+
+        #[cfg(debug_assertions)]
+        let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+
+        let mut ctx = Context {
+            entry,
+            instance,
+            pdevice,
+            device,
+            properties,
             pool,
             allocator,
             gfx_queue,
 
             buffers: Default::default(),
             render_passes: Default::default(),
-
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
@@ -731,14 +783,66 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
-            #[cfg(feature = "dashi-sdl2")]
-            sdl_context,
 
             #[cfg(feature = "dashi-sdl2")]
-            sdl_video,
+            sdl_context: sdl2::init().unwrap(),
+            #[cfg(feature = "dashi-sdl2")]
+            sdl_video: None,
             #[cfg(debug_assertions)]
             debug_utils,
-        });
+        };
+
+        Ok(ctx)
+    }
+
+    pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
+        let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
+            Self::init_core(info, true)?;
+
+        #[cfg(debug_assertions)]
+        let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+
+        let mut ctx = Context {
+            entry,
+            instance,
+            pdevice,
+            device,
+            properties,
+            pool,
+            allocator,
+            gfx_queue,
+
+            buffers: Default::default(),
+            render_passes: Default::default(),
+            semaphores: Default::default(),
+            fences: Default::default(),
+            images: Default::default(),
+            image_views: Default::default(),
+            samplers: Default::default(),
+            bind_group_layouts: Default::default(),
+            bind_groups: Default::default(),
+            gfx_pipeline_layouts: Default::default(),
+            gfx_pipelines: Default::default(),
+            compute_pipeline_layouts: Default::default(),
+            compute_pipelines: Default::default(),
+            cmds_to_release: Default::default(),
+
+            #[cfg(feature = "dashi-sdl2")]
+            sdl_context: sdl2::init().unwrap(),
+            #[cfg(feature = "dashi-sdl2")]
+            sdl_video: None,
+            #[cfg(debug_assertions)]
+            debug_utils,
+        };
+
+        // and then—*if* we're building with SDL2—init the windowing bits:
+        #[cfg(feature = "dashi-sdl2")]
+        {
+            let video = ctx.sdl_context.video().unwrap();
+            ctx.sdl_video = Some(video);
+        }
+
+        Ok(ctx)
     }
 
     #[cfg(feature = "dashi-sdl2")]
@@ -897,6 +1001,66 @@ impl Context {
         };
 
         img.layout = layout;
+    }
+
+    /// Utility: given an image’s old & new layouts, pick the correct
+    /// src/dst pipeline stages and access masks.
+    fn barrier_masks_for_transition(
+        &self,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) -> (
+        vk::PipelineStageFlags,
+        vk::AccessFlags,
+        vk::PipelineStageFlags,
+        vk::AccessFlags,
+    ) {
+        use vk::{AccessFlags as AF, ImageLayout as L, PipelineStageFlags as PS};
+
+        match (old_layout, new_layout) {
+            // UNDEFINED → TRANSFER_DST (first use as a copy/blit target)
+            (L::UNDEFINED, L::TRANSFER_DST_OPTIMAL) => (
+                PS::TOP_OF_PIPE,
+                AF::empty(),
+                PS::TRANSFER,
+                AF::TRANSFER_WRITE,
+            ),
+
+            // COLOR_ATTACHMENT_OPTIMAL → TRANSFER_SRC (reading from a color buffer)
+            (L::COLOR_ATTACHMENT_OPTIMAL, L::TRANSFER_SRC_OPTIMAL) => (
+                PS::COLOR_ATTACHMENT_OUTPUT,
+                AF::COLOR_ATTACHMENT_WRITE,
+                PS::TRANSFER,
+                AF::TRANSFER_READ,
+            ),
+
+            // TRANSFER_DST → SHADER_READ (e.g. sample from an image you just wrote)
+            (L::TRANSFER_DST_OPTIMAL, L::SHADER_READ_ONLY_OPTIMAL) => (
+                PS::TRANSFER,
+                AF::TRANSFER_WRITE,
+                PS::FRAGMENT_SHADER,
+                AF::SHADER_READ,
+            ),
+
+            // SHADER_READ → COLOR_ATTACHMENT (rendering over a previously sampled image)
+            (L::SHADER_READ_ONLY_OPTIMAL, L::COLOR_ATTACHMENT_OPTIMAL) => (
+                PS::FRAGMENT_SHADER,
+                AF::SHADER_READ,
+                PS::COLOR_ATTACHMENT_OUTPUT,
+                AF::COLOR_ATTACHMENT_WRITE,
+            ),
+
+            // TRANSFER_SRC → GENERAL (reset to general for arbitrary use)
+            (L::TRANSFER_SRC_OPTIMAL, L::GENERAL) | (L::TRANSFER_DST_OPTIMAL, L::GENERAL) => (
+                PS::TRANSFER,
+                AF::TRANSFER_READ | AF::TRANSFER_WRITE,
+                PS::ALL_COMMANDS,
+                AF::empty(),
+            ),
+
+            // Any other combination → worst-case “all commands”
+            _ => (PS::ALL_COMMANDS, AF::empty(), PS::ALL_COMMANDS, AF::empty()),
+        }
     }
 
     fn transition_image(
@@ -1163,7 +1327,7 @@ impl Context {
 
                 let staging = self.make_buffer(&new_info)?;
                 let mut list = self.begin_command_list(&Default::default())?;
-                list.append(Command::BufferCopyCommand(BufferCopy {
+                list.append(Command::BufferCopy(BufferCopy {
                     src: staging,
                     dst: buf,
                     src_offset: 0,
@@ -1193,15 +1357,15 @@ impl Context {
             layer: 0,
             mip_level: 0,
             aspect: match info.format {
-                Format::R8Sint |
-                Format::R8Uint |
-                Format::RGB8 |
-                Format::BGRA8 |
-                Format::BGRA8Unorm |
-                Format::RGBA8 |
-                Format::RGBA32F => AspectMask::Color,
+                Format::R8Sint
+                | Format::R8Uint
+                | Format::RGB8
+                | Format::BGRA8
+                | Format::BGRA8Unorm
+                | Format::RGBA8
+                | Format::RGBA32F => AspectMask::Color,
                 Format::D24S8 => AspectMask::DepthStencil,
-            }
+            },
         })?;
 
         let mut list = self.begin_command_list(&Default::default())?;
@@ -1227,18 +1391,44 @@ impl Context {
         })?;
 
         let mut list = self.begin_command_list(&Default::default())?;
-        list.append(Command::BufferImageCopyCommand(BufferImageCopy {
+
+        // 1) barrier: UNDEFINED -> TRANSFER_DST_OPTIMAL
+        self.transition_image_stages(
+            list.cmd_buf,
+            tmp_view,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            Default::default(),
+            vk::AccessFlags::TRANSFER_WRITE,
+        );
+
+        list.append(Command::BufferImageCopy(BufferImageCopy {
             src: staging,
             dst: tmp_view,
             src_offset: 0,
         }));
 
+        // 3) barrier: TRANSFER_DST_OPTIMAL -> GENERAL
+        self.transition_image_stages(
+            list.cmd_buf,
+            tmp_view,
+            vk::ImageLayout::GENERAL,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::AccessFlags::TRANSFER_WRITE,
+            Default::default(),
+        );
         let fence = self.submit(&mut list, &Default::default())?;
         self.wait(fence)?;
         self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
         self.destroy_image_view(tmp_view);
         return Ok(());
+    }
+
+    pub fn sync_current_device(&mut self) {
+        unsafe { self.device.device_wait_idle().unwrap() };
     }
 
     pub fn make_dynamic_allocator(
@@ -1336,19 +1526,7 @@ impl Context {
         }
     }
 
-    pub fn clean_up(&mut self) {
-        self.buffers.for_each_occupied_mut(|buf| {
-            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
-        });
-
-        self.images.for_each_occupied_mut(|img| {
-            unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
-        });
-
-        self.image_views.for_each_occupied_mut(|img| {
-            unsafe { self.device.destroy_image_view(img.view, None) };
-        });
-    }
+    pub fn clean_up(&mut self) {}
 
     pub fn destroy(mut self) {
         // Drain and destroy any pending command lists
@@ -1447,7 +1625,7 @@ impl Context {
         // Allocator cleanup handled separately
         //        self.allocator.cleanup().ok(); // optional: wrap in Result if needed
         //
-        
+
         drop(self.allocator);
 
         // Device and instance
@@ -1498,6 +1676,8 @@ impl Context {
         }
 
         unsafe { self.device.destroy_render_pass(rp.raw, None) };
+
+        self.render_passes.release(handle);
     }
 
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
@@ -1916,7 +2096,6 @@ impl Context {
                         .build();
 
                     buffer_infos.push(buffer_info);
-                        println!("a");
                     let write_descriptor_set = vk::WriteDescriptorSet::builder()
                         .dst_set(descriptor_set)
                         .dst_binding(binding_info.binding)
@@ -1936,7 +2115,6 @@ impl Context {
                         .sampler(sampler.sampler)
                         .build();
 
-                        println!("b");
                     image_infos.push(image_info);
 
                     let write_descriptor_set = vk::WriteDescriptorSet::builder()
@@ -2522,6 +2700,13 @@ impl Context {
     }
 
     pub fn destroy_display(&mut self, dsp: Display) {
+        for img in &dsp.images {
+            self.images.release(*img);
+        }
+
+        for img in &dsp.views {
+            self.destroy_image_view(*img);
+        }
         unsafe { dsp.sc_loader.destroy_swapchain(dsp.swapchain, None) };
         unsafe { dsp.loader.destroy_surface(dsp.surface, None) };
         for sem in dsp.semaphores {
@@ -2540,6 +2725,8 @@ impl Context {
     ) -> (std::cell::Cell<sdl2::video::Window>, vk::SurfaceKHR) {
         let mut window = std::cell::Cell::new(
             self.sdl_video
+                .as_ref()
+                .unwrap()
                 .window(&info.title, info.size[0], info.size[1])
                 .vulkan()
                 .build()
@@ -2555,6 +2742,10 @@ impl Context {
     }
 
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
+        #[cfg(feature = "dashi-sdl2")]
+        if self.sdl_video.is_none() {
+            return Err(GPUError::HeadlessDisplayNotSupported);
+        }
         let (window, surface) = self.make_window(&info.window);
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
@@ -2740,64 +2931,484 @@ impl Context {
     }
 }
 
-#[test]
-fn test_context() {
-    let ctx = Context::new(&ContextInfo {});
-    assert!(ctx.is_ok());
-}
-
-#[test]
-fn test_buffer() {
-    let c_buffer_size = 1280;
-    let c_test_val = 8 as u8;
-    let mut ctx = Context::new(&Default::default()).unwrap();
-
-    let initial_data = vec![c_test_val as u8; c_buffer_size as usize];
-    let buffer_res = ctx.make_buffer(&BufferInfo {
-        debug_name: "Test Buffer",
-        byte_size: c_buffer_size,
-        visibility: MemoryVisibility::CpuAndGpu,
-        initial_data: Some(&initial_data),
-        ..Default::default()
-    });
-
-    assert!(buffer_res.is_ok());
-
-    let buffer = buffer_res.unwrap();
-
-    let mapped_res = ctx.map_buffer::<u8>(buffer);
-    assert!(mapped_res.is_ok());
-
-    let mapped = mapped_res.unwrap();
-    for byte in mapped {
-        assert_eq!(*byte, c_test_val);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    #[test]
+    #[serial]
+    fn test_context() {
+        let ctx = Context::new(&Default::default());
+        assert!(ctx.is_ok());
+        ctx.unwrap().destroy();
     }
 
-    let res = ctx.unmap_buffer(buffer);
-    assert!(res.is_ok());
+    #[test]
+    #[serial]
+    fn test_buffer() {
+        let c_buffer_size = 1280;
+        let c_test_val = 8 as u8;
+        let mut ctx = Context::new(&Default::default()).unwrap();
 
-    ctx.destroy_buffer(buffer);
+        let initial_data = vec![c_test_val as u8; c_buffer_size as usize];
+        let buffer_res = ctx.make_buffer(&BufferInfo {
+            debug_name: "Test Buffer",
+            byte_size: c_buffer_size,
+            visibility: MemoryVisibility::CpuAndGpu,
+            initial_data: Some(&initial_data),
+            ..Default::default()
+        });
+
+        assert!(buffer_res.is_ok());
+
+        let buffer = buffer_res.unwrap();
+
+        let mapped_res = ctx.map_buffer::<u8>(buffer);
+        assert!(mapped_res.is_ok());
+
+        let mapped = mapped_res.unwrap();
+        for byte in mapped {
+            assert_eq!(*byte, c_test_val);
+        }
+
+        let res = ctx.unmap_buffer(buffer);
+        assert!(res.is_ok());
+
+        ctx.destroy_buffer(buffer);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn test_image() {
+        let c_test_dim: [u32; 3] = [1280, 1024, 1];
+        let c_format = Format::RGBA8;
+        let c_mip_levels = 1;
+        let c_test_val = 8 as u8;
+        let initial_data =
+            vec![c_test_val as u8; (c_test_dim[0] * c_test_dim[1] * c_test_dim[2] * 4) as usize];
+        let mut ctx = Context::new(&Default::default()).unwrap();
+        let image_res = ctx.make_image(&ImageInfo {
+            debug_name: "Test Image",
+            dim: c_test_dim,
+            format: c_format,
+            mip_levels: c_mip_levels,
+            initial_data: Some(&initial_data),
+            ..Default::default()
+        });
+
+        assert!(image_res.is_ok());
+        let image = image_res.unwrap();
+        ctx.destroy_image(image);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn test_headless_context_creation() {
+        // headless() should succeed...
+        let ctx = Context::headless(&ContextInfo::default());
+        assert!(ctx.is_ok(), "Context::headless() failed to create");
+        let mut ctx = ctx.unwrap();
+
+        // ...and never initialize any SDL bits in windowed builds
+        #[cfg(feature = "dashi-sdl2")]
+        {
+            assert!(
+                ctx.sdl_video.is_none(),
+                "SDL video subsystem must be None in headless"
+            );
+        }
+
+        // Core Vulkan ops still work:
+        let buf = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "headless-buffer",
+                byte_size: 128,
+                visibility: MemoryVisibility::CpuAndGpu,
+                ..Default::default()
+            })
+            .expect("make_buffer failed in headless mode");
+        ctx.destroy_buffer(buf);
+
+        // And we can clean up without panicking
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn test_headless_rejects_display() {
+        let mut ctx =
+            Context::headless(&ContextInfo::default()).expect("headless() should succeed");
+
+        // Try to call the windowed API -- should panic or error
+        let info = DisplayInfo {
+            window: WindowInfo {
+                title: "nope".to_string(),
+                size: [64, 64],
+                resizable: false,
+            },
+            vsync: false,
+            buffering: WindowBuffering::Double,
+        };
+
+        let err = ctx.make_display(&info).err().unwrap();
+
+        assert!(
+            matches!(err, GPUError::HeadlessDisplayNotSupported),
+            "expected HeadlessDisplayNotSupported, got {:?}",
+            err
+        );
+
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn compute_test() {
+        // The GPU context that holds all the data.
+        let mut ctx = Context::new(&Default::default()).unwrap();
+
+        // Make the bind group layout. This describes the bindings into a shader.
+        let bg_layout = ctx
+            .make_bind_group_layout(&BindGroupLayoutInfo {
+                debug_name: "Hello Compute BG Layout",
+                shaders: &[ShaderInfo {
+                    shader_type: ShaderType::Compute,
+                    variables: &[
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Storage,
+                            binding: 0,
+                        },
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Storage,
+                            binding: 1,
+                        },
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::DynamicUniform,
+                            binding: 2,
+                        },
+                    ],
+                }],
+            })
+            .unwrap();
+
+        // Make a pipeline layout. This describes a graphics pipeline's state.
+        let pipeline_layout = ctx
+            .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
+                bg_layouts: [Some(bg_layout), None, None, None],
+                shader: &PipelineShaderInfo {
+                    stage: ShaderType::Compute,
+                    spirv: inline_spirv::inline_spirv!(
+                        r#"
+#version 450
+
+layout(local_size_x = 1) in;
+
+layout(binding = 0) buffer InputBuffer {
+    float inputData[];
+};
+
+layout(binding = 1) buffer OutputBuffer {
+    float outputData[];
+};
+
+layout(binding = 2) uniform OutputBuffer {
+    float num_to_add;
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    outputData[index] = inputData[index] + num_to_add;
 }
+"#,
+                        comp
+                    ),
+                    specialization: &[],
+                },
+            })
+            .expect("Unable to create Compute Pipeline Layout!");
 
-#[test]
-fn test_image() {
-    let c_test_dim: [u32; 3] = [1280, 1024, 1];
-    let c_format = Format::RGBA8;
-    let c_mip_levels = 1;
-    let c_test_val = 8 as u8;
-    let initial_data =
-        vec![c_test_val as u8; (c_test_dim[0] * c_test_dim[1] * c_test_dim[2] * 4) as usize];
-    let mut ctx = Context::new(&Default::default()).unwrap();
-    let image_res = ctx.make_image(&ImageInfo {
-        debug_name: "Test Image",
-        dim: c_test_dim,
-        format: c_format,
-        mip_levels: c_mip_levels,
-        initial_data: Some(&initial_data),
-        ..Default::default()
-    });
+        // Make a compute pipeline. This describes a compute pass.
+        let pipeline = ctx
+            .make_compute_pipeline(&ComputePipelineInfo {
+                debug_name: "Compute",
+                layout: pipeline_layout,
+            })
+            .unwrap();
 
-    assert!(image_res.is_ok());
-    let image = image_res.unwrap();
-    ctx.destroy_image(image);
+        // Make dynamic allocator to use for dynamic buffers.
+        let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
+        const BUFF_SIZE: u32 = 2048 * std::mem::size_of::<f32>() as u32;
+        let initial_data = vec![0; BUFF_SIZE as usize];
+        let input = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "input_test",
+                byte_size: BUFF_SIZE,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: Some(&initial_data),
+            })
+            .unwrap();
+
+        let output = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "output_test",
+                byte_size: BUFF_SIZE,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: Some(&initial_data),
+            })
+            .unwrap();
+
+        // Make bind group what we want to bind to what was described in the Bind Group Layout.
+        let bind_group = ctx
+            .make_bind_group(&BindGroupInfo {
+                debug_name: "Hello Compute BG",
+                layout: bg_layout,
+                bindings: &[
+                    BindingInfo {
+                        resource: ShaderResource::StorageBuffer(input),
+                        binding: 0,
+                    },
+                    BindingInfo {
+                        resource: ShaderResource::StorageBuffer(output),
+                        binding: 1,
+                    },
+                    BindingInfo {
+                        resource: ShaderResource::Dynamic(&allocator),
+                        binding: 2,
+                    },
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Reset the allocator
+        allocator.reset();
+
+        // Begin recording commands
+        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+
+        // Bump alloc some data to write the triangle position to.
+        let mut buf = allocator.bump().unwrap();
+        buf.slice::<f32>()[0] = 5.0;
+
+        list.dispatch_compute(Dispatch {
+            compute: pipeline,
+            workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
+            bind_groups: [Some(bind_group), None, None, None],
+            dynamic_buffers: [Some(buf), None, None, None],
+            ..Default::default()
+        });
+
+        // Submit our recorded commands
+        let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+
+        ctx.wait(fence).unwrap();
+
+        let data = ctx.map_buffer::<f32>(output).unwrap();
+        for entry in data {
+            assert!(*entry == 5.0);
+        }
+
+        ctx.unmap_buffer(output).unwrap();
+        ctx.destroy_dynamic_allocator(allocator);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn bindless_test() {
+        // The GPU context that holds all the data.
+        let mut ctx = Context::headless(&Default::default()).unwrap();
+
+        // Make the bind group layout. This describes the bindless bindings.
+        let bg_layout = ctx
+            .make_bindless_bind_group_layout(&BindGroupLayoutInfo {
+                debug_name: "Hello Compute Bindless",
+                shaders: &[ShaderInfo {
+                    shader_type: ShaderType::Compute,
+                    variables: &[
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Storage,
+                            binding: 0,
+                        },
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Storage,
+                            binding: 1,
+                        },
+                    ],
+                }],
+            })
+            .unwrap();
+
+        // Make the bind group layout. This describes the dynamic bindings
+        let dyn_bg_layout = ctx
+            .make_bind_group_layout(&BindGroupLayoutInfo {
+                debug_name: "Hello Compute Dynamic Binding",
+                shaders: &[ShaderInfo {
+                    shader_type: ShaderType::Compute,
+                    variables: &[BindGroupVariable {
+                        var_type: BindGroupVariableType::DynamicUniform,
+                        binding: 0,
+                    }],
+                }],
+            })
+            .unwrap();
+
+        // Make a pipeline layout. This describes a graphics pipeline's state.
+        let pipeline_layout = ctx
+            .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
+                bg_layouts: [Some(bg_layout), Some(dyn_bg_layout), None, None],
+                shader: &PipelineShaderInfo {
+                    stage: ShaderType::Compute,
+                    spirv: inline_spirv::inline_spirv!(
+                        r#"
+#version 450
+#extension GL_EXT_nonuniform_qualifier : enable 
+
+layout(local_size_x = 1) in;
+
+layout(set = 0,binding = 0) buffer InputBuffer {
+    float data;
+} c_input[];
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    float data;
+} c_output[];
+
+
+layout(set = 1, binding = 0) uniform OutputBuffer {
+    float num_to_add;
+};
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    c_output[index].data = c_input[index].data + num_to_add;
+}
+"#,
+                        comp
+                    ),
+                    specialization: &[],
+                },
+            })
+            .expect("Unable to create Compute Pipeline Layout!");
+
+        // Make a compute pipeline. This describes a compute pass.
+        let pipeline = ctx
+            .make_compute_pipeline(&ComputePipelineInfo {
+                debug_name: "Compute",
+                layout: pipeline_layout,
+            })
+            .unwrap();
+
+        // Make dynamic allocator to use for dynamic buffers.
+        let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
+        const BUFF_SIZE: u32 = std::mem::size_of::<f32>() as u32;
+        let initial_data = vec![0; BUFF_SIZE as usize];
+
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+
+        const NUM_BUFFS: u32 = 256;
+        for i in 0..NUM_BUFFS {
+            inputs.push(IndexedResource {
+                resource: ShaderResource::StorageBuffer(
+                    ctx.make_buffer(&BufferInfo {
+                        debug_name: "input_test",
+                        byte_size: BUFF_SIZE,
+                        visibility: MemoryVisibility::Gpu,
+                        usage: BufferUsage::STORAGE,
+                        initial_data: Some(&initial_data),
+                    })
+                    .unwrap(),
+                ),
+                slot: i,
+            });
+
+            outputs.push(IndexedResource {
+                resource: ShaderResource::StorageBuffer(
+                    ctx.make_buffer(&BufferInfo {
+                        debug_name: "input_test",
+                        byte_size: BUFF_SIZE,
+                        visibility: MemoryVisibility::CpuAndGpu,
+                        usage: BufferUsage::STORAGE,
+                        initial_data: Some(&initial_data),
+                    })
+                    .unwrap(),
+                ),
+                slot: i,
+            });
+        }
+
+        // Make bind group what we want to bind to what was described in the Bind Group Layout.
+        let bind_group = ctx
+            .make_indexed_bind_group(&IndexedBindGroupInfo {
+                debug_name: "Hello Compute Bindless",
+                layout: bg_layout,
+                bindings: &[
+                    IndexedBindingInfo {
+                        resources: &inputs,
+                        binding: 0,
+                    },
+                    IndexedBindingInfo {
+                        resources: &outputs,
+                        binding: 1,
+                    },
+                ],
+                ..Default::default()
+            })
+            .unwrap();
+
+        let dynamic_bind_group = ctx
+            .make_bind_group(&BindGroupInfo {
+                debug_name: "Hello Compute Dynamic",
+                layout: dyn_bg_layout,
+                set: 1,
+                bindings: &[BindingInfo {
+                    resource: ShaderResource::Dynamic(&allocator),
+                    binding: 0,
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Reset the allocator
+        allocator.reset();
+
+        // Begin recording commands
+        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+
+        // Bump alloc some data to write the triangle position to.
+        let mut buf = allocator.bump().unwrap();
+        buf.slice::<f32>()[0] = 5.0;
+        list.dispatch_compute(Dispatch {
+            compute: pipeline,
+            workgroup_size: [NUM_BUFFS as u32, 1, 1],
+            bind_groups: [Some(bind_group), Some(dynamic_bind_group), None, None],
+            dynamic_buffers: [None, Some(buf), None, None],
+            ..Default::default()
+        });
+
+        // Submit our recorded commands
+        let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+
+        ctx.wait(fence).unwrap();
+
+        for out in outputs {
+            match out.resource {
+                ShaderResource::StorageBuffer(b) => {
+                    let data = ctx.map_buffer::<f32>(b).unwrap();
+                    assert!(data[0] == 5.0);
+                    ctx.unmap_buffer(b).unwrap();
+                }
+                _ => {}
+            }
+        }
+        
+        ctx.destroy_dynamic_allocator(allocator);
+        ctx.clean_up();
+        ctx.destroy();
+    }
 }

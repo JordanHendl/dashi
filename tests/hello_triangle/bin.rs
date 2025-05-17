@@ -317,7 +317,7 @@ void main() {
             pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
 
             // Append a draw call using our vertices & indices & dynamic buffers
-            list.append(Command::DrawIndexedCommand(DrawIndexed {
+            list.append(Command::DrawIndexed(DrawIndexed {
                 vertices,
                 indices,
                 index_count: INDICES.len() as u32,
@@ -330,7 +330,7 @@ void main() {
             list.end_drawing().expect("Error ending drawing!");
 
             // Blit the framebuffer to the display's image
-            list.blit(ImageBlit {
+            list.blit_image(ImageBlit {
                 src: fb_view,
                 dst: img,
                 filter: Filter::Nearest,

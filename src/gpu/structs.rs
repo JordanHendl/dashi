@@ -344,7 +344,7 @@ impl<'a> Default for SubmitInfo<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AttachmentDescription {
     pub format: Format,
     pub samples: SampleCount,
@@ -376,7 +376,7 @@ impl Default for AttachmentDescription {
         }
     }
 }
-#[derive(Hash, Clone, Debug)]
+#[derive(Hash, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BindGroupVariableType {
     Uniform,
@@ -387,7 +387,7 @@ pub enum BindGroupVariableType {
     StorageImage,
 }
 
-#[derive(Hash, Clone, Debug)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderType {
     Vertex,
@@ -643,7 +643,7 @@ pub struct SpecializationInfo<'a> {
     pub data: &'a [u8], // ConstSlice in Rust can be a reference slice
 }
 
-#[derive(Hash, Debug, Clone, Copy)]
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderPrimitiveType {
     Vec2,

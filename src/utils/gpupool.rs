@@ -43,13 +43,17 @@ impl<T> GPUPool<T> {
             _ctx: ctx,
         }
     }
-    
+
+    pub fn destroy(&mut self) {
+        unsafe { &*self._ctx }.unmap_buffer(self.staging).unwrap();
+    }
+
     pub fn get_gpu_handle(&self) -> Handle<Buffer> {
         return self.buffer;
     }
 
     pub fn sync_down(&mut self, list: &mut CommandList) {
-        list.copy_buffers(&BufferCopy {
+        list.copy_buffer(BufferCopy {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
@@ -57,7 +61,7 @@ impl<T> GPUPool<T> {
     }
 
     pub fn sync_up(&mut self, list: &mut CommandList) {
-        list.copy_buffers(&BufferCopy {
+        list.copy_buffer(BufferCopy {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
@@ -107,42 +111,52 @@ impl<T> GPUPool<T> {
     }
 }
 
-#[test]
-fn test_gpu_pool() {
-    const TEST_AMT: usize = 2048;
-    #[derive(Default)]
-    struct S {
-        _big_data: [u32; 16],
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    #[test]
+    #[serial]
+    fn test_gpu_pool() {
+        const TEST_AMT: usize = 2048;
+        #[derive(Default)]
+        struct S {
+            _big_data: [u32; 16],
+        }
+
+        let mut ctx = Context::new(&Default::default()).unwrap();
+
+        let mut pool = GPUPool::new(
+            &mut ctx,
+            &BufferInfo {
+                debug_name: "Test Buffer",
+                byte_size: (std::mem::size_of::<S>() * TEST_AMT) as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                initial_data: None,
+                ..Default::default()
+            },
+        );
+
+        assert!(pool.len() == TEST_AMT);
+
+        let mut p = Vec::new();
+
+        for _it in 0..TEST_AMT {
+            p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
+        }
+
+        for _it in 0..TEST_AMT {
+            assert!(pool.insert(S::default()) == None);
+        }
+        assert!(pool.len() == TEST_AMT);
+
+        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+        pool.sync_up(&mut list);
+        ctx.submit(&mut list, &Default::default())
+            .expect("ASSERT: Should be able to sync data up");
+        
+        ctx.sync_current_device();
+        pool.destroy();
+        ctx.destroy();
     }
-
-    let mut ctx = Context::new(&Default::default()).unwrap();
-
-    let mut pool = GPUPool::new(
-        &mut ctx,
-        &BufferInfo {
-            debug_name: "Test Buffer",
-            byte_size: (std::mem::size_of::<S>() * TEST_AMT) as u32,
-            visibility: MemoryVisibility::CpuAndGpu,
-            initial_data: None,
-            ..Default::default()
-        },
-    );
-
-    assert!(pool.len() == TEST_AMT);
-
-    let mut p = Vec::new();
-
-    for _it in 0..TEST_AMT {
-        p.push(pool.insert(S::default()).expect("ASSERT: Should insert."));
-    }
-
-    for _it in 0..TEST_AMT {
-        assert!(pool.insert(S::default()) == None);
-    }
-    assert!(pool.len() == TEST_AMT);
-
-    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
-    pool.sync_up(&mut list);
-    ctx.submit(&mut list, &Default::default())
-        .expect("ASSERT: Should be able to sync data up");
 }
