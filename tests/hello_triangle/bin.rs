@@ -143,6 +143,7 @@ fn main() {
                 variables: &[BindGroupVariable {
                     var_type: BindGroupVariableType::DynamicUniform,
                     binding: 0,
+                    ..Default::default()
                 }],
             }],
             debug_name: "Hello Triangle",

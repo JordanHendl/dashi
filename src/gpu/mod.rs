@@ -272,6 +272,7 @@ pub struct Buffer {
     alloc: vk_mem::Allocation,
     offset: u32,
     size: u32,
+    suballocated: bool,
 }
 
 impl Clone for Buffer {
@@ -281,6 +282,7 @@ impl Clone for Buffer {
             alloc: unsafe { std::mem::transmute_copy(&self.alloc) },
             offset: self.offset.clone(),
             size: self.size.clone(),
+            suballocated: self.suballocated.clone(),
         }
     }
 }
@@ -1462,13 +1464,14 @@ impl Context {
     ) -> Option<Handle<Buffer>> {
         let src = self.buffers.get_ref(parent).unwrap();
         let mut cpy = src.clone();
-
+        
         if src.size - cpy.offset + offset < size {
             return None;
         }
 
         cpy.size = size;
         cpy.offset += offset;
+        cpy.suballocated = true; 
         match self.buffers.insert(cpy) {
             Some(handle) => {
                 return Some(handle);
@@ -1510,12 +1513,12 @@ impl Context {
             )?;
 
             self.set_name(buffer, info.debug_name, vk::ObjectType::BUFFER);
-
             match self.buffers.insert(Buffer {
                 buf: buffer,
                 alloc: allocation,
                 size: info.byte_size,
                 offset: 0,
+                suballocated: false,
             }) {
                 Some(handle) => {
                     self.init_buffer(handle, info)?;
@@ -1577,7 +1580,9 @@ impl Context {
 
         // Buffers
         self.buffers.for_each_occupied_mut(|buf| {
-            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+            if !buf.suballocated {
+                unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+            }
         });
 
         // Render passes
@@ -1642,7 +1647,9 @@ impl Context {
 
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
         let buf = self.buffers.get_mut_ref(handle).unwrap();
-        unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+        if !buf.suballocated {
+            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+        }
         self.buffers.release(handle);
     }
 
@@ -1724,7 +1731,7 @@ impl Context {
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
-                    .descriptor_count(MAX_DESCRIPTOR_SETS) // Assuming one per binding
+                    .descriptor_count(variable.count) // Assuming one per binding
                     .stage_flags(stage_flags)
                     .build();
 
@@ -1820,19 +1827,10 @@ impl Context {
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
-                match variable.var_type {
-                    BindGroupVariableType::DynamicUniform => {
-                        max_descriptor_sets = 1;
-                    }
-                    BindGroupVariableType::DynamicStorage => {
-                        max_descriptor_sets = 1;
-                    }
-                    _ => {}
-                }
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
-                    .descriptor_count(max_descriptor_sets) // Assuming one per binding
+                    .descriptor_count(variable.count) // Assuming one per binding
                     .stage_flags(stage_flags)
                     .build();
 
@@ -1906,13 +1904,12 @@ impl Context {
         for binding_info in info.bindings.iter() {
             for res in binding_info.resources {
                 match &res.resource {
-                    ShaderResource::Buffer(buffer_handle) => {
-                        let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
-
+                    ShaderResource::Buffer(handle) => {
+                        let buffer = self.buffers.get_ref(*handle).unwrap();
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
-                            .offset(0)
-                            .range(vk::WHOLE_SIZE)
+                            .offset(buffer.offset as u64)
+                            .range(buffer.size as u64)
                             .build();
 
                         buffer_infos.push(buffer_info);
@@ -1989,14 +1986,13 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-
-                    ShaderResource::StorageBuffer(buffer_handle) => {
-                        let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+                    ShaderResource::StorageBuffer(handle) => {
+                        let buffer = self.buffers.get_ref(*handle).unwrap();
 
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
-                            .offset(0)
-                            .range(vk::WHOLE_SIZE)
+                            .offset(buffer.offset as u64)
+                            .range(buffer.size as u64)
                             .build();
 
                         buffer_infos.push(buffer_info);
@@ -2086,13 +2082,13 @@ impl Context {
 
         for binding_info in info.bindings.iter() {
             match &binding_info.resource {
-                ShaderResource::Buffer(buffer_handle) => {
-                    let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+                ShaderResource::Buffer(handle) => {
+                    let buffer = self.buffers.get_ref(*handle).unwrap();
 
                     let buffer_info = vk::DescriptorBufferInfo::builder()
                         .buffer(buffer.buf)
-                        .offset(0)
-                        .range(vk::WHOLE_SIZE)
+                        .offset(buffer.offset as u64)
+                        .range(buffer.size as u64)
                         .build();
 
                     buffer_infos.push(buffer_info);
@@ -2171,8 +2167,8 @@ impl Context {
 
                     let buffer_info = vk::DescriptorBufferInfo::builder()
                         .buffer(buffer.buf)
-                        .offset(0)
-                        .range(vk::WHOLE_SIZE)
+                        .offset(buffer.offset as u64)
+                        .range(buffer.size as u64)
                         .build();
 
                     buffer_infos.push(buffer_info);
@@ -3079,14 +3075,17 @@ mod tests {
                         BindGroupVariable {
                             var_type: BindGroupVariableType::Storage,
                             binding: 0,
+                            count: 2048,
                         },
                         BindGroupVariable {
                             var_type: BindGroupVariableType::Storage,
                             binding: 1,
+                            count: 2048,
                         },
                         BindGroupVariable {
                             var_type: BindGroupVariableType::DynamicUniform,
                             binding: 2,
+                            count: 1,
                         },
                     ],
                 }],
@@ -3233,10 +3232,12 @@ void main() {
                         BindGroupVariable {
                             var_type: BindGroupVariableType::Storage,
                             binding: 0,
+                            count: 256,
                         },
                         BindGroupVariable {
                             var_type: BindGroupVariableType::Storage,
                             binding: 1,
+                            count: 256,
                         },
                     ],
                 }],
@@ -3252,6 +3253,7 @@ void main() {
                     variables: &[BindGroupVariable {
                         var_type: BindGroupVariableType::DynamicUniform,
                         binding: 0,
+                        count: 1,
                     }],
                 }],
             })
@@ -3406,7 +3408,7 @@ void main() {
                 _ => {}
             }
         }
-        
+
         ctx.destroy_dynamic_allocator(allocator);
         ctx.clean_up();
         ctx.destroy();

@@ -247,11 +247,11 @@ impl<'a> Default for ImageInfo<'a> {
 #[derive(Hash, Clone, Debug, Default, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum AspectMask {
-  #[default]
-  Color,
-  Depth,
-  Stencil,
-  DepthStencil,
+    #[default]
+    Color,
+    Depth,
+    Stencil,
+    DepthStencil,
 }
 
 pub struct ImageViewInfo<'a> {
@@ -401,8 +401,18 @@ pub enum ShaderType {
 pub struct BindGroupVariable {
     pub var_type: BindGroupVariableType,
     pub binding: u32,
+    pub count: u32,
 }
 
+impl Default for BindGroupVariable {
+    fn default() -> Self {
+        Self {
+            var_type: BindGroupVariableType::Uniform,
+            binding: Default::default(),
+            count: 1,
+        }
+    }
+}
 #[derive(Hash, Clone, Debug)]
 pub struct ShaderInfo<'a> {
     pub shader_type: ShaderType,
@@ -532,10 +542,20 @@ pub struct Viewport {
 impl Default for Viewport {
     fn default() -> Self {
         Self {
-            area: Default::default(),
-            scissor: Default::default(),
-            min_depth: Default::default(),
-            max_depth: Default::default(),
+            area: FRect2D {
+                x: 0.0,
+                y: 0.0,
+                w: 1024.0,
+                h: 1024.0,
+            },
+            scissor: Rect2D {
+                x: 0,
+                y: 0,
+                w: 1024,
+                h: 1024,
+            },
+            min_depth: 0.0,
+            max_depth: 1.0,
         }
     }
 }

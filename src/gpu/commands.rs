@@ -115,6 +115,7 @@ pub struct DrawBegin<'a> {
 pub struct Draw {
     pub vertices: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub instance_count: u32,
     pub count: u32,
 }
@@ -586,6 +587,7 @@ impl CommandList {
 
     pub fn draw(&mut self, cmd: Draw) {
         unsafe {
+            self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
             let buf = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
             static OFFSET: vk::DeviceSize = 0;
             self.ctx_ref()
