@@ -698,7 +698,7 @@ pub struct SubpassDescription<'a> {
     pub subpass_dependencies: &'a [SubpassDependency],
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ClearValue {
     Color([f32; 4]),
     IntColor([i32; 4]),
@@ -738,7 +738,7 @@ pub enum AttachmentType {
     Depth,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Attachment {
     pub img: Handle<ImageView>,
     pub clear: ClearValue,

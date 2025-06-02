@@ -227,7 +227,7 @@ impl DeviceSelector {
             }
         }
 
-        if best_device > 0 {
+        if best_device >= 0 {
             return Some(SelectedDevice {
                 device_id: best_device as usize,
                 info: self.devices[best_device as usize].clone(),
