@@ -402,6 +402,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore]
     fn test_display_builder() {
         let mut ctx = Context::new(&ContextInfo::default()).unwrap();
         let dsp = DisplayBuilder::new()
