@@ -2934,7 +2934,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_context() {
-        let ctx = Context::new(&Default::default());
+        let ctx = Context::headless(&Default::default());
         assert!(ctx.is_ok());
         ctx.unwrap().destroy();
     }
@@ -2944,7 +2944,7 @@ mod tests {
     fn test_buffer() {
         let c_buffer_size = 1280;
         let c_test_val = 8 as u8;
-        let mut ctx = Context::new(&Default::default()).unwrap();
+        let mut ctx = Context::headless(&Default::default()).unwrap();
 
         let initial_data = vec![c_test_val as u8; c_buffer_size as usize];
         let buffer_res = ctx.make_buffer(&BufferInfo {
@@ -2983,7 +2983,7 @@ mod tests {
         let c_test_val = 8 as u8;
         let initial_data =
             vec![c_test_val as u8; (c_test_dim[0] * c_test_dim[1] * c_test_dim[2] * 4) as usize];
-        let mut ctx = Context::new(&Default::default()).unwrap();
+        let mut ctx = Context::headless(&Default::default()).unwrap();
         let image_res = ctx.make_image(&ImageInfo {
             debug_name: "Test Image",
             dim: c_test_dim,
@@ -3063,7 +3063,7 @@ mod tests {
     #[serial]
     fn compute_test() {
         // The GPU context that holds all the data.
-        let mut ctx = Context::new(&Default::default()).unwrap();
+        let mut ctx = Context::headless(&Default::default()).unwrap();
 
         // Make the bind group layout. This describes the bindings into a shader.
         let bg_layout = ctx
