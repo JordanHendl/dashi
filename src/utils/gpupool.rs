@@ -124,7 +124,7 @@ mod tests {
             _big_data: [u32; 16],
         }
 
-        let mut ctx = Context::new(&Default::default()).unwrap();
+        let mut ctx = Context::headless(&Default::default()).unwrap();
 
         let mut pool = GPUPool::new(
             &mut ctx,
