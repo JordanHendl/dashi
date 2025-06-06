@@ -130,13 +130,11 @@ impl FramedCommandList {
 
     /// Waits on all in-flight fences, frees all command lists, and clears internal state.
     fn destroy_all(&mut self) {
-                println!("b");
         // wait on any outstanding work
         self.wait_all();
         // free command buffers and fences
         unsafe {
             for cmd in self.cmds.drain(..) {
-                println!("a");
                 (*self.ctx).destroy_cmd_list(cmd);
             }
         }

@@ -301,7 +301,6 @@ impl<T> Pool<T> {
         let old_len = self.items.len();
         self.items.expand(amount);
 
-        println!("Expanded: {} -> {}", old_len, self.items.len());
         if self.items.len() > old_len {
             self.generation.resize_with(self.items.len(), || 0);
             for i in old_len..(self.items.len()) {
@@ -432,7 +431,6 @@ mod tests {
 
         pool.for_each_occupied_mut(|f| {
             f._big_data[0] = 5;
-            println!("{}", f._big_data[0]);
         });
     }
 
