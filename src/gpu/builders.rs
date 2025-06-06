@@ -384,7 +384,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_render_pass_builder() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let viewport: Viewport = Default::default();
         let desc = AttachmentDescription::default();
         let dep = SubpassDependency {
@@ -404,7 +404,7 @@ mod tests {
     #[serial]
     #[ignore]
     fn test_display_builder() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let dsp = DisplayBuilder::new()
             .title("test")
             .size(300, 200)
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_graphics_pipeline_layout_builder_missing_vertex_info() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             GraphicsPipelineLayoutBuilder::new("gpl")
                 .build(&mut ctx)
@@ -433,7 +433,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_graphics_pipeline_builder_missing_fields() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             GraphicsPipelineBuilder::new("gp").build(&mut ctx).unwrap();
         }));
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_compute_pipeline_layout_builder_missing_shader() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             ComputePipelineLayoutBuilder::new().build(&mut ctx).unwrap();
         }));
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_compute_pipeline_builder_missing_layout() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             ComputePipelineBuilder::new("cp").build(&mut ctx).unwrap();
         }));
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_bind_group_layout_builder() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let shader_info = crate::ShaderInfo {
             shader_type: crate::ShaderType::All,
             variables: &[],
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_bind_group_builder() {
-        let mut ctx = Context::new(&ContextInfo::default()).unwrap();
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let shader_info = crate::ShaderInfo {
             shader_type: crate::ShaderType::All,
             variables: &[],
