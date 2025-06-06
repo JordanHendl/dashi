@@ -165,12 +165,7 @@ impl DeviceSelector {
                 info.bindless_capable = true;
             }
 
-            if let Some(_ext) = enabled_extensions.iter().find(|a| {
-                return unsafe {
-                    CStr::from_ptr(a.extension_name.as_ptr())
-                        != ash::extensions::khr::Swapchain::name()
-                };
-            }) {
+            if Self::has_swapchain_extension(&enabled_extensions) {
                 info.display_capable = true;
             }
 
@@ -189,6 +184,13 @@ impl DeviceSelector {
 
     pub fn select_by_id(&self, id: usize) -> SelectedDevice {
         SelectedDevice { device_id: id, info: self.devices[id].clone() }
+    }
+
+    fn has_swapchain_extension(enabled: &[vk::ExtensionProperties]) -> bool {
+        enabled.iter().any(|ext| unsafe {
+            CStr::from_ptr(ext.extension_name.as_ptr())
+                == ash::extensions::khr::Swapchain::name()
+        })
     }
 
     fn check<T: PartialEq>(a: T, b: Option<T>) -> bool {
@@ -241,5 +243,37 @@ impl DeviceSelector {
 impl Default for DeviceSelector {
     fn default() -> Self {
         Self::new().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::{CStr, CString};
+    use std::os::raw::c_char;
+
+    fn make_ext(name: &CStr) -> vk::ExtensionProperties {
+        let mut ext_name = [0 as c_char; vk::MAX_EXTENSION_NAME_SIZE];
+        let bytes = name.to_bytes_with_nul();
+        for (i, b) in bytes.iter().enumerate() {
+            ext_name[i] = *b as c_char;
+        }
+        vk::ExtensionProperties {
+            extension_name: ext_name,
+            spec_version: 0,
+        }
+    }
+
+    #[test]
+    fn detects_swapchain_extension() {
+        let swap_ext = make_ext(ash::extensions::khr::Swapchain::name());
+        let other_name = CString::new("VK_OTHER_ext").unwrap();
+        let other_ext = make_ext(&other_name);
+
+        let list = [other_ext.clone(), swap_ext];
+        assert!(DeviceSelector::has_swapchain_extension(&list));
+
+        let list = [other_ext];
+        assert!(!DeviceSelector::has_swapchain_extension(&list));
     }
 }
