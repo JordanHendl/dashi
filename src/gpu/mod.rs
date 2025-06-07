@@ -1678,7 +1678,7 @@ impl Context {
 
     pub fn destroy_render_pass(&mut self, handle: Handle<RenderPass>) {
         let rp = self.render_passes.get_ref(handle).unwrap();
-        for (id, sb) in &rp.subpasses {
+        for (_id, sb) in &rp.subpasses {
             unsafe { self.device.destroy_framebuffer(sb.fb, None) };
         }
 
