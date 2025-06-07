@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_allocation_no_space() {
-        let allocator = Allocator::new(1024, 2);
+        let _allocator = Allocator::new(1024, 2);
         let allocation = Allocation::NO_SPACE;
         assert_eq!(allocation, 0xffffffff);
     }
