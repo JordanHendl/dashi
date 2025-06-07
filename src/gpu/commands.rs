@@ -917,7 +917,6 @@ impl CommandList {
             rp.subpasses.insert(
                 key,
                 SubpassContainer {
-                    attachments: info.attachments.to_vec(),
                     fb,
                     clear_values: clear_vals,
                 },
