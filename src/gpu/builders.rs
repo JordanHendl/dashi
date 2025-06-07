@@ -6,7 +6,7 @@ use crate::{
     ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo, GraphicsPipeline,
     GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
     GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
-    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering, WindowInfo,
+    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering,
 };
 use crate::{Context, GPUError};
 
