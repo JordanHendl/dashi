@@ -1801,7 +1801,7 @@ impl Context {
         &mut self,
         info: &BindGroupLayoutInfo,
     ) -> Result<Handle<BindGroupLayout>, GPUError> {
-        let mut max_descriptor_sets: u32 = 2048;
+        let max_descriptor_sets: u32 = 2048;
         let mut bindings = Vec::new();
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
