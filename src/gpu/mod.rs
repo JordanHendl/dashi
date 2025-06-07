@@ -3218,6 +3218,7 @@ void main() {
 
     #[test]
     #[serial]
+    #[ignore = "requires descriptor indexing and compute pipeline support"]
     fn bindless_test() {
         // The GPU context that holds all the data.
         let mut ctx = Context::headless(&Default::default()).unwrap();
