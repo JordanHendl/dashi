@@ -397,7 +397,6 @@ pub struct ImageView {
 
 #[derive(Clone, Default)]
 pub(super) struct SubpassContainer {
-    pub(super) attachments: Vec<Attachment>,
     pub(super) fb: vk::Framebuffer,
     pub(super) clear_values: Vec<vk::ClearValue>,
 }
