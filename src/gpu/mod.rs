@@ -761,7 +761,7 @@ impl Context {
         #[cfg(debug_assertions)]
         let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
 
-        let mut ctx = Context {
+        let ctx = Context {
             entry,
             instance,
             pdevice,
@@ -804,7 +804,12 @@ impl Context {
         #[cfg(debug_assertions)]
         let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
 
-        let mut ctx = Context {
+        #[cfg(feature = "dashi-sdl2")]
+        let sdl_context = sdl2::init().unwrap();
+        #[cfg(feature = "dashi-sdl2")]
+        let sdl_video = sdl_context.video().unwrap();
+
+        let ctx = Context {
             entry,
             instance,
             pdevice,
@@ -830,19 +835,14 @@ impl Context {
             cmds_to_release: Default::default(),
 
             #[cfg(feature = "dashi-sdl2")]
-            sdl_context: sdl2::init().unwrap(),
+            sdl_context,
             #[cfg(feature = "dashi-sdl2")]
-            sdl_video: None,
+            sdl_video: Some(sdl_video),
             #[cfg(debug_assertions)]
             debug_utils,
         };
 
-        // and then—*if* we're building with SDL2—init the windowing bits:
-        #[cfg(feature = "dashi-sdl2")]
-        {
-            let video = ctx.sdl_context.video().unwrap();
-            ctx.sdl_video = Some(video);
-        }
+
 
         Ok(ctx)
     }
