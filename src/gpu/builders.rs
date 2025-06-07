@@ -471,11 +471,11 @@ mod tests {
             shader_type: crate::ShaderType::All,
             variables: &[],
         };
-        let bgl = BindGroupLayoutBuilder::new("bgl")
+        let _bgl = BindGroupLayoutBuilder::new("bgl")
             .shader(shader_info)
             .build(&mut ctx)
             .unwrap();
-        //        ctx.destroy_bind_group_layout(bgl);
+        //        ctx.destroy_bind_group_layout(_bgl);
         ctx.destroy();
     }
 
@@ -491,11 +491,11 @@ mod tests {
             .shader(shader_info)
             .build(&mut ctx)
             .unwrap();
-        let bg = BindGroupBuilder::new("bg")
+        let _bg = BindGroupBuilder::new("bg")
             .layout(bgl)
             .build(&mut ctx)
             .unwrap();
-        //    ctx.destroy_bind_group(bg);
+        //    ctx.destroy_bind_group(_bg);
         ctx.destroy();
     }
 
@@ -586,7 +586,7 @@ mod tests {
             "#,
             vert
         );
-        let layout = GraphicsPipelineLayoutBuilder::new("gpl")
+        let _layout = GraphicsPipelineLayoutBuilder::new("gpl")
             .vertex_info(vert_info)
             .bind_group_layout(0, bgl)
             .shader(PipelineShaderInfo {

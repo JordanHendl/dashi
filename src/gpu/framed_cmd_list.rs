@@ -165,7 +165,7 @@ mod tests {
         let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3);
 
         // do 10 cycles of append + submit
-        for i in 0..10 {
+        for _ in 0..10 {
             fcl.append(|cmd| {
                 // we can even record a no-op dispatch or whatever
                 // here we just begin/end an empty command list
