@@ -715,7 +715,7 @@ impl CommandList {
         dyn_bufs: &[Option<DynamicBuffer>; 4],
         bgs: &[Option<Handle<BindGroup>>; 4],
     ) {
-        for (i, bg_opt) in bgs.iter().enumerate() {
+        for (_i, bg_opt) in bgs.iter().enumerate() {
             if let Some(bg) = bg_opt {
                 let bg_data = self.ctx_ref().bind_groups.get_ref(*bg).unwrap();
                 let offsets: Vec<u32> = dyn_bufs
