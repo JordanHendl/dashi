@@ -31,6 +31,14 @@ dashi = {git = "https://github.com/JordanHendl/dashi"}
 
 See the [tests](https://github.com/JordanHendl/dashi/tree/main/tests) for example usage.
 
+### Window Backends
+
+Dashi ships with multiple window backends. The default `dashi-sdl2` feature
+uses SDL2 for a full event system. If build times are a concern you can instead
+enable the `dashi-minifb` feature which relies on `minifb`. It compiles much
+faster but only offers very basic input handling.
+Only one of these window features can be enabled at a time.
+
 ## Documentation
 
 Detailed documentation is available [here](https://github.com/JordanHendl/dashi/wiki). It includes guides, API references, and examples to help you get the most out of Dashi.

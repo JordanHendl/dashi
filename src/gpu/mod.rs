@@ -4,6 +4,10 @@ use crate::utils::{
     Handle, Pool,
 };
 use ash::*;
+#[cfg(feature = "dashi-minifb")]
+use minifb;
+#[cfg(feature = "dashi-minifb")]
+use ash_window;
 pub use error::*;
 use std::{
     collections::HashMap,
@@ -20,6 +24,8 @@ pub mod commands;
 pub use commands::*;
 pub mod framed_cmd_list;
 pub use framed_cmd_list::*;
+#[cfg(feature = "dashi-minifb")]
+pub mod minifb_window;
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -433,7 +439,10 @@ pub struct IndexedBindGroup {
 
 #[allow(dead_code)]
 pub struct Display {
+    #[cfg(feature = "dashi-sdl2")]
     window: std::cell::Cell<sdl2::video::Window>,
+    #[cfg(feature = "dashi-minifb")]
+    window: minifb::Window,
     swapchain: ash::vk::SwapchainKHR,
     surface: ash::vk::SurfaceKHR,
     images: Vec<Handle<Image>>,
@@ -2734,6 +2743,14 @@ impl Context {
             .expect("Unable to create vulkan surface!");
 
         (window, vk::Handle::from_raw(surface))
+    }
+
+    #[cfg(feature = "dashi-minifb")]
+    fn make_window(
+        &mut self,
+        info: &WindowInfo,
+    ) -> (minifb::Window, vk::SurfaceKHR) {
+        minifb_window::create_window(&self.entry, &self.instance, info).unwrap()
     }
 
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
