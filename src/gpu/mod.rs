@@ -454,6 +454,13 @@ pub struct Display {
     frame_idx: u32,
 }
 
+impl Display {
+    #[cfg(feature = "dashi-minifb")]
+    pub fn minifb_window(&mut self) -> &mut minifb::Window {
+        &mut self.window
+    }
+}
+
 #[derive(Clone)]
 pub struct Fence {
     raw: vk::Fence,
