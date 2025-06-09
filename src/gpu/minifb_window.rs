@@ -2,7 +2,6 @@ use crate::gpu::structs::WindowInfo;
 use crate::gpu::error::GPUError;
 use ash::{vk, Entry, Instance};
 use minifb::{Window, WindowOptions};
-use raw_window_handle::HasRawWindowHandle;
 
 pub(super) fn create_window(
     entry: &Entry,

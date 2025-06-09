@@ -572,6 +572,9 @@ pub struct Context {
     pub(super) compute_pipelines: Pool<ComputePipeline>,
     pub(super) cmds_to_release: Vec<(CommandList, Handle<Fence>)>,
 
+    /// Indicates whether the context was created in headless mode
+    headless: bool,
+
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
     #[cfg(feature = "dashi-sdl2")]
@@ -798,6 +801,7 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            headless: true,
 
             #[cfg(feature = "dashi-sdl2")]
             sdl_context: sdl2::init().unwrap(),
@@ -846,6 +850,7 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            headless: false,
 
             #[cfg(feature = "dashi-sdl2")]
             sdl_context,
@@ -2759,8 +2764,7 @@ impl Context {
     }
 
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
-        #[cfg(feature = "dashi-sdl2")]
-        if self.sdl_video.is_none() {
+        if self.headless {
             return Err(GPUError::HeadlessDisplayNotSupported);
         }
         let (window, surface) = self.make_window(&info.window);
