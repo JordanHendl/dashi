@@ -6,8 +6,6 @@ use crate::utils::{
 use ash::*;
 #[cfg(feature = "dashi-minifb")]
 use minifb;
-#[cfg(feature = "dashi-minifb")]
-use ash_window;
 pub use error::*;
 use std::{
     collections::HashMap,
