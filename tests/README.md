@@ -10,7 +10,7 @@ It is ignored by default because it opens a native window.
 Build and run it with:
 
 ```bash
-cargo test --features dashi-minifb --test minifb_triangle -- --ignored
+cargo test --no-default-features --features dashi-minifb --test minifb_triangle -- --ignored
 ```
 
 You can also run all tests (without executing the ignored one) via `cargo test`.
