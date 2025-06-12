@@ -4,6 +4,8 @@ use crate::utils::{
     Handle, Pool,
 };
 use ash::*;
+#[cfg(feature = "dashi-minifb")]
+use minifb;
 pub use error::*;
 use std::{
     collections::HashMap,
@@ -20,6 +22,8 @@ pub mod commands;
 pub use commands::*;
 pub mod framed_cmd_list;
 pub use framed_cmd_list::*;
+#[cfg(feature = "dashi-minifb")]
+pub mod minifb_window;
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -433,7 +437,10 @@ pub struct IndexedBindGroup {
 
 #[allow(dead_code)]
 pub struct Display {
+    #[cfg(feature = "dashi-sdl2")]
     window: std::cell::Cell<sdl2::video::Window>,
+    #[cfg(feature = "dashi-minifb")]
+    window: minifb::Window,
     swapchain: ash::vk::SwapchainKHR,
     surface: ash::vk::SurfaceKHR,
     images: Vec<Handle<Image>>,
@@ -443,6 +450,13 @@ pub struct Display {
     semaphores: Vec<Handle<Semaphore>>,
     fences: Vec<Handle<Fence>>,
     frame_idx: u32,
+}
+
+impl Display {
+    #[cfg(feature = "dashi-minifb")]
+    pub fn minifb_window(&mut self) -> &mut minifb::Window {
+        &mut self.window
+    }
 }
 
 #[derive(Clone)]
@@ -557,6 +571,9 @@ pub struct Context {
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
     pub(super) compute_pipelines: Pool<ComputePipeline>,
     pub(super) cmds_to_release: Vec<(CommandList, Handle<Fence>)>,
+
+    /// Indicates whether the context was created in headless mode
+    headless: bool,
 
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_context: sdl2::Sdl,
@@ -784,6 +801,7 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            headless: true,
 
             #[cfg(feature = "dashi-sdl2")]
             sdl_context: sdl2::init().unwrap(),
@@ -832,6 +850,7 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            headless: false,
 
             #[cfg(feature = "dashi-sdl2")]
             sdl_context,
@@ -2736,9 +2755,16 @@ impl Context {
         (window, vk::Handle::from_raw(surface))
     }
 
+    #[cfg(feature = "dashi-minifb")]
+    fn make_window(
+        &mut self,
+        info: &WindowInfo,
+    ) -> (minifb::Window, vk::SurfaceKHR) {
+        minifb_window::create_window(&self.entry, &self.instance, info).unwrap()
+    }
+
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
-        #[cfg(feature = "dashi-sdl2")]
-        if self.sdl_video.is_none() {
+        if self.headless {
             return Err(GPUError::HeadlessDisplayNotSupported);
         }
         let (window, surface) = self.make_window(&info.window);
