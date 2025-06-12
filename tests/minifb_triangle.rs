@@ -75,12 +75,14 @@ impl Timer {
 }
 
 #[cfg(feature = "dashi-minifb")]
-fn main() {
+#[test]
+#[ignore]
+fn minifb_triangle() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
-    let mut ctx = gpu::Context::headless(&ContextInfo { device }).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
 
     const WIDTH: u32 = 1280;
     const HEIGHT: u32 = 1024;
@@ -343,4 +345,6 @@ void main() {
 }
 
 #[cfg(not(feature = "dashi-minifb"))]
-fn main() {}
+#[test]
+#[ignore]
+fn minifb_triangle() {}
