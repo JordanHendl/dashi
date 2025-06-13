@@ -6,6 +6,8 @@ use crate::utils::{
 use ash::*;
 #[cfg(feature = "dashi-minifb")]
 use minifb;
+#[cfg(feature = "dashi-winit")]
+use winit;
 pub use error::*;
 use std::{
     collections::HashMap,
@@ -24,6 +26,8 @@ pub mod framed_cmd_list;
 pub use framed_cmd_list::*;
 #[cfg(feature = "dashi-minifb")]
 pub mod minifb_window;
+#[cfg(feature = "dashi-winit")]
+pub mod winit_window;
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -441,6 +445,10 @@ pub struct Display {
     window: std::cell::Cell<sdl2::video::Window>,
     #[cfg(feature = "dashi-minifb")]
     window: minifb::Window,
+    #[cfg(feature = "dashi-winit")]
+    window: winit::window::Window,
+    #[cfg(feature = "dashi-winit")]
+    event_loop: winit::event_loop::EventLoop<()>,
     swapchain: ash::vk::SwapchainKHR,
     surface: ash::vk::SurfaceKHR,
     images: Vec<Handle<Image>>,
@@ -456,6 +464,14 @@ impl Display {
     #[cfg(feature = "dashi-minifb")]
     pub fn minifb_window(&mut self) -> &mut minifb::Window {
         &mut self.window
+    }
+    #[cfg(feature = "dashi-winit")]
+    pub fn winit_window(&self) -> &winit::window::Window {
+        &self.window
+    }
+    #[cfg(feature = "dashi-winit")]
+    pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
+        &mut self.event_loop
     }
 }
 
@@ -2763,10 +2779,21 @@ impl Context {
         minifb_window::create_window(&self.entry, &self.instance, info).unwrap()
     }
 
+    #[cfg(feature = "dashi-winit")]
+    fn make_window(
+        &mut self,
+        info: &WindowInfo,
+    ) -> (winit::event_loop::EventLoop<()>, winit::window::Window, vk::SurfaceKHR) {
+        winit_window::create_window(&self.entry, &self.instance, info).unwrap()
+    }
+
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
         if self.headless {
             return Err(GPUError::HeadlessDisplayNotSupported);
         }
+        #[cfg(feature = "dashi-winit")]
+        let (event_loop, window, surface) = self.make_window(&info.window);
+        #[cfg(not(feature = "dashi-winit"))]
         let (window, surface) = self.make_window(&info.window);
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
@@ -2884,6 +2911,8 @@ impl Context {
         }
         return Ok(Display {
             window,
+            #[cfg(feature = "dashi-winit")]
+            event_loop,
             swapchain,
             surface,
             images: handles,

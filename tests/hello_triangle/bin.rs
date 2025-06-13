@@ -1,5 +1,7 @@
 use dashi::*;
-use sdl2::{event::Event, keyboard::Keycode};
+use winit::event::{Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode};
+use winit::event_loop::{ControlFlow};
+use winit::platform::run_return::EventLoopExtRunReturn;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "dashi-tests")]
@@ -252,8 +254,6 @@ void main() {
         })
         .unwrap();
 
-    // Event pump for events
-    let mut event_pump = ctx.get_sdl_ctx().event_pump().unwrap();
     // Display for windowing
     let mut display = ctx.make_display(&Default::default()).unwrap();
     // Timer to move the triangle
@@ -267,17 +267,24 @@ void main() {
         allocator.reset();
 
         // Listen to events
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => {
-                    break 'running;
+        let mut should_exit = false;
+        {
+            let event_loop = display.winit_event_loop();
+            event_loop.run_return(|event, _target, control_flow| {
+                *control_flow = ControlFlow::Exit;
+                if let Event::WindowEvent { event, .. } = event {
+                    match event {
+                        WindowEvent::CloseRequested => should_exit = true,
+                        WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Escape), state: ElementState::Pressed, .. }, .. } => {
+                            should_exit = true
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
-            }
+            });
+        }
+        if should_exit {
+            break 'running;
         }
 
         // Get the next image from the display.
