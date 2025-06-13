@@ -1,17 +1,19 @@
+#[cfg(feature = "dashi-minifb")]
 use dashi::*;
-use winit::event::{Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode};
-use winit::event_loop::{ControlFlow};
-use winit::platform::run_return::EventLoopExtRunReturn;
+
+#[cfg(feature = "dashi-minifb")]
+use minifb::Key;
+#[cfg(feature = "dashi-minifb")]
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "dashi-tests")]
+#[cfg(feature = "dashi-minifb")]
 pub struct Timer {
     start_time: Option<Instant>,
     elapsed: Duration,
     is_paused: bool,
 }
 
-#[cfg(feature = "dashi-tests")]
+#[cfg(feature = "dashi-minifb")]
 impl Timer {
     // Create a new timer instance
     pub fn new() -> Timer {
@@ -72,7 +74,12 @@ impl Timer {
     }
 }
 
-#[cfg(feature = "dashi-tests")]
+#[cfg(not(feature = "dashi-minifb"))]
+fn main() {
+    eprintln!("This example requires the dashi-minifb feature");
+}
+
+#[cfg(feature = "dashi-minifb")]
 fn main() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
@@ -177,6 +184,7 @@ void main() {
     frag_color = inPosition;
     gl_Position = vec4(inPosition + pos, 0.0, 1.0);
 }
+
 "#,
                         vert
                     ),
@@ -262,28 +270,12 @@ void main() {
     timer.start();
     let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 3);
     let sems = ctx.make_semaphores(2).unwrap();
-    'running: loop {
+    'running: while display.minifb_window().is_open() {
         // Reset the allocator
         allocator.reset();
 
         // Listen to events
-        let mut should_exit = false;
-        {
-            let event_loop = display.winit_event_loop();
-            event_loop.run_return(|event, _target, control_flow| {
-                *control_flow = ControlFlow::Exit;
-                if let Event::WindowEvent { event, .. } = event {
-                    match event {
-                        WindowEvent::CloseRequested => should_exit = true,
-                        WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Escape), state: ElementState::Pressed, .. }, .. } => {
-                            should_exit = true
-                        }
-                        _ => {}
-                    }
-                }
-            });
-        }
-        if should_exit {
+        if display.minifb_window().is_key_down(Key::Escape) {
             break 'running;
         }
 
@@ -352,9 +344,7 @@ void main() {
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
         ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
+        display.minifb_window().update();
     }
 }
 
-#[cfg(not(feature = "dashi-tests"))]
-fn main() { //none
-}

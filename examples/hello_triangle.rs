@@ -4,14 +4,12 @@ use winit::event_loop::{ControlFlow};
 use winit::platform::run_return::EventLoopExtRunReturn;
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "dashi-tests")]
 pub struct Timer {
     start_time: Option<Instant>,
     elapsed: Duration,
     is_paused: bool,
 }
 
-#[cfg(feature = "dashi-tests")]
 impl Timer {
     // Create a new timer instance
     pub fn new() -> Timer {
@@ -72,7 +70,6 @@ impl Timer {
     }
 }
 
-#[cfg(feature = "dashi-tests")]
 fn main() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
@@ -355,6 +352,3 @@ void main() {
     }
 }
 
-#[cfg(not(feature = "dashi-tests"))]
-fn main() { //none
-}

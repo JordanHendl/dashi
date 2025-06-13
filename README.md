@@ -29,14 +29,19 @@ dashi = {git = "https://github.com/JordanHendl/dashi"}
 
 ### Example Usage
 
-See the [tests](https://github.com/JordanHendl/dashi/tree/main/tests) for example usage.
+See the [examples](https://github.com/JordanHendl/dashi/tree/main/examples) for runnable samples. Run one with:
+
+```bash
+cargo run --example hello_triangle
+```
 
 ### Window Backends
 
-Dashi ships with multiple window backends. The default `dashi-sdl2` feature
-uses SDL2 for a full event system. If build times are a concern you can instead
-enable the `dashi-minifb` feature which relies on `minifb`. It compiles much
-faster but only offers very basic input handling.
+Dashi ships with multiple window backends. The default `dashi-winit` feature
+uses winit for cross-platform windowing and event handling. SDL2 support can be
+enabled via the `dashi-sdl2` feature. If build times are a concern you can
+instead enable the `dashi-minifb` feature which relies on `minifb`. It compiles
+much faster but only offers very basic input handling.
 Only one of these window features can be enabled at a time.
 
 ## Documentation

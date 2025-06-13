@@ -5,7 +5,8 @@ edition = "2021"
 license = "MIT"
 
 [features]
-default = ["dashi-sdl2"]
+default = ["dashi-winit"]
+dashi-winit = ["dep:winit"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]
 dashi-serde = ["dep:serde"]
@@ -18,6 +19,7 @@ vk-mem = "0.3.0"
 sdl2 = {version = "0.35.2", features = ["bundled", "static-link", "raw-window-handle"], optional = true}
 ash-window = "0.11"
 minifb = { version = "0.24", optional = true }
+winit = { version = "0.26", optional = true }
 raw-window-handle = "0.4"
 serde = {version = "1.0.210", features = ["derive"], optional = true}
 
