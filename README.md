@@ -29,7 +29,11 @@ dashi = {git = "https://github.com/JordanHendl/dashi"}
 
 ### Example Usage
 
-See the [tests](https://github.com/JordanHendl/dashi/tree/main/tests) for example usage.
+See the [examples](https://github.com/JordanHendl/dashi/tree/main/examples) for runnable samples. Run one with:
+
+```bash
+cargo run --example hello_triangle
+```
 
 ### Window Backends
 

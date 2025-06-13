@@ -1,0 +1,3 @@
+use dashi::*;
+
+fn main() {}
