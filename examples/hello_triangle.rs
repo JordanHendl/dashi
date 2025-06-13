@@ -75,7 +75,7 @@ fn main() {
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
-    let mut ctx = gpu::Context::headless(&ContextInfo { device }).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
 
     const WIDTH: u32 = 1280;
     const HEIGHT: u32 = 1024;
