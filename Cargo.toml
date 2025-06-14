@@ -29,5 +29,6 @@ orbclient = { path = "orbclient_stub" }
 [dev-dependencies]
 inline-spirv = {version = "0.2.1"}
 serial_test = "2.0"
+image_utils = { path = "image_utils" }
 
 [lib]
