@@ -1320,7 +1320,8 @@ impl Context {
 
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
-        let typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        typed_map = unsafe { typed_map.offset(buf.offset as isize) };
         return Ok(unsafe {
             std::slice::from_raw_parts_mut(typed_map, buf.size as usize / std::mem::size_of::<T>())
         });
@@ -1334,7 +1335,8 @@ impl Context {
 
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
-        let typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        typed_map = unsafe { typed_map.offset(buf.offset as isize) };
         return Ok(unsafe {
             std::slice::from_raw_parts(typed_map, buf.size as usize / std::mem::size_of::<T>())
         });
