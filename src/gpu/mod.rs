@@ -214,6 +214,7 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::D24S8 => vk::Format::D24_UNORM_S8_UINT,
         Format::R8Uint => vk::Format::R8_UINT,
         Format::R8Sint => vk::Format::R8_SINT,
+        Format::RGBA8Unorm => vk::Format::R8G8B8A8_UNORM,
     }
 }
 
@@ -233,7 +234,7 @@ fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
 pub fn channel_count(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8 => 3,
-        Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA32F => 4,
+        Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA8Unorm | Format::RGBA32F => 4,
         Format::D24S8 => 4,
         Format::R8Sint | Format::R8Uint => 1,
     }
@@ -244,8 +245,9 @@ pub fn bytes_per_channel(fmt: &Format) -> u32 {
         Format::RGB8
         | Format::BGRA8
         | Format::BGRA8Unorm
-        | Format::RGBA8
-        | Format::R8Sint
+        | Format::RGBA8 
+        | Format::RGBA8Unorm
+        | Format::R8Sint 
         | Format::R8Uint => 1,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
@@ -1417,6 +1419,7 @@ impl Context {
                 | Format::RGBA8
                 | Format::RGBA32F => AspectMask::Color,
                 Format::D24S8 => AspectMask::DepthStencil,
+                _ => AspectMask::Color,
             },
         })?;
 

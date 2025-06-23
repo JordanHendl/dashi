@@ -34,6 +34,7 @@ pub enum Format {
     BGRA8,
     BGRA8Unorm,
     RGBA8,
+    RGBA8Unorm,
     RGBA32F,
     D24S8,
 }
