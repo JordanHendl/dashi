@@ -25,7 +25,7 @@ pub enum BufferUsage {
     STORAGE,
 }
 
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
     R8Sint,
@@ -33,6 +33,7 @@ pub enum Format {
     RGB8,
     BGRA8,
     BGRA8Unorm,
+    #[default]
     RGBA8,
     RGBA8Unorm,
     RGBA32F,
