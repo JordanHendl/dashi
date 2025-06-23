@@ -308,7 +308,8 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.dst).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
-            let old_layout = img_data.layout;
+            let mip = view_data.range.base_mip_level as usize;
+            let old_layout = img_data.layouts[mip];
             self.transition_image(
                 rec.dst,
                 vk::PipelineStageFlags::TRANSFER,
@@ -320,7 +321,7 @@ impl CommandList {
                 self.cmd_buf,
                 self.ctx_ref().buffers.get_ref(rec.src).unwrap().buf,
                 img_data.img,
-                img_data.layout,
+                img_data.layouts[mip],
                 &[vk::BufferImageCopy {
                     buffer_offset: rec.src_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
@@ -351,7 +352,8 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.src).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
-            let old_layout = img_data.layout;
+            let mip = view_data.range.base_mip_level as usize;
+            let old_layout = img_data.layouts[mip];
             self.transition_image(
                 rec.src,
                 vk::PipelineStageFlags::TRANSFER,
@@ -362,7 +364,7 @@ impl CommandList {
             self.ctx_ref().device.cmd_copy_image_to_buffer(
                 self.cmd_buf,
                 img_data.img,
-                img_data.layout,
+                img_data.layouts[mip],
                 self.ctx_ref().buffers.get_ref(rec.dst).unwrap().buf,
                 &[vk::BufferImageCopy {
                     buffer_offset: rec.dst_offset as u64,
@@ -436,8 +438,10 @@ impl CommandList {
                     },
                 ],
             }];
-            let src_layout = src_data.layout;
-            let dst_layout = dst_data.layout;
+            let src_mip = src_view.range.base_mip_level as usize;
+            let dst_mip = dst_view.range.base_mip_level as usize;
+            let src_layout = src_data.layouts[src_mip];
+            let dst_layout = dst_data.layouts[dst_mip];
 
             self.transition_image_layout(
                 cmd.src,
@@ -454,9 +458,9 @@ impl CommandList {
             self.ctx_ref().device.cmd_blit_image(
                 self.cmd_buf,
                 src_data.img,
-                src_data.layout,
+                src_data.layouts[src_mip],
                 dst_data.img,
-                dst_data.layout,
+                dst_data.layouts[dst_mip],
                 &regions,
                 cmd.filter.into(),
             );
@@ -484,6 +488,7 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(barrier.view).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 self.last_op_stage,
@@ -492,8 +497,8 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
-                    .new_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
+                    .new_layout(img_data.layouts[mip])
                     .src_access_mask(self.last_op_access)
                     .dst_access_mask(vk::AccessFlags::empty())
                     .image(img_data.img)
@@ -839,9 +844,10 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
             let img_data = self.ctx_ref().images.get_mut_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             let (src_stage, src_access, dst_stage, dst_access) = self
                 .ctx_ref()
-                .barrier_masks_for_transition(img_data.layout, layout);
+                .barrier_masks_for_transition(img_data.layouts[mip], layout);
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 src_stage,
@@ -850,7 +856,7 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
                     .new_layout(layout)
                     .src_access_mask(src_access)
                     .dst_access_mask(dst_access)
@@ -858,7 +864,7 @@ impl CommandList {
                     .subresource_range(view_data.range)
                     .build()],
             );
-            img_data.layout = layout;
+            img_data.layouts[mip] = layout;
             self.last_op_stage = new_stage;
             self.last_op_access = new_access;
         }
@@ -874,6 +880,7 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 self.last_op_stage,
@@ -882,8 +889,8 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
-                    .new_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
+                    .new_layout(img_data.layouts[mip])
                     .src_access_mask(self.last_op_access)
                     .dst_access_mask(new_access)
                     .image(img_data.img)

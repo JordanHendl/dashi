@@ -394,7 +394,7 @@ pub struct Image {
     alloc: vk_mem::Allocation,
     dim: [u32; 3],
     format: Format,
-    layout: vk::ImageLayout,
+    layouts: Vec<vk::ImageLayout>,
     sub_layers: vk::ImageSubresourceLayers,
     extent: vk::Extent3D,
 }
@@ -1017,7 +1017,9 @@ impl Context {
     ) {
         let view = self.image_views.get_mut_ref(img).unwrap();
         let img = self.images.get_mut_ref(view.img).unwrap();
-        let old_layout = img.layout;
+        let base = view.range.base_mip_level as usize;
+        let count = view.range.level_count as usize;
+        let old_layout = img.layouts[base];
         let new_layout = if layout == vk::ImageLayout::UNDEFINED {
             vk::ImageLayout::GENERAL
         } else {
@@ -1044,7 +1046,11 @@ impl Context {
             )
         };
 
-        img.layout = layout;
+        for i in base..base + count {
+            if let Some(l) = img.layouts.get_mut(i) {
+                *l = layout;
+            }
+        }
     }
 
     /// Utility: given an image’s old & new layouts, pick the correct
@@ -1297,7 +1303,7 @@ impl Context {
         match self.images.insert(Image {
             img: image,
             alloc: allocation,
-            layout: vk::ImageLayout::UNDEFINED,
+            layouts: vec![vk::ImageLayout::UNDEFINED; info.mip_levels as usize],
             sub_layers: vk::ImageSubresourceLayers::builder()
                 .layer_count(info.dim[2] as u32)
                 .mip_level(0)
@@ -2932,7 +2938,7 @@ impl Context {
             match self.images.insert(Image {
                 img,
                 alloc: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
-                layout: vk::ImageLayout::UNDEFINED,
+                layouts: vec![vk::ImageLayout::UNDEFINED],
                 sub_layers: vk::ImageSubresourceLayers::builder()
                     .layer_count(1)
                     .mip_level(0)
