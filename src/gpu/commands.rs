@@ -308,18 +308,20 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.dst).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
-            let old_layout = img_data.layout;
+            let mip = view_data.range.base_mip_level as usize;
+            let old_layout = img_data.layouts[mip];
             self.transition_image(
                 rec.dst,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_WRITE,
             );
 
+            let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
             self.ctx_ref().device.cmd_copy_buffer_to_image(
                 self.cmd_buf,
                 self.ctx_ref().buffers.get_ref(rec.src).unwrap().buf,
                 img_data.img,
-                img_data.layout,
+                img_data.layouts[mip],
                 &[vk::BufferImageCopy {
                     buffer_offset: rec.src_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
@@ -328,7 +330,7 @@ impl CommandList {
                         base_array_layer: view_data.range.base_array_layer,
                         layer_count: view_data.range.layer_count,
                     },
-                    image_extent: img_data.extent,
+                    image_extent: vk::Extent3D { width: dims[0], height: dims[1], depth: dims[2] },
                     ..Default::default()
                 }],
             );
@@ -350,17 +352,19 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.src).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
-            let old_layout = img_data.layout;
+            let mip = view_data.range.base_mip_level as usize;
+            let old_layout = img_data.layouts[mip];
             self.transition_image(
                 rec.src,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_READ,
             );
 
+            let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
             self.ctx_ref().device.cmd_copy_image_to_buffer(
                 self.cmd_buf,
                 img_data.img,
-                img_data.layout,
+                img_data.layouts[mip],
                 self.ctx_ref().buffers.get_ref(rec.dst).unwrap().buf,
                 &[vk::BufferImageCopy {
                     buffer_offset: rec.dst_offset as u64,
@@ -370,7 +374,7 @@ impl CommandList {
                         base_array_layer: view_data.range.base_array_layer,
                         layer_count: view_data.range.layer_count,
                     },
-                    image_extent: img_data.extent,
+                    image_extent: vk::Extent3D { width: dims[0], height: dims[1], depth: dims[2] },
                     ..Default::default()
                 }],
             );
@@ -390,18 +394,19 @@ impl CommandList {
 
     pub fn blit_image(&mut self, cmd: ImageBlit) {
         unsafe {
-            let src_data = self
-                .ctx_ref()
-                .images
-                .get_ref(self.ctx_ref().image_views.get_ref(cmd.src).unwrap().img)
-                .unwrap();
-            let dst_data = self
-                .ctx_ref()
-                .images
-                .get_ref(self.ctx_ref().image_views.get_ref(cmd.dst).unwrap().img)
-                .unwrap();
+            let src_view = self.ctx_ref().image_views.get_ref(cmd.src).unwrap();
+            let dst_view = self.ctx_ref().image_views.get_ref(cmd.dst).unwrap();
+            let src_data = self.ctx_ref().images.get_ref(src_view.img).unwrap();
+            let dst_data = self.ctx_ref().images.get_ref(dst_view.img).unwrap();
+            let src_dim = crate::gpu::mip_dimensions(src_data.dim, src_view.range.base_mip_level);
+            let dst_dim = crate::gpu::mip_dimensions(dst_data.dim, dst_view.range.base_mip_level);
             let regions = [vk::ImageBlit {
-                src_subresource: src_data.sub_layers,
+                src_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: src_view.range.aspect_mask,
+                    mip_level: src_view.range.base_mip_level,
+                    base_array_layer: src_view.range.base_array_layer,
+                    layer_count: src_view.range.layer_count,
+                },
                 src_offsets: [
                     vk::Offset3D {
                         x: cmd.src_region.x as i32,
@@ -409,12 +414,17 @@ impl CommandList {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.src_region.w.max(src_data.dim[0])) as i32,
-                        y: (cmd.src_region.h.max(src_data.dim[1])) as i32,
+                        x: (cmd.src_region.w.max(src_dim[0])) as i32,
+                        y: (cmd.src_region.h.max(src_dim[1])) as i32,
                         z: 1,
                     },
                 ],
-                dst_subresource: dst_data.sub_layers,
+                dst_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: dst_view.range.aspect_mask,
+                    mip_level: dst_view.range.base_mip_level,
+                    base_array_layer: dst_view.range.base_array_layer,
+                    layer_count: dst_view.range.layer_count,
+                },
                 dst_offsets: [
                     vk::Offset3D {
                         x: cmd.dst_region.x as i32,
@@ -422,14 +432,16 @@ impl CommandList {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.dst_region.w.max(dst_data.dim[0])) as i32,
-                        y: (cmd.dst_region.h.max(dst_data.dim[1])) as i32,
+                        x: (cmd.dst_region.w.max(dst_dim[0])) as i32,
+                        y: (cmd.dst_region.h.max(dst_dim[1])) as i32,
                         z: 1,
                     },
                 ],
             }];
-            let src_layout = src_data.layout;
-            let dst_layout = dst_data.layout;
+            let src_mip = src_view.range.base_mip_level as usize;
+            let dst_mip = dst_view.range.base_mip_level as usize;
+            let src_layout = src_data.layouts[src_mip];
+            let dst_layout = dst_data.layouts[dst_mip];
 
             self.transition_image_layout(
                 cmd.src,
@@ -446,9 +458,9 @@ impl CommandList {
             self.ctx_ref().device.cmd_blit_image(
                 self.cmd_buf,
                 src_data.img,
-                src_data.layout,
+                src_data.layouts[src_mip],
                 dst_data.img,
-                dst_data.layout,
+                dst_data.layouts[dst_mip],
                 &regions,
                 cmd.filter.into(),
             );
@@ -476,6 +488,7 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(barrier.view).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 self.last_op_stage,
@@ -484,8 +497,8 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
-                    .new_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
+                    .new_layout(img_data.layouts[mip])
                     .src_access_mask(self.last_op_access)
                     .dst_access_mask(vk::AccessFlags::empty())
                     .image(img_data.img)
@@ -831,9 +844,10 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
             let img_data = self.ctx_ref().images.get_mut_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             let (src_stage, src_access, dst_stage, dst_access) = self
                 .ctx_ref()
-                .barrier_masks_for_transition(img_data.layout, layout);
+                .barrier_masks_for_transition(img_data.layouts[mip], layout);
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 src_stage,
@@ -842,7 +856,7 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
                     .new_layout(layout)
                     .src_access_mask(src_access)
                     .dst_access_mask(dst_access)
@@ -850,7 +864,7 @@ impl CommandList {
                     .subresource_range(view_data.range)
                     .build()],
             );
-            img_data.layout = layout;
+            img_data.layouts[mip] = layout;
             self.last_op_stage = new_stage;
             self.last_op_access = new_access;
         }
@@ -866,6 +880,7 @@ impl CommandList {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+            let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 self.last_op_stage,
@@ -874,8 +889,8 @@ impl CommandList {
                 &[],
                 &[],
                 &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layout)
-                    .new_layout(img_data.layout)
+                    .old_layout(img_data.layouts[mip])
+                    .new_layout(img_data.layouts[mip])
                     .src_access_mask(self.last_op_access)
                     .dst_access_mask(new_access)
                     .image(img_data.img)
