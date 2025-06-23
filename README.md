@@ -8,6 +8,7 @@ Dashi is a low-level graphics backend written in Rust. It provides efficient abs
 - **Cross-Platform**: Designed to be compatible across multiple platforms, providing seamless experiences on Windows and Linux.
 - **Rust Safety**: Combines the power of Rust's ownership and borrowing system to ensure memory and thread safety, while dealing with low-level graphics.
 - **Extensible**: Built with extensibility in mind, enabling integration with higher-level frameworks or custom rendering pipelines.
+- **Automatic Mipmaps**: Images created with multiple mip levels now have additional levels generated automatically after upload.
 
 ## Getting Started
 

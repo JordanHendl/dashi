@@ -1462,7 +1462,88 @@ impl Context {
         self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
         self.destroy_image_view(tmp_view);
+
+        // Generate the remaining mip levels after the base level upload
+        if info.mip_levels > 1 {
+            self.generate_mipmaps(image, info.mip_levels)?;
+        }
+
         return Ok(());
+    }
+
+    /// Generate mip levels for an image by blitting from each level to the next.
+    fn generate_mipmaps(&mut self, image: Handle<Image>, levels: u32) -> Result<(), GPUError> {
+        if levels <= 1 {
+            return Ok(());
+        }
+
+        let img = self.images.get_ref(image).unwrap();
+        let aspect = match img.format {
+            Format::D24S8 => AspectMask::DepthStencil,
+            _ => AspectMask::Color,
+        };
+
+        let dims = img.dim;
+
+        let mut list = self.begin_command_list(&Default::default())?;
+        for level in 0..(levels - 1) {
+            let src_view = self.make_image_view(&ImageViewInfo {
+                debug_name: "mip_src",
+                img: image,
+                layer: 0,
+                mip_level: level,
+                aspect,
+            })?;
+            let dst_view = self.make_image_view(&ImageViewInfo {
+                debug_name: "mip_dst",
+                img: image,
+                layer: 0,
+                mip_level: level + 1,
+                aspect,
+            })?;
+
+            self.transition_image_stages(
+                list.cmd_buf,
+                dst_view,
+                vk::ImageLayout::GENERAL,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+            );
+
+            let src_w = (dims[0] >> level).max(1);
+            let src_h = (dims[1] >> level).max(1);
+            let dst_w = (dims[0] >> (level + 1)).max(1);
+            let dst_h = (dims[1] >> (level + 1)).max(1);
+
+            list.blit_image(ImageBlit {
+                src: src_view,
+                dst: dst_view,
+                filter: Filter::Linear,
+                src_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: src_w,
+                    h: src_h,
+                },
+                dst_region: Rect2D {
+                    x: 0,
+                    y: 0,
+                    w: dst_w,
+                    h: dst_h,
+                },
+            });
+
+            self.destroy_image_view(src_view);
+            self.destroy_image_view(dst_view);
+        }
+
+        let fence = self.submit(&mut list, &Default::default())?;
+        self.wait(fence)?;
+        self.destroy_cmd_list(list);
+
+        Ok(())
     }
 
     pub fn sync_current_device(&mut self) {

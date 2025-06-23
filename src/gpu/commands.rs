@@ -390,18 +390,25 @@ impl CommandList {
 
     pub fn blit_image(&mut self, cmd: ImageBlit) {
         unsafe {
-            let src_data = self
-                .ctx_ref()
-                .images
-                .get_ref(self.ctx_ref().image_views.get_ref(cmd.src).unwrap().img)
-                .unwrap();
-            let dst_data = self
-                .ctx_ref()
-                .images
-                .get_ref(self.ctx_ref().image_views.get_ref(cmd.dst).unwrap().img)
-                .unwrap();
+            let src_view = self.ctx_ref().image_views.get_ref(cmd.src).unwrap();
+            let dst_view = self.ctx_ref().image_views.get_ref(cmd.dst).unwrap();
+            let src_data = self.ctx_ref().images.get_ref(src_view.img).unwrap();
+            let dst_data = self.ctx_ref().images.get_ref(dst_view.img).unwrap();
+            let src_dim = [
+                (src_data.dim[0] >> src_view.range.base_mip_level).max(1),
+                (src_data.dim[1] >> src_view.range.base_mip_level).max(1),
+            ];
+            let dst_dim = [
+                (dst_data.dim[0] >> dst_view.range.base_mip_level).max(1),
+                (dst_data.dim[1] >> dst_view.range.base_mip_level).max(1),
+            ];
             let regions = [vk::ImageBlit {
-                src_subresource: src_data.sub_layers,
+                src_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: src_data.sub_layers.aspect_mask,
+                    mip_level: src_view.range.base_mip_level,
+                    base_array_layer: src_view.range.base_array_layer,
+                    layer_count: src_view.range.layer_count,
+                },
                 src_offsets: [
                     vk::Offset3D {
                         x: cmd.src_region.x as i32,
@@ -409,12 +416,17 @@ impl CommandList {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.src_region.w.max(src_data.dim[0])) as i32,
-                        y: (cmd.src_region.h.max(src_data.dim[1])) as i32,
+                        x: (cmd.src_region.w.max(src_dim[0])) as i32,
+                        y: (cmd.src_region.h.max(src_dim[1])) as i32,
                         z: 1,
                     },
                 ],
-                dst_subresource: dst_data.sub_layers,
+                dst_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: dst_data.sub_layers.aspect_mask,
+                    mip_level: dst_view.range.base_mip_level,
+                    base_array_layer: dst_view.range.base_array_layer,
+                    layer_count: dst_view.range.layer_count,
+                },
                 dst_offsets: [
                     vk::Offset3D {
                         x: cmd.dst_region.x as i32,
@@ -422,8 +434,8 @@ impl CommandList {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.dst_region.w.max(dst_data.dim[0])) as i32,
-                        y: (cmd.dst_region.h.max(dst_data.dim[1])) as i32,
+                        x: (cmd.dst_region.w.max(dst_dim[0])) as i32,
+                        y: (cmd.dst_region.h.max(dst_dim[1])) as i32,
                         z: 1,
                     },
                 ],
