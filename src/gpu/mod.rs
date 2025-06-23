@@ -252,6 +252,14 @@ pub fn bytes_per_channel(fmt: &Format) -> u32 {
     }
 }
 
+pub fn mip_dimensions(dim: [u32; 3], level: u32) -> [u32; 3] {
+    [
+        std::cmp::max(1, dim[0] >> level),
+        std::cmp::max(1, dim[1] >> level),
+        std::cmp::max(1, dim[2] >> level),
+    ]
+}
+
 fn convert_load_op(load_op: LoadOp) -> vk::AttachmentLoadOp {
     match load_op {
         LoadOp::Load => vk::AttachmentLoadOp::LOAD,
@@ -1453,16 +1461,66 @@ impl Context {
             tmp_view,
             vk::ImageLayout::GENERAL,
             vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
             vk::AccessFlags::TRANSFER_WRITE,
-            Default::default(),
+            vk::AccessFlags::TRANSFER_READ,
         );
+
+        if info.mip_levels > 1 {
+            for i in 0..info.mip_levels - 1 {
+                let src_view = self
+                    .make_image_view(&ImageViewInfo {
+                        debug_name: "mip_src",
+                        img: image,
+                        layer: 0,
+                        mip_level: i,
+                        aspect: if info.format == Format::D24S8 {
+                            AspectMask::DepthStencil
+                        } else {
+                            AspectMask::Color
+                        },
+                    })?;
+                let dst_view = self
+                    .make_image_view(&ImageViewInfo {
+                        debug_name: "mip_dst",
+                        img: image,
+                        layer: 0,
+                        mip_level: i + 1,
+                        aspect: if info.format == Format::D24S8 {
+                            AspectMask::DepthStencil
+                        } else {
+                            AspectMask::Color
+                        },
+                    })?;
+
+                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+
+                list.append(Command::Blit(ImageBlit {
+                    src: src_view,
+                    dst: dst_view,
+                    filter: Filter::Linear,
+                    ..Default::default()
+                }));
+
+                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::GENERAL);
+                if i + 1 < info.mip_levels - 1 {
+                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                } else {
+                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::GENERAL);
+                }
+
+                self.destroy_image_view(src_view);
+                self.destroy_image_view(dst_view);
+            }
+        }
+
         let fence = self.submit(&mut list, &Default::default())?;
         self.wait(fence)?;
         self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
         self.destroy_image_view(tmp_view);
-        return Ok(());
+        Ok(())
     }
 
     pub fn sync_current_device(&mut self) {

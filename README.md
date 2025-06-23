@@ -8,6 +8,7 @@ Dashi is a low-level graphics backend written in Rust. It provides efficient abs
 - **Cross-Platform**: Designed to be compatible across multiple platforms, providing seamless experiences on Windows and Linux.
 - **Rust Safety**: Combines the power of Rust's ownership and borrowing system to ensure memory and thread safety, while dealing with low-level graphics.
 - **Extensible**: Built with extensibility in mind, enabling integration with higher-level frameworks or custom rendering pipelines.
+- **Automatic Mipmaps**: Images with `mip_levels` greater than 1 generate their mip chains on upload.
 
 ## Getting Started
 
@@ -34,6 +35,9 @@ See the [examples](https://github.com/JordanHendl/dashi/tree/main/examples) for 
 ```bash
 cargo run --example hello_triangle
 ```
+
+Creating an image with `mip_levels` greater than 1 will automatically generate
+the full mip chain after the initial data upload.
 
 ### Window Backends
 
