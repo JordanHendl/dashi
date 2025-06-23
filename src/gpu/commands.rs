@@ -315,6 +315,11 @@ impl CommandList {
                 vk::AccessFlags::TRANSFER_WRITE,
             );
 
+            let extent = vk::Extent3D {
+                width: (img_data.dim[0] >> view_data.range.base_mip_level).max(1),
+                height: (img_data.dim[1] >> view_data.range.base_mip_level).max(1),
+                depth: 1,
+            };
             self.ctx_ref().device.cmd_copy_buffer_to_image(
                 self.cmd_buf,
                 self.ctx_ref().buffers.get_ref(rec.src).unwrap().buf,
@@ -328,7 +333,7 @@ impl CommandList {
                         base_array_layer: view_data.range.base_array_layer,
                         layer_count: view_data.range.layer_count,
                     },
-                    image_extent: img_data.extent,
+                    image_extent: extent,
                     ..Default::default()
                 }],
             );
@@ -357,6 +362,11 @@ impl CommandList {
                 vk::AccessFlags::TRANSFER_READ,
             );
 
+            let extent = vk::Extent3D {
+                width: (img_data.dim[0] >> view_data.range.base_mip_level).max(1),
+                height: (img_data.dim[1] >> view_data.range.base_mip_level).max(1),
+                depth: 1,
+            };
             self.ctx_ref().device.cmd_copy_image_to_buffer(
                 self.cmd_buf,
                 img_data.img,
@@ -370,7 +380,7 @@ impl CommandList {
                         base_array_layer: view_data.range.base_array_layer,
                         layer_count: view_data.range.layer_count,
                     },
-                    image_extent: img_data.extent,
+                    image_extent: extent,
                     ..Default::default()
                 }],
             );

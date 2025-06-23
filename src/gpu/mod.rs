@@ -3138,6 +3138,82 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_mipmap_generation() {
+        const W: u32 = 4;
+        const H: u32 = 4;
+        const LEVELS: u32 = 3;
+
+        let mut base_data = Vec::new();
+        for _ in 0..(W * H) {
+            base_data.extend_from_slice(&[255u8, 0u8, 0u8, 255u8]);
+        }
+
+        let mut ctx = Context::headless(&Default::default()).unwrap();
+        let image = ctx
+            .make_image(&ImageInfo {
+                debug_name: "mip-test",
+                dim: [W, H, 1],
+                format: Format::RGBA8,
+                mip_levels: LEVELS,
+                initial_data: Some(&base_data),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let buffer = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "readback",
+                byte_size: (W * H * 4) as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                ..Default::default()
+            })
+            .unwrap();
+
+        for level in 0..LEVELS {
+            let view = ctx
+                .make_image_view(&ImageViewInfo {
+                    debug_name: "view",
+                    img: image,
+                    layer: 0,
+                    mip_level: level,
+                    aspect: AspectMask::Color,
+                })
+                .unwrap();
+
+            let mut list = ctx
+                .begin_command_list(&CommandListInfo::default())
+                .unwrap();
+            list.copy_image_to_buffer(ImageBufferCopy {
+                src: view,
+                dst: buffer,
+                dst_offset: 0,
+            });
+            let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+            ctx.wait(fence).unwrap();
+            ctx.destroy_cmd_list(list);
+            ctx.destroy_image_view(view);
+
+            let width = (W >> level).max(1);
+            let height = (H >> level).max(1);
+            let expected_len = (width * height * 4) as usize;
+            let data = ctx.map_buffer::<u8>(buffer).unwrap();
+            for i in 0..expected_len / 4 {
+                let idx = i * 4;
+                assert_eq!(data[idx], 255u8);
+                assert_eq!(data[idx + 1], 0u8);
+                assert_eq!(data[idx + 2], 0u8);
+                assert_eq!(data[idx + 3], 255u8);
+            }
+            ctx.unmap_buffer(buffer).unwrap();
+        }
+
+        ctx.destroy_buffer(buffer);
+        ctx.destroy_image(image);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
     fn test_headless_context_creation() {
         // headless() should succeed...
         let ctx = Context::headless(&ContextInfo::default());
