@@ -12,4 +12,7 @@ compile_error!(
     "window backends are mutually exclusive; enable only one of `dashi-sdl2`, `dashi-minifb`, or `dashi-winit`"
 );
 
+#[cfg(all(feature = "dashi-vulkan", feature = "dashi-dx12"))]
+compile_error!("GPU backends are mutually exclusive; enable only one of `dashi-vulkan` or `dashi-dx12`");
+
 pub use gpu::*;
