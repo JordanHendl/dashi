@@ -2556,6 +2556,7 @@ impl Context {
                         ShaderPrimitiveType::Vec3 => vk::Format::R32G32B32_SFLOAT,
                         ShaderPrimitiveType::Vec2 => vk::Format::R32G32_SFLOAT,
                         ShaderPrimitiveType::IVec4 => vk::Format::R32G32B32A32_SINT,
+                        ShaderPrimitiveType::UVec4 => vk::Format::R32G32B32A32_UINT,
                     })
                     .offset(entry.offset as u32)
                     .build()

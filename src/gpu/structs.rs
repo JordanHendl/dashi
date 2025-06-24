@@ -672,6 +672,7 @@ pub enum ShaderPrimitiveType {
     Vec3,
     Vec4,
     IVec4,
+    UVec4,
 }
 
 #[derive(Hash, Debug, Clone)]
