@@ -24,6 +24,8 @@ pub mod commands;
 pub use commands::*;
 pub mod framed_cmd_list;
 pub use framed_cmd_list::*;
+pub mod timing;
+pub use timing::*;
 #[cfg(feature = "dashi-minifb")]
 pub mod minifb_window;
 #[cfg(feature = "dashi-winit")]
@@ -598,6 +600,9 @@ pub struct Context {
     pub(super) compute_pipelines: Pool<ComputePipeline>,
     pub(super) cmds_to_release: Vec<(CommandList, Handle<Fence>)>,
 
+    pub(super) gpu_timers: Vec<GpuTimer>,
+    pub(super) timestamp_period: f32,
+
     /// Indicates whether the context was created in headless mode
     headless: bool,
 
@@ -827,6 +832,8 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            gpu_timers: Vec::new(),
+            timestamp_period: properties.limits.timestamp_period,
             headless: true,
 
             #[cfg(feature = "dashi-sdl2")]
@@ -836,7 +843,8 @@ impl Context {
             #[cfg(debug_assertions)]
             debug_utils,
         };
-
+        let mut ctx = ctx;
+        ctx.init_gpu_timers(1)?;
         Ok(ctx)
     }
 
@@ -876,6 +884,8 @@ impl Context {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             cmds_to_release: Default::default(),
+            gpu_timers: Vec::new(),
+            timestamp_period: properties.limits.timestamp_period,
             headless: false,
 
             #[cfg(feature = "dashi-sdl2")]
@@ -885,9 +895,8 @@ impl Context {
             #[cfg(debug_assertions)]
             debug_utils,
         };
-
-
-
+        let mut ctx = ctx;
+        ctx.init_gpu_timers(1)?;
         Ok(ctx)
     }
 
@@ -1536,6 +1545,36 @@ impl Context {
         unsafe { self.device.device_wait_idle().unwrap() };
     }
 
+    pub fn init_gpu_timers(&mut self, count: usize) -> Result<(), GPUError> {
+        for timer in self.gpu_timers.drain(..) {
+            unsafe { self.device.destroy_query_pool(timer.pool, None) };
+        }
+        let mut timers = Vec::with_capacity(count);
+        for _ in 0..count {
+            timers.push(GpuTimer::new(&self.device)?);
+        }
+        self.gpu_timers = timers;
+        Ok(())
+    }
+
+    pub fn gpu_timer_begin(&mut self, list: &mut CommandList, frame: usize) {
+        if let Some(t) = self.gpu_timers.get(frame) {
+            unsafe { t.begin(&self.device, list.cmd_buf) };
+        }
+    }
+
+    pub fn gpu_timer_end(&mut self, list: &mut CommandList, frame: usize) {
+        if let Some(t) = self.gpu_timers.get(frame) {
+            unsafe { t.end(&self.device, list.cmd_buf) };
+        }
+    }
+
+    pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
+        self.gpu_timers
+            .get(frame)
+            .and_then(|t| t.resolve(&self.device, self.timestamp_period).ok())
+    }
+
     pub fn make_dynamic_allocator(
         &mut self,
         info: &DynamicAllocatorInfo,
@@ -1724,6 +1763,10 @@ impl Context {
             .for_each_occupied_mut(|pipeline| unsafe {
                 self.device.destroy_pipeline(pipeline.raw, None);
             });
+
+        for timer in self.gpu_timers.drain(..) {
+            unsafe { self.device.destroy_query_pool(timer.pool, None) };
+        }
 
         // Command pool
         unsafe {
@@ -2978,6 +3021,7 @@ impl Context {
         for _idx in 0..handles.len() {
             fences.push(self.make_fence()?);
         }
+        self.init_gpu_timers(handles.len())?;
         return Ok(Display {
             window,
             #[cfg(feature = "dashi-winit")]
