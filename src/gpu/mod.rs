@@ -220,16 +220,16 @@ fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
     }
 }
 
-fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
+fn vk_to_lib_image_format(fmt: vk::Format) -> Result<Format, GPUError> {
     match fmt {
-        vk::Format::R8G8B8_SRGB => return Format::RGB8,
-        vk::Format::R32G32B32A32_SFLOAT => return Format::RGBA32F,
-        vk::Format::R8G8B8A8_SRGB => return Format::RGBA8,
-        vk::Format::B8G8R8A8_SRGB => return Format::BGRA8,
-        vk::Format::B8G8R8A8_SNORM => return Format::BGRA8Unorm,
-        vk::Format::R8_SINT => return Format::R8Sint,
-        vk::Format::R8_UINT => return Format::R8Uint,
-        _ => todo!(),
+        vk::Format::R8G8B8_SRGB => Ok(Format::RGB8),
+        vk::Format::R32G32B32A32_SFLOAT => Ok(Format::RGBA32F),
+        vk::Format::R8G8B8A8_SRGB => Ok(Format::RGBA8),
+        vk::Format::B8G8R8A8_SRGB => Ok(Format::BGRA8),
+        vk::Format::B8G8R8A8_SNORM => Ok(Format::BGRA8Unorm),
+        vk::Format::R8_SINT => Ok(Format::R8Sint),
+        vk::Format::R8_UINT => Ok(Format::R8Uint),
+        _ => Err(GPUError::UnsupportedVkFormat(fmt)),
     }
 }
 
@@ -2517,22 +2517,22 @@ impl Context {
         let shader_stages: Vec<vk::PipelineShaderStageCreateInfo> = info
             .shaders
             .iter()
-            .map(|shader_info| {
+            .map(|shader_info| -> Result<vk::PipelineShaderStageCreateInfo, GPUError> {
                 let stage_flags = match shader_info.stage {
                     ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
                     ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
                     ShaderType::All => vk::ShaderStageFlags::ALL,
-                    _ => todo!(),
+                    other => return Err(GPUError::UnsupportedShaderStage(other)),
                 };
 
-                vk::PipelineShaderStageCreateInfo::builder()
+                Ok(vk::PipelineShaderStageCreateInfo::builder()
                     .stage(stage_flags)
-                    .module(self.create_shader_module(shader_info.spirv).unwrap())
+                    .module(self.create_shader_module(shader_info.spirv)?)
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
                     //                    .specialization_info(None) // Handle specialization constants if needed
-                    .build()
+                    .build())
             })
-            .collect();
+            .collect::<Result<Vec<_>, GPUError>>()?;
 
         // Step 2: Create Vertex Input State
         let vertex_binding_description = vk::VertexInputBindingDescription::builder()
@@ -2998,7 +2998,7 @@ impl Context {
                     .depth(1)
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
-                format: vk_to_lib_image_format(wanted_format),
+                format: vk_to_lib_image_format(wanted_format)?,
             }) {
                 Some(handle) => {
                     self.oneshot_transition_image_noview(handle, vk::ImageLayout::PRESENT_SRC_KHR);
@@ -3013,7 +3013,7 @@ impl Context {
                     view_handles.push(h);
                     handles.push(handle)
                 }
-                None => todo!(),
+                None => return Err(GPUError::SlotError()),
             };
         }
 
