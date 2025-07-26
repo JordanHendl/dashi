@@ -9,6 +9,7 @@ default = ["dashi-winit", "dashi-vulkan"]
 dashi-winit = ["dep:winit"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]
+dashi-openxr = ["dep:openxr"]
 dashi-serde = ["dep:serde"]
 debug_offset_alloc = []
 use_16_bit_node_indices = []
@@ -22,6 +23,7 @@ sdl2 = {version = "0.35.2", features = ["bundled", "static-link", "raw-window-ha
 ash-window = { version = "0.11", optional = true }
 minifb = { version = "0.24", optional = true }
 winit = { version = "0.26", optional = true }
+openxr = { version = "0.19", optional = true }
 raw-window-handle = "0.4"
 serde = {version = "1.0.210", features = ["derive"], optional = true}
 windows = { version = "0.52.0", optional = true, features = ["Win32_Graphics_Direct3D12"] }
