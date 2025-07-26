@@ -46,7 +46,9 @@ uses winit for cross-platform windowing and event handling. SDL2 support can be
 enabled via the `dashi-sdl2` feature. If build times are a concern you can
 instead enable the `dashi-minifb` feature which relies on `minifb`. It compiles
 much faster but only offers very basic input handling.
-Only one of these window features can be enabled at a time.
+OpenXR headsets are supported via the `dashi-openxr` feature.
+Only one of these window features can be enabled at a time, and `dashi-openxr`
+is mutually exclusive with them.
 
 ## Documentation
 
