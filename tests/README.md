@@ -15,6 +15,16 @@ cargo test --no-default-features --features dashi-minifb --test minifb_triangle 
 
 You can also run all tests (without executing the ignored one) via `cargo test`.
 
+## OpenXR Triangle
+The `openxr_triangle` test exercises the experimental OpenXR backend. It is
+ignored by default because it requires a headset.
+
+Run it with:
+
+```bash
+cargo test --no-default-features --features dashi-openxr --test openxr_triangle -- --ignored
+```
+
 ## Framebuffer Comparison
 The `framebuffer_compare` test demonstrates capturing GPU output to a CPU visible buffer and comparing it against a reference PNG image using the helper functions in `image_utils`.
 Reference PNGs are not stored in the repo. Place them under `tests/reference` before running.
