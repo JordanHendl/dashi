@@ -8,6 +8,8 @@ use ash::*;
 use minifb;
 #[cfg(feature = "dashi-winit")]
 use winit;
+#[cfg(feature = "dashi-openxr")]
+use openxr as xr;
 pub use error::*;
 use std::{
     collections::HashMap,
@@ -30,6 +32,8 @@ pub use timing::*;
 pub mod minifb_window;
 #[cfg(feature = "dashi-winit")]
 pub mod winit_window;
+#[cfg(feature = "dashi-openxr")]
+pub mod openxr_window;
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -485,6 +489,13 @@ impl Display {
     pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
         &mut self.event_loop
     }
+}
+
+#[cfg(feature = "dashi-openxr")]
+pub struct XrDisplay {
+    pub xr_instance: xr::Instance,
+    pub session: xr::Session<xr::Vulkan>,
+    pub swapchain: xr::Swapchain<xr::Vulkan>,
 }
 
 #[derive(Clone)]
@@ -3037,6 +3048,24 @@ impl Context {
             fences,
             views: view_handles,
         });
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn make_xr_display(&mut self) -> Result<XrDisplay, GPUError> {
+        let (xr_instance, session, swapchain) =
+            openxr_window::create_xr_session(
+                &self.instance,
+                self.pdevice,
+                &self.device,
+                self.gfx_queue.family,
+            )
+            .map_err(|_| GPUError::LibraryError())?;
+
+        Ok(XrDisplay {
+            xr_instance,
+            session,
+            swapchain,
+        })
     }
 
     pub fn acquire_new_image(
