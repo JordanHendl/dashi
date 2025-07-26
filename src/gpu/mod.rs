@@ -498,6 +498,8 @@ pub struct Display {
     xr_images: Vec<xr::vulkan::SwapchainImage>,
     #[cfg(feature = "dashi-openxr")]
     xr_view_config: Vec<xr::ViewConfigurationView>,
+    #[cfg(feature = "dashi-openxr")]
+    xr_input: openxr_window::XrInput,
 }
 
 impl Display {
@@ -547,6 +549,16 @@ impl Display {
     #[cfg(feature = "dashi-openxr")]
     pub fn xr_view_configuration(&self) -> &[xr::ViewConfigurationView] {
         &self.xr_view_config
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn poll_inputs(&mut self) -> xr::Result<openxr_window::XrInputState> {
+        self.xr_input.poll_inputs()
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_input(&self) -> &openxr_window::XrInput {
+        &self.xr_input
     }
 }
 
@@ -3120,6 +3132,9 @@ impl Context {
             )
             .map_err(|_| GPUError::LibraryError())?;
 
+        let xr_input = openxr_window::XrInput::new(&xr_instance, &session)
+            .map_err(|_| GPUError::LibraryError())?;
+
         Ok(Display {
             xr_instance,
             xr_session: session,
@@ -3128,6 +3143,7 @@ impl Context {
             xr_swapchain: swapchain,
             xr_images: images,
             xr_view_config: views,
+            xr_input,
         })
     }
 

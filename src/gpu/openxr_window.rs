@@ -84,3 +84,102 @@ pub fn create_xr_session(
 
     Ok((instance, session, waiter, stream, swapchain, images, views))
 }
+
+#[cfg(feature = "dashi-openxr")]
+#[derive(Default, Debug)]
+pub struct XrInputState {
+    pub left_trigger: f32,
+    pub right_trigger: f32,
+    pub left_active: bool,
+    pub right_active: bool,
+}
+
+#[cfg(feature = "dashi-openxr")]
+pub struct XrInput {
+    session: xr::Session<xr::Vulkan>,
+    base_space: xr::Space,
+    action_set: xr::ActionSet,
+    grip_action: xr::Action<xr::Posef>,
+    trigger_action: xr::Action<f32>,
+    left_path: xr::Path,
+    right_path: xr::Path,
+    left_space: xr::Space,
+    right_space: xr::Space,
+}
+
+#[cfg(feature = "dashi-openxr")]
+impl XrInput {
+    pub fn new(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> xr::Result<Self> {
+        let action_set = instance.create_action_set("input", "input", 0)?;
+        let left_path = instance.string_to_path("/user/hand/left")?;
+        let right_path = instance.string_to_path("/user/hand/right")?;
+
+        let grip_action =
+            action_set.create_action::<xr::Posef>("grip_pose", "Grip Pose", &[left_path, right_path])?;
+        let trigger_action =
+            action_set.create_action::<f32>("trigger", "Trigger", &[left_path, right_path])?;
+
+        instance.suggest_interaction_profile_bindings(
+            instance.string_to_path("/interaction_profiles/khr/simple_controller")?,
+            &[
+                xr::Binding::new(&grip_action, instance.string_to_path("/user/hand/left/input/grip/pose")?),
+                xr::Binding::new(&grip_action, instance.string_to_path("/user/hand/right/input/grip/pose")?),
+                xr::Binding::new(&trigger_action, instance.string_to_path("/user/hand/left/input/select/value")?),
+                xr::Binding::new(&trigger_action, instance.string_to_path("/user/hand/right/input/select/value")?),
+            ],
+        )?;
+
+        session.attach_action_sets(&[&action_set])?;
+
+        let base_space = session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
+        let left_space = grip_action.create_space(session.clone(), left_path, xr::Posef::IDENTITY)?;
+        let right_space = grip_action.create_space(session.clone(), right_path, xr::Posef::IDENTITY)?;
+
+        Ok(Self {
+            session: session.clone(),
+            base_space,
+            action_set,
+            grip_action,
+            trigger_action,
+            left_path,
+            right_path,
+            left_space,
+            right_space,
+        })
+    }
+
+    pub fn poll_inputs(&mut self) -> xr::Result<XrInputState> {
+        self.session.sync_actions(&[(&self.action_set).into()])?;
+
+        let left_trigger = self
+            .trigger_action
+            .state(&self.session, self.left_path)?
+            .current_state;
+        let right_trigger = self
+            .trigger_action
+            .state(&self.session, self.right_path)?
+            .current_state;
+
+        let left_active = self.grip_action.is_active(&self.session, self.left_path)?;
+        let right_active = self.grip_action.is_active(&self.session, self.right_path)?;
+
+        Ok(XrInputState {
+            left_trigger,
+            right_trigger,
+            left_active,
+            right_active,
+        })
+    }
+
+    pub fn left_space(&self) -> &xr::Space {
+        &self.left_space
+    }
+
+    pub fn right_space(&self) -> &xr::Space {
+        &self.right_space
+    }
+
+    pub fn base_space(&self) -> &xr::Space {
+        &self.base_space
+    }
+}
