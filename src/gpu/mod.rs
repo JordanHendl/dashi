@@ -465,15 +465,35 @@ pub struct Display {
     window: winit::window::Window,
     #[cfg(feature = "dashi-winit")]
     event_loop: winit::event_loop::EventLoop<()>,
+    #[cfg(not(feature = "dashi-openxr"))]
     swapchain: ash::vk::SwapchainKHR,
+    #[cfg(not(feature = "dashi-openxr"))]
     surface: ash::vk::SurfaceKHR,
+    #[cfg(not(feature = "dashi-openxr"))]
     images: Vec<Handle<Image>>,
+    #[cfg(not(feature = "dashi-openxr"))]
     views: Vec<Handle<ImageView>>,
+    #[cfg(not(feature = "dashi-openxr"))]
     loader: ash::extensions::khr::Surface,
+    #[cfg(not(feature = "dashi-openxr"))]
     sc_loader: ash::extensions::khr::Swapchain,
+    #[cfg(not(feature = "dashi-openxr"))]
     semaphores: Vec<Handle<Semaphore>>,
+    #[cfg(not(feature = "dashi-openxr"))]
     fences: Vec<Handle<Fence>>,
+    #[cfg(not(feature = "dashi-openxr"))]
     frame_idx: u32,
+
+    #[cfg(feature = "dashi-openxr")]
+    xr_instance: xr::Instance,
+    #[cfg(feature = "dashi-openxr")]
+    xr_session: xr::Session<xr::Vulkan>,
+    #[cfg(feature = "dashi-openxr")]
+    xr_swapchain: xr::Swapchain<xr::Vulkan>,
+    #[cfg(feature = "dashi-openxr")]
+    xr_images: Vec<xr::vulkan::SwapchainImage>,
+    #[cfg(feature = "dashi-openxr")]
+    xr_view_config: Vec<xr::ViewConfigurationView>,
 }
 
 impl Display {
@@ -489,14 +509,33 @@ impl Display {
     pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
         &mut self.event_loop
     }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_instance(&self) -> &xr::Instance {
+        &self.xr_instance
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_session(&self) -> &xr::Session<xr::Vulkan> {
+        &self.xr_session
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_swapchain(&self) -> &xr::Swapchain<xr::Vulkan> {
+        &self.xr_swapchain
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_swapchain_images(&self) -> &[xr::vulkan::SwapchainImage] {
+        &self.xr_images
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_view_configuration(&self) -> &[xr::ViewConfigurationView] {
+        &self.xr_view_config
+    }
 }
 
-#[cfg(feature = "dashi-openxr")]
-pub struct XrDisplay {
-    pub xr_instance: xr::Instance,
-    pub session: xr::Session<xr::Vulkan>,
-    pub swapchain: xr::Swapchain<xr::Vulkan>,
-}
 
 #[derive(Clone)]
 pub struct Fence {
@@ -2853,6 +2892,7 @@ impl Context {
         });
     }
 
+    #[cfg(not(feature = "dashi-openxr"))]
     pub fn destroy_display(&mut self, dsp: Display) {
         for img in &dsp.images {
             self.images.release(*img);
@@ -2870,6 +2910,11 @@ impl Context {
         for fence in &dsp.fences {
             self.destroy_fence(fence.clone());
         }
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn destroy_display(&mut self, _dsp: Display) {
+        // OpenXR resources are cleaned up by Drop implementations
     }
 
     #[cfg(feature = "dashi-sdl2")]
@@ -3051,8 +3096,8 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
-    pub fn make_xr_display(&mut self) -> Result<XrDisplay, GPUError> {
-        let (xr_instance, session, swapchain) =
+    pub fn make_xr_display(&mut self) -> Result<Display, GPUError> {
+        let (xr_instance, session, swapchain, images, views) =
             openxr_window::create_xr_session(
                 &self.instance,
                 self.pdevice,
@@ -3061,10 +3106,12 @@ impl Context {
             )
             .map_err(|_| GPUError::LibraryError())?;
 
-        Ok(XrDisplay {
+        Ok(Display {
             xr_instance,
-            session,
-            swapchain,
+            xr_session: session,
+            xr_swapchain: swapchain,
+            xr_images: images,
+            xr_view_config: views,
         })
     }
 
