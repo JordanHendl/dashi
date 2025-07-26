@@ -4,13 +4,24 @@ use ash::vk;
 use ash::{Device, Instance};
 
 /// Create an OpenXR Vulkan session and swapchain.
-/// Returns the created `openxr::Instance`, `openxr::Session`, and `openxr::Swapchain`.
+///
+/// Returns the created `openxr::Instance`, `openxr::Session`, `openxr::Swapchain`,
+/// the swapchain images, and the view configuration.
 pub fn create_xr_session(
     vk_instance: &Instance,
     physical_device: vk::PhysicalDevice,
     device: &Device,
     queue_family_index: u32,
-) -> Result<(xr::Instance, xr::Session<xr::Vulkan>, xr::Swapchain<xr::Vulkan>), xr::sys::Result> {
+) -> Result<
+    (
+        xr::Instance,
+        xr::Session<xr::Vulkan>,
+        xr::Swapchain<xr::Vulkan>,
+        Vec<xr::vulkan::SwapchainImage>,
+        Vec<xr::ViewConfigurationView>,
+    ),
+    xr::sys::Result,
+> {
     #[cfg(feature = "static")]
     let entry = xr::Entry::linked();
     #[cfg(not(feature = "static"))]
@@ -67,6 +78,7 @@ pub fn create_xr_session(
         array_size,
         mip_count: 1,
     })?;
+    let images = swapchain.enumerate_images()?;
 
-    Ok((instance, session, swapchain))
+    Ok((instance, session, swapchain, images, views))
 }
