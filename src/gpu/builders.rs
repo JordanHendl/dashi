@@ -9,6 +9,8 @@ use crate::{
     SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering,
 };
 use crate::{Context, GPUError};
+#[cfg(feature = "dashi-openxr")]
+use crate::XrDisplayInfo;
 
 /// Builds a RenderPass via the builder pattern.
 pub struct RenderPassBuilder<'a> {
@@ -100,6 +102,12 @@ impl DisplayBuilder {
     /// Finalize and create the Display.
     pub fn build(self, ctx: &mut Context) -> Result<Display, GPUError> {
         ctx.make_display(&self.info)
+    }
+
+    /// Create an OpenXR display when the `dashi-openxr` feature is enabled.
+    #[cfg(feature = "dashi-openxr")]
+    pub fn build_xr(&self, ctx: &mut Context) -> Result<Display, GPUError> {
+        ctx.make_xr_display(&XrDisplayInfo::default())
     }
 }
 

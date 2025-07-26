@@ -16,6 +16,8 @@ pub fn create_xr_session(
     (
         xr::Instance,
         xr::Session<xr::Vulkan>,
+        xr::FrameWaiter,
+        xr::FrameStream<xr::Vulkan>,
         xr::Swapchain<xr::Vulkan>,
         Vec<xr::vulkan::SwapchainImage>,
         Vec<xr::ViewConfigurationView>,
@@ -48,7 +50,7 @@ pub fn create_xr_session(
 
     let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
 
-    let (session, _, _) = instance.create_session::<xr::Vulkan>(
+    let (session, waiter, stream) = instance.create_session::<xr::Vulkan>(
         system,
         &xr::vulkan::SessionCreateInfo {
             instance: vk_instance.handle().as_raw() as _,
@@ -80,5 +82,5 @@ pub fn create_xr_session(
     })?;
     let images = swapchain.enumerate_images()?;
 
-    Ok((instance, session, swapchain, images, views))
+    Ok((instance, session, waiter, stream, swapchain, images, views))
 }

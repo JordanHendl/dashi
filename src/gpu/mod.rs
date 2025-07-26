@@ -489,6 +489,10 @@ pub struct Display {
     #[cfg(feature = "dashi-openxr")]
     xr_session: xr::Session<xr::Vulkan>,
     #[cfg(feature = "dashi-openxr")]
+    xr_waiter: xr::FrameWaiter,
+    #[cfg(feature = "dashi-openxr")]
+    xr_stream: xr::FrameStream<xr::Vulkan>,
+    #[cfg(feature = "dashi-openxr")]
     xr_swapchain: xr::Swapchain<xr::Vulkan>,
     #[cfg(feature = "dashi-openxr")]
     xr_images: Vec<xr::vulkan::SwapchainImage>,
@@ -518,6 +522,16 @@ impl Display {
     #[cfg(feature = "dashi-openxr")]
     pub fn xr_session(&self) -> &xr::Session<xr::Vulkan> {
         &self.xr_session
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_frame_waiter(&mut self) -> &mut xr::FrameWaiter {
+        &mut self.xr_waiter
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn xr_frame_stream(&mut self) -> &mut xr::FrameStream<xr::Vulkan> {
+        &mut self.xr_stream
     }
 
     #[cfg(feature = "dashi-openxr")]
@@ -3096,8 +3110,8 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
-    pub fn make_xr_display(&mut self) -> Result<Display, GPUError> {
-        let (xr_instance, session, swapchain, images, views) =
+    pub fn make_xr_display(&mut self, _info: &XrDisplayInfo) -> Result<Display, GPUError> {
+        let (xr_instance, session, waiter, stream, swapchain, images, views) =
             openxr_window::create_xr_session(
                 &self.instance,
                 self.pdevice,
@@ -3109,6 +3123,8 @@ impl Context {
         Ok(Display {
             xr_instance,
             xr_session: session,
+            xr_waiter: waiter,
+            xr_stream: stream,
             xr_swapchain: swapchain,
             xr_images: images,
             xr_view_config: views,
@@ -3168,6 +3184,43 @@ impl Context {
         }?;
 
         return Ok(());
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn acquire_xr_image(
+        &mut self,
+        dsp: &mut Display,
+    ) -> Result<(u32, xr::FrameState), GPUError> {
+        let state = dsp
+            .xr_waiter
+            .wait()
+            .map_err(|_| GPUError::LibraryError())?;
+        dsp.xr_stream
+            .begin()
+            .map_err(|_| GPUError::LibraryError())?;
+        let idx = dsp
+            .xr_swapchain
+            .acquire_image()
+            .map_err(|_| GPUError::LibraryError())?;
+        dsp.xr_swapchain
+            .wait_image(xr::Duration::INFINITE)
+            .map_err(|_| GPUError::LibraryError())?;
+        Ok((idx, state))
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn present_xr_display(
+        &mut self,
+        dsp: &mut Display,
+        state: xr::FrameState,
+    ) -> Result<(), GPUError> {
+        dsp.xr_swapchain
+            .release_image()
+            .map_err(|_| GPUError::LibraryError())?;
+        dsp.xr_stream
+            .end(state.predicted_display_time, xr::EnvironmentBlendMode::OPAQUE, &[])
+            .map_err(|_| GPUError::LibraryError())?;
+        Ok(())
     }
 }
 

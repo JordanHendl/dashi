@@ -861,3 +861,11 @@ impl Default for DisplayInfo {
         }
     }
 }
+
+/// Information used when creating an OpenXR display.
+///
+/// Currently no configuration options are required but the
+/// struct exists for future expansion and a consistent API.
+#[cfg(feature = "dashi-openxr")]
+#[derive(Default)]
+pub struct XrDisplayInfo;
