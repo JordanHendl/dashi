@@ -100,8 +100,14 @@ impl DisplayBuilder {
     }
 
     /// Finalize and create the Display.
+    #[cfg(not(feature = "dashi-openxr"))]
     pub fn build(self, ctx: &mut Context) -> Result<Display, GPUError> {
         ctx.make_display(&self.info)
+    }
+
+    #[cfg(feature = "dashi-openxr")]
+    pub fn build(self, ctx: &mut Context) -> Result<Display, GPUError> {
+        ctx.make_xr_display(&XrDisplayInfo::default())
     }
 
     /// Create an OpenXR display when the `dashi-openxr` feature is enabled.

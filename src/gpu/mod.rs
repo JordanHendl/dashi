@@ -457,13 +457,13 @@ pub struct IndexedBindGroup {
 
 #[allow(dead_code)]
 pub struct Display {
-    #[cfg(feature = "dashi-sdl2")]
+    #[cfg(all(feature = "dashi-sdl2", not(feature = "dashi-openxr")))]
     window: std::cell::Cell<sdl2::video::Window>,
-    #[cfg(feature = "dashi-minifb")]
+    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
     window: minifb::Window,
-    #[cfg(feature = "dashi-winit")]
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     window: winit::window::Window,
-    #[cfg(feature = "dashi-winit")]
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     event_loop: winit::event_loop::EventLoop<()>,
     #[cfg(not(feature = "dashi-openxr"))]
     swapchain: ash::vk::SwapchainKHR,
@@ -495,7 +495,7 @@ pub struct Display {
     #[cfg(feature = "dashi-openxr")]
     xr_swapchain: xr::Swapchain<xr::Vulkan>,
     #[cfg(feature = "dashi-openxr")]
-    xr_images: Vec<xr::vulkan::SwapchainImage>,
+    xr_images: Vec<vk::Image>,
     #[cfg(feature = "dashi-openxr")]
     xr_view_config: Vec<xr::ViewConfigurationView>,
     #[cfg(feature = "dashi-openxr")]
@@ -503,15 +503,15 @@ pub struct Display {
 }
 
 impl Display {
-    #[cfg(feature = "dashi-minifb")]
+    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
     pub fn minifb_window(&mut self) -> &mut minifb::Window {
         &mut self.window
     }
-    #[cfg(feature = "dashi-winit")]
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     pub fn winit_window(&self) -> &winit::window::Window {
         &self.window
     }
-    #[cfg(feature = "dashi-winit")]
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
         &mut self.event_loop
     }
@@ -542,7 +542,7 @@ impl Display {
     }
 
     #[cfg(feature = "dashi-openxr")]
-    pub fn xr_swapchain_images(&self) -> &[xr::vulkan::SwapchainImage] {
+    pub fn xr_swapchain_images(&self) -> &[vk::Image] {
         &self.xr_images
     }
 
@@ -2943,7 +2943,7 @@ impl Context {
         // OpenXR resources are cleaned up by Drop implementations
     }
 
-    #[cfg(feature = "dashi-sdl2")]
+    #[cfg(all(feature = "dashi-sdl2", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
         info: &WindowInfo,
@@ -2966,7 +2966,7 @@ impl Context {
         (window, vk::Handle::from_raw(surface))
     }
 
-    #[cfg(feature = "dashi-minifb")]
+    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
         info: &WindowInfo,
@@ -2974,7 +2974,7 @@ impl Context {
         minifb_window::create_window(&self.entry, &self.instance, info).unwrap()
     }
 
-    #[cfg(feature = "dashi-winit")]
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
         info: &WindowInfo,
@@ -2982,6 +2982,7 @@ impl Context {
         winit_window::create_window(&self.entry, &self.instance, info).unwrap()
     }
 
+    #[cfg(not(feature = "dashi-openxr"))]
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
         if self.headless {
             return Err(GPUError::HeadlessDisplayNotSupported);
@@ -3147,6 +3148,7 @@ impl Context {
         })
     }
 
+    #[cfg(not(feature = "dashi-openxr"))]
     pub fn acquire_new_image(
         &mut self,
         dsp: &mut Display,
@@ -3178,6 +3180,7 @@ impl Context {
         return Ok((dsp.views[res.0 as usize], signal_sem_handle, res.0, res.1));
     }
 
+    #[cfg(not(feature = "dashi-openxr"))]
     pub fn present_display(
         &mut self,
         dsp: &Display,
@@ -3346,6 +3349,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(not(feature = "dashi-openxr"))]
     fn test_headless_rejects_display() {
         let mut ctx =
             Context::headless(&ContextInfo::default()).expect("headless() should succeed");
