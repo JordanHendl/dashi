@@ -2,6 +2,7 @@
 use openxr as xr;
 use ash::vk;
 use ash::{Device, Instance};
+use ash::vk::Handle;
 
 /// Create an OpenXR Vulkan session and swapchain.
 ///
@@ -19,7 +20,7 @@ pub fn create_xr_session(
         xr::FrameWaiter,
         xr::FrameStream<xr::Vulkan>,
         xr::Swapchain<xr::Vulkan>,
-        Vec<xr::vulkan::SwapchainImage>,
+        Vec<vk::Image>,
         Vec<xr::ViewConfigurationView>,
     ),
     xr::sys::Result,
@@ -27,7 +28,9 @@ pub fn create_xr_session(
     #[cfg(feature = "static")]
     let entry = xr::Entry::linked();
     #[cfg(not(feature = "static"))]
-    let entry = unsafe { xr::Entry::load()? };
+    let entry = unsafe {
+        xr::Entry::load().map_err(|_| xr::sys::Result::ERROR_RUNTIME_FAILURE)?
+    };
 
     let exts = entry.enumerate_extensions()?;
     if !exts.khr_vulkan_enable2 {
@@ -50,16 +53,18 @@ pub fn create_xr_session(
 
     let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
 
-    let (session, waiter, stream) = instance.create_session::<xr::Vulkan>(
-        system,
-        &xr::vulkan::SessionCreateInfo {
-            instance: vk_instance.handle().as_raw() as _,
-            physical_device: physical_device.as_raw() as _,
-            device: device.handle().as_raw() as _,
-            queue_family_index,
-            queue_index: 0,
-        },
-    )?;
+    let (session, waiter, stream) = unsafe {
+        instance.create_session::<xr::Vulkan>(
+            system,
+            &xr::vulkan::SessionCreateInfo {
+                instance: vk_instance.handle().as_raw() as _,
+                physical_device: physical_device.as_raw() as _,
+                device: device.handle().as_raw() as _,
+                queue_family_index,
+                queue_index: 0,
+            },
+        )?
+    };
 
     let views = instance.enumerate_view_configuration_views(
         system,
@@ -80,7 +85,11 @@ pub fn create_xr_session(
         array_size,
         mip_count: 1,
     })?;
-    let images = swapchain.enumerate_images()?;
+    let images_raw = swapchain.enumerate_images()?;
+    let images = images_raw
+        .into_iter()
+        .map(|img| vk::Image::from_raw(img as u64))
+        .collect();
 
     Ok((instance, session, waiter, stream, swapchain, images, views))
 }
