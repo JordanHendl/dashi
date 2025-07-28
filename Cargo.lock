@@ -326,6 +326,7 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "ash-window",
+ "glam",
  "image_utils",
  "inline-spirv",
  "minifb",
@@ -566,6 +567,12 @@ dependencies = [
  "color_quant",
  "weezl",
 ]
+
+[[package]]
+name = "glam"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
 
 [[package]]
 name = "half"
