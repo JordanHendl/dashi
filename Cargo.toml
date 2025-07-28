@@ -35,5 +35,6 @@ orbclient = { path = "orbclient_stub" }
 inline-spirv = {version = "0.2.1"}
 serial_test = "2.0"
 image_utils = { path = "image_utils" }
+glam = "0.24"
 
 [lib]

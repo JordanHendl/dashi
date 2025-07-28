@@ -36,6 +36,12 @@ See the [examples](https://github.com/JordanHendl/dashi/tree/main/examples) for 
 cargo run --example hello_triangle
 ```
 
+To try the OpenXR simple scene example (requires a VR headset), run:
+
+```bash
+cargo run --no-default-features --features dashi-openxr --example openxr_simple_scene
+```
+
 Creating an image with `mip_levels` greater than 1 will automatically generate
 the full mip chain after the initial data upload.
 
