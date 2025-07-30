@@ -792,6 +792,8 @@ impl CommandList {
                 unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
                 self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
                 self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+                self.curr_rp = None;
+                self.curr_pipeline = None;
                 Ok(())
             }
             None => return Err(GPUError::LibraryError()),
