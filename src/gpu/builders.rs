@@ -6,7 +6,7 @@ use crate::{
     ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo, GraphicsPipeline,
     GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
     GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
-    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering,
+    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering, DynamicState,
 };
 use crate::{Context, GPUError};
 #[cfg(feature = "dashi-openxr")]
@@ -161,6 +161,12 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
     /// Configure blend, culling, topology, etc.
     pub fn details(mut self, details: GraphicsPipelineDetails) -> Self {
         self.details = details;
+        self
+    }
+
+    /// Specify which pipeline states will be set dynamically.
+    pub fn dynamic_states(mut self, states: Vec<DynamicState>) -> Self {
+        self.details.dynamic_states = states;
         self
     }
 
