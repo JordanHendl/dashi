@@ -581,6 +581,13 @@ pub enum VertexOrdering {
     Clockwise,
 }
 
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum DynamicState {
+    Viewport,
+    Scissor,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DepthInfo {
@@ -644,6 +651,8 @@ pub struct GraphicsPipelineDetails {
     pub culling: CullMode,
     pub front_face: VertexOrdering,
     pub depth_test: Option<DepthInfo>,
+    /// Pipeline states that will be configured dynamically at draw time.
+    pub dynamic_states: Vec<DynamicState>,
 }
 
 impl Default for GraphicsPipelineDetails {
@@ -654,6 +663,7 @@ impl Default for GraphicsPipelineDetails {
             front_face: VertexOrdering::Clockwise,
             depth_test: None,
             color_blend_states: vec![Default::default()],
+            dynamic_states: Vec::new(),
             subpass: 0,
         }
     }
