@@ -156,6 +156,15 @@ impl From<BorderColor> for vk::BorderColor {
     }
 }
 
+impl From<DynamicState> for vk::DynamicState {
+    fn from(state: DynamicState) -> Self {
+        match state {
+            DynamicState::Viewport => vk::DynamicState::VIEWPORT,
+            DynamicState::Scissor => vk::DynamicState::SCISSOR,
+        }
+    }
+}
+
 // Function to convert SamplerCreateInfo to VkSamplerCreateInfo
 impl From<SamplerInfo> for vk::SamplerCreateInfo {
     fn from(info: SamplerInfo) -> Self {
@@ -603,6 +612,7 @@ pub struct GraphicsPipelineLayout {
     vertex_input: vk::VertexInputBindingDescription,
     color_blend_states: Vec<vk::PipelineColorBlendAttachmentState>,
     vertex_attribs: Vec<vk::VertexInputAttributeDescription>,
+    dynamic_states: Vec<vk::DynamicState>,
     layout: vk::PipelineLayout,
 }
 
@@ -2696,6 +2706,13 @@ impl Context {
             .map(|c| c.clone().into())
             .collect();
 
+        let dynamic_states: Vec<vk::DynamicState> = info
+            .details
+            .dynamic_states
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+
         return Ok(self
             .gfx_pipeline_layouts
             .insert(GraphicsPipelineLayout {
@@ -2708,6 +2725,7 @@ impl Context {
                 depth_stencil: depth_stencil_state,
                 input_assembly,
                 color_blend_states: color_blends,
+                dynamic_states,
             })
             .unwrap());
     }
@@ -2799,33 +2817,37 @@ impl Context {
             .build();
 
         // Step 10: Create Graphics Pipeline
-        let pipeline_info = match layout.depth_stencil.as_ref() {
-            Some(d) => vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&layout.shader_stages)
-                .vertex_input_state(&vertex_input_info)
-                .input_assembly_state(&layout.input_assembly)
-                .viewport_state(&viewport_state)
-                .rasterization_state(&layout.rasterizer)
-                .multisample_state(&layout.multisample)
-                .depth_stencil_state(d)
-                .color_blend_state(&color_blend_state)
-                .layout(layout.layout)
-                .render_pass(rp)
-                .subpass(info.subpass_id as u32)
-                .build(),
-            None => vk::GraphicsPipelineCreateInfo::builder()
-                .stages(&layout.shader_stages)
-                .vertex_input_state(&vertex_input_info)
-                .input_assembly_state(&layout.input_assembly)
-                .viewport_state(&viewport_state)
-                .rasterization_state(&layout.rasterizer)
-                .multisample_state(&layout.multisample)
-                .color_blend_state(&color_blend_state)
-                .layout(layout.layout)
-                .render_pass(rp)
-                .subpass(info.subpass_id as u32)
-                .build(),
+        let dynamic_state_info = if !layout.dynamic_states.is_empty() {
+            Some(
+                vk::PipelineDynamicStateCreateInfo::builder()
+                    .dynamic_states(&layout.dynamic_states)
+                    .build(),
+            )
+        } else {
+            None
         };
+
+        let mut pipeline_builder = vk::GraphicsPipelineCreateInfo::builder()
+            .stages(&layout.shader_stages)
+            .vertex_input_state(&vertex_input_info)
+            .input_assembly_state(&layout.input_assembly)
+            .viewport_state(&viewport_state)
+            .rasterization_state(&layout.rasterizer)
+            .multisample_state(&layout.multisample)
+            .color_blend_state(&color_blend_state)
+            .layout(layout.layout)
+            .render_pass(rp)
+            .subpass(info.subpass_id as u32);
+
+        if let Some(d) = layout.depth_stencil.as_ref() {
+            pipeline_builder = pipeline_builder.depth_stencil_state(d);
+        }
+
+        if let Some(ref dyn_info) = dynamic_state_info {
+            pipeline_builder = pipeline_builder.dynamic_state(dyn_info);
+        }
+
+        let pipeline_info = pipeline_builder.build();
 
         let graphics_pipelines = unsafe {
             self.device
