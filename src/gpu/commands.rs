@@ -762,14 +762,73 @@ impl CommandList {
         }
     }
 
+    /// Set the active viewport for subsequent draw calls.
+    ///
+    /// This should be used when the bound pipeline enables the `Viewport`
+    /// dynamic state. The provided [`Viewport`] is converted to Vulkan's
+    /// [`vk::Viewport`] and applied using `cmd_set_viewport`.
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        let vk_viewport = vk::Viewport {
+            x: viewport.area.x,
+            y: viewport.area.y,
+            width: viewport.area.w,
+            height: viewport.area.h,
+            min_depth: viewport.min_depth,
+            max_depth: viewport.max_depth,
+        };
+
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_set_viewport(self.cmd_buf, 0, &[vk_viewport]);
+        }
+    }
+  
     fn cmd_bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) {
         unsafe {
-            let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+               let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
             self.ctx_ref().device.cmd_bind_pipeline(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 gfx.raw,
             );
+        }
+    }
+    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<(), GPUError> {
+        if self.curr_rp.is_none() {
+            return Err(GPUError::LibraryError());
+        }
+        if self.curr_pipeline == Some(pipeline) {
+            return Ok(());
+        }
+        self.curr_pipeline = Some(pipeline);
+        self.cmd_bind_pipeline(pipeline);
+        Ok(())
+    }
+
+    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
+        let pipeline = info.pipeline;
+        let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+        self.begin_render_pass(&RenderPassBegin {
+            render_pass: gfx.render_pass,
+            viewport: info.viewport,
+            attachments: info.attachments,
+        })?;
+        self.bind_pipeline(pipeline)
+    }
+  
+    /// Set the scissor rectangle used for rendering.
+    ///
+    /// Call this when the pipeline uses the `Scissor` dynamic state.
+    /// The [`Rect2D`] is converted to [`vk::Rect2D`] before being passed to
+    /// `cmd_set_scissor`.
+    pub fn set_scissor(&mut self, rect: Rect2D) {
+        let vk_rect = convert_rect2d_to_vulkan(rect);
+
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_set_scissor(self.cmd_buf, 0, &[vk_rect]);
         }
     }
 
