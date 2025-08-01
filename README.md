@@ -45,6 +45,16 @@ cargo run --no-default-features --features dashi-openxr --example openxr_simple_
 Creating an image with `mip_levels` greater than 1 will automatically generate
 the full mip chain after the initial data upload.
 
+Switching graphics pipelines without ending the render pass:
+
+```rust
+list.begin_drawing(&DrawBegin { pipeline: first, viewport, attachments })?;
+list.append(Command::Draw(my_draw));
+list.bind_pipeline(second)?; // change pipelines mid-pass
+list.append(Command::Draw(other_draw));
+list.end_drawing()?;
+```
+
 ### Window Backends
 
 Dashi ships with multiple window backends. The default `dashi-winit` feature
