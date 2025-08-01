@@ -760,6 +760,43 @@ impl CommandList {
         }
     }
 
+    /// Set the active viewport for subsequent draw calls.
+    ///
+    /// This should be used when the bound pipeline enables the `Viewport`
+    /// dynamic state. The provided [`Viewport`] is converted to Vulkan's
+    /// [`vk::Viewport`] and applied using `cmd_set_viewport`.
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        let vk_viewport = vk::Viewport {
+            x: viewport.area.x,
+            y: viewport.area.y,
+            width: viewport.area.w,
+            height: viewport.area.h,
+            min_depth: viewport.min_depth,
+            max_depth: viewport.max_depth,
+        };
+
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_set_viewport(self.cmd_buf, 0, &[vk_viewport]);
+        }
+    }
+
+    /// Set the scissor rectangle used for rendering.
+    ///
+    /// Call this when the pipeline uses the `Scissor` dynamic state.
+    /// The [`Rect2D`] is converted to [`vk::Rect2D`] before being passed to
+    /// `cmd_set_scissor`.
+    pub fn set_scissor(&mut self, rect: Rect2D) {
+        let vk_rect = convert_rect2d_to_vulkan(rect);
+
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_set_scissor(self.cmd_buf, 0, &[vk_rect]);
+        }
+    }
+
     pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
         let pipeline = info.pipeline;
         if let Some(gfx) = self.curr_pipeline {
@@ -781,6 +818,18 @@ impl CommandList {
                 vk::PipelineBindPoint::GRAPHICS,
                 gfx.raw,
             );
+
+            let layout = (*self.ctx)
+                .gfx_pipeline_layouts
+                .get_ref(gfx.layout)
+                .unwrap();
+            // Apply dynamic viewport/scissor if requested by the pipeline
+            if layout.dynamic_states.contains(&vk::DynamicState::VIEWPORT) {
+                self.set_viewport(info.viewport);
+            }
+            if layout.dynamic_states.contains(&vk::DynamicState::SCISSOR) {
+                self.set_scissor(info.viewport.scissor);
+            }
         }
 
         return Ok(());
