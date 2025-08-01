@@ -252,6 +252,7 @@ pub enum Command {
     DrawIndexedDynamic(DrawIndexedDynamic),
     DrawIndexedIndirect(DrawIndexedIndirect),
     DrawIndirect(DrawIndirect),
+    BindPipeline(Handle<GraphicsPipeline>),
     Blit(ImageBlit),
     ImageBarrier(ImageBarrier),
     Dispatch(Dispatch),
@@ -275,6 +276,7 @@ impl CommandList {
             Command::DrawIndexedDynamic(d) => self.draw_indexed_dynamic(d),
             Command::DrawIndexedIndirect(d) => self.draw_indexed_indirect(d),
             Command::DrawIndirect(d) => self.draw_indirect(d),
+            Command::BindPipeline(p) => self.cmd_bind_pipeline(p),
         }
         self.dirty = true;
     }
@@ -760,30 +762,38 @@ impl CommandList {
         }
     }
 
-    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
-        let pipeline = info.pipeline;
-        if let Some(gfx) = self.curr_pipeline {
-            if pipeline == gfx {
-                return Ok(());
-            }
-        }
-
+    fn cmd_bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) {
         unsafe {
-            self.curr_pipeline = Some(pipeline);
-            let gfx = (*self.ctx).gfx_pipelines.get_ref(pipeline).unwrap();
-            self.begin_render_pass(&RenderPassBegin {
-                render_pass: gfx.render_pass,
-                viewport: info.viewport,
-                attachments: info.attachments,
-            })?;
-            (*self.ctx).device.cmd_bind_pipeline(
+            let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+            self.ctx_ref().device.cmd_bind_pipeline(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 gfx.raw,
             );
         }
+    }
 
-        return Ok(());
+    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<(), GPUError> {
+        if self.curr_rp.is_none() {
+            return Err(GPUError::LibraryError());
+        }
+        if self.curr_pipeline == Some(pipeline) {
+            return Ok(());
+        }
+        self.curr_pipeline = Some(pipeline);
+        self.cmd_bind_pipeline(pipeline);
+        Ok(())
+    }
+
+    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
+        let pipeline = info.pipeline;
+        let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+        self.begin_render_pass(&RenderPassBegin {
+            render_pass: gfx.render_pass,
+            viewport: info.viewport,
+            attachments: info.attachments,
+        })?;
+        self.bind_pipeline(pipeline)
     }
 
     pub fn end_drawing(&mut self) -> Result<(), GPUError> {
