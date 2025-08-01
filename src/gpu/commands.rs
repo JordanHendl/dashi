@@ -806,17 +806,6 @@ impl CommandList {
         Ok(())
     }
 
-    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
-        let pipeline = info.pipeline;
-        let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
-        self.begin_render_pass(&RenderPassBegin {
-            render_pass: gfx.render_pass,
-            viewport: info.viewport,
-            attachments: info.attachments,
-        })?;
-        self.bind_pipeline(pipeline)
-    }
-  
     /// Set the scissor rectangle used for rendering.
     ///
     /// Call this when the pipeline uses the `Scissor` dynamic state.
@@ -830,18 +819,6 @@ impl CommandList {
                 .device
                 .cmd_set_scissor(self.cmd_buf, 0, &[vk_rect]);
         }
-    }
-
-    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<(), GPUError> {
-        if self.curr_rp.is_none() {
-            return Err(GPUError::LibraryError());
-        }
-        if self.curr_pipeline == Some(pipeline) {
-            return Ok(());
-        }
-        self.curr_pipeline = Some(pipeline);
-        self.cmd_bind_pipeline(pipeline);
-        Ok(())
     }
 
     pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
