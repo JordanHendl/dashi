@@ -1,6 +1,6 @@
-use super::GPUError;
+use super::{GPUError, DEBUG_LAYER_NAMES};
 use ash::*;
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 
 #[derive(Default, Clone, Copy, PartialEq)]
 pub enum DeviceType {
@@ -113,21 +113,38 @@ impl DeviceSelector {
         };
 
         let entry = unsafe { Entry::load() }?;
-        let requested_instance_extensions = [
-            #[cfg(debug_assertions)]
-            ash::extensions::ext::DebugUtils::name().as_ptr(),
+        let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
+
+        let mut requested_instance_extensions = vec![
             ash::extensions::khr::Surface::name().as_ptr(),
             #[cfg(target_os = "linux")]
             ash::extensions::khr::XlibSurface::name().as_ptr(),
             #[cfg(target_os = "windows")]
             ash::extensions::khr::Win32Surface::name().as_ptr(),
         ];
+        if enable_validation {
+            requested_instance_extensions.push(ash::extensions::ext::DebugUtils::name().as_ptr());
+        }
+
+        let mut layer_names: Vec<*const c_char> = Vec::new();
+        if enable_validation {
+            let available_layers = entry.enumerate_instance_layer_properties()?;
+            for &layer in &DEBUG_LAYER_NAMES {
+                let name = unsafe { CStr::from_ptr(layer) };
+                if available_layers.iter().any(|prop| unsafe {
+                    CStr::from_ptr(prop.layer_name.as_ptr()) == name
+                }) {
+                    layer_names.push(layer);
+                }
+            }
+        }
 
         let instance = unsafe {
             entry.create_instance(
                 &vk::InstanceCreateInfo::builder()
                     .application_info(&app_info)
                     .enabled_extension_names(&requested_instance_extensions)
+                    .enabled_layer_names(&layer_names)
                     .build(),
                 None,
             )

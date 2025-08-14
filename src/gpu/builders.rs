@@ -439,6 +439,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan graphics pipeline layout"]
     fn test_graphics_pipeline_layout_builder_missing_vertex_info() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -452,6 +453,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan graphics pipeline"]
     fn test_graphics_pipeline_builder_missing_fields() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -463,6 +465,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan compute pipeline layout"]
     fn test_compute_pipeline_layout_builder_missing_shader() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -474,6 +477,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan compute pipeline"]
     fn test_compute_pipeline_builder_missing_layout() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
