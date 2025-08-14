@@ -37,10 +37,9 @@ pub mod winit_window;
 pub mod openxr_window;
 
 /// Names of debugging layers that should be enabled when validation is requested.
-pub const DEBUG_LAYER_NAMES: [*const c_char; 3] = [
+/// Only includes the standard Vulkan validation layer to avoid enabling any extra layers.
+pub const DEBUG_LAYER_NAMES: [*const c_char; 1] = [
     b"VK_LAYER_KHRONOS_validation\0".as_ptr() as *const c_char,
-    b"VK_LAYER_LUNARG_monitor\0".as_ptr() as *const c_char,
-    b"VK_LAYER_LUNARG_api_dump\0".as_ptr() as *const c_char,
 ];
 
 unsafe extern "system" fn vulkan_debug_callback(
