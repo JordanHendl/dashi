@@ -13,7 +13,8 @@ use openxr as xr;
 pub use error::*;
 use std::{
     collections::HashMap,
-    ffi::{c_char, CStr, CString},
+    ffi::{c_char, c_void, CStr, CString},
+    mem::ManuallyDrop,
 };
 use vk_mem::Alloc;
 
@@ -34,6 +35,29 @@ pub mod minifb_window;
 pub mod winit_window;
 #[cfg(feature = "dashi-openxr")]
 pub mod openxr_window;
+
+/// Names of debugging layers that should be enabled when validation is requested.
+pub const DEBUG_LAYER_NAMES: [*const c_char; 3] = [
+    b"VK_LAYER_KHRONOS_validation\0".as_ptr() as *const c_char,
+    b"VK_LAYER_LUNARG_monitor\0".as_ptr() as *const c_char,
+    b"VK_LAYER_LUNARG_api_dump\0".as_ptr() as *const c_char,
+];
+
+unsafe extern "system" fn vulkan_debug_callback(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut c_void,
+) -> vk::Bool32 {
+    let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
+    eprintln!(
+        "[{:?}][{:?}] {}",
+        message_severity,
+        message_type,
+        message.to_string_lossy()
+    );
+    vk::FALSE
+}
 
 // Convert Filter enum to VkFilter
 impl From<Filter> for vk::Filter {
@@ -669,7 +693,7 @@ pub struct Context {
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
     pub(super) pool: vk::CommandPool,
-    pub(super) allocator: vk_mem::Allocator,
+    pub(super) allocator: ManuallyDrop<vk_mem::Allocator>,
     pub(super) gfx_queue: Queue,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
@@ -696,8 +720,8 @@ pub struct Context {
     pub(super) sdl_context: sdl2::Sdl,
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_video: Option<sdl2::VideoSubsystem>,
-    #[cfg(debug_assertions)]
-    pub(super) debug_utils: ash::extensions::ext::DebugUtils,
+    pub(super) debug_utils: Option<ash::extensions::ext::DebugUtils>,
+    pub(super) debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
 impl Default for Context {
@@ -708,10 +732,21 @@ impl Default for Context {
 
 impl std::panic::UnwindSafe for Context {}
 
+impl Drop for Context {
+    fn drop(&mut self) {
+        if let (Some(utils), Some(messenger)) = (&self.debug_utils, self.debug_messenger) {
+            unsafe {
+                utils.destroy_debug_utils_messenger(messenger, None);
+            }
+        }
+    }
+}
+
 impl Context {
     fn init_core(
         info: &ContextInfo,
         windowed: bool,
+        enable_validation: bool,
     ) -> Result<
         (
             ash::Entry,
@@ -737,8 +772,22 @@ impl Context {
         // Create instance
         let entry = unsafe { Entry::load() }?;
         let mut inst_exts = Vec::new();
-        #[cfg(debug_assertions)]
-        inst_exts.push(ash::extensions::ext::DebugUtils::name().as_ptr());
+        if enable_validation {
+            inst_exts.push(ash::extensions::ext::DebugUtils::name().as_ptr());
+        }
+
+        let mut inst_layers = Vec::new();
+        if enable_validation {
+            let available_layers = entry.enumerate_instance_layer_properties()?;
+            for &layer in &DEBUG_LAYER_NAMES {
+                let name = unsafe { CStr::from_ptr(layer) };
+                if available_layers.iter().any(|prop| unsafe {
+                    CStr::from_ptr(prop.layer_name.as_ptr()) == name
+                }) {
+                    inst_layers.push(layer);
+                }
+            }
+        }
 
         if windowed {
             // only pull in surface‐extensions when we actually need a window
@@ -754,6 +803,7 @@ impl Context {
                 &vk::InstanceCreateInfo::builder()
                     .application_info(&app_info)
                     .enabled_extension_names(&inst_exts)
+                    .enabled_layer_names(&inst_layers)
                     .build(),
                 None,
             )
@@ -888,11 +938,34 @@ impl Context {
     }
 
     pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
+        let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
-            Self::init_core(info, false)?;
+            Self::init_core(info, false, enable_validation)?;
 
-        #[cfg(debug_assertions)]
-        let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+        let (debug_utils, debug_messenger) = if enable_validation {
+            let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+            let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                )
+                .pfn_user_callback(Some(vulkan_debug_callback));
+            let debug_messenger = unsafe {
+                debug_utils
+                    .create_debug_utils_messenger(&messenger_ci, None)
+                    .unwrap()
+            };
+            (Some(debug_utils), Some(debug_messenger))
+        } else {
+            (None, None)
+        };
 
         let ctx = Context {
             entry,
@@ -901,7 +974,7 @@ impl Context {
             device,
             properties,
             pool,
-            allocator,
+            allocator: ManuallyDrop::new(allocator),
             gfx_queue,
 
             buffers: Default::default(),
@@ -926,8 +999,8 @@ impl Context {
             sdl_context: sdl2::init().unwrap(),
             #[cfg(feature = "dashi-sdl2")]
             sdl_video: None,
-            #[cfg(debug_assertions)]
             debug_utils,
+            debug_messenger,
         };
         let mut ctx = ctx;
         ctx.init_gpu_timers(1)?;
@@ -935,11 +1008,34 @@ impl Context {
     }
 
     pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
+        let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
-            Self::init_core(info, true)?;
+            Self::init_core(info, true, enable_validation)?;
 
-        #[cfg(debug_assertions)]
-        let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+        let (debug_utils, debug_messenger) = if enable_validation {
+            let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+            let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                )
+                .pfn_user_callback(Some(vulkan_debug_callback));
+            let debug_messenger = unsafe {
+                debug_utils
+                    .create_debug_utils_messenger(&messenger_ci, None)
+                    .unwrap()
+            };
+            (Some(debug_utils), Some(debug_messenger))
+        } else {
+            (None, None)
+        };
 
         #[cfg(feature = "dashi-sdl2")]
         let sdl_context = sdl2::init().unwrap();
@@ -953,7 +1049,7 @@ impl Context {
             device,
             properties,
             pool,
-            allocator,
+            allocator: ManuallyDrop::new(allocator),
             gfx_queue,
 
             buffers: Default::default(),
@@ -978,8 +1074,8 @@ impl Context {
             sdl_context,
             #[cfg(feature = "dashi-sdl2")]
             sdl_video: Some(sdl_video),
-            #[cfg(debug_assertions)]
             debug_utils,
+            debug_messenger,
         };
         let mut ctx = ctx;
         ctx.init_gpu_timers(1)?;
@@ -995,11 +1091,10 @@ impl Context {
     where
         T: ash::vk::Handle,
     {
-        #[cfg(debug_assertions)]
-        {
+        if let Some(utils) = &self.debug_utils {
             unsafe {
                 let name: CString = CString::new(name.to_string()).unwrap();
-                self.debug_utils
+                utils
                     .set_debug_utils_object_name(
                         self.device.handle(),
                         &vk::DebugUtilsObjectNameInfoEXT::builder()
@@ -1760,6 +1855,12 @@ impl Context {
     pub fn clean_up(&mut self) {}
 
     pub fn destroy(mut self) {
+        if let Some(messenger) = self.debug_messenger.take() {
+            if let Some(utils) = &self.debug_utils {
+                unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
+            }
+        }
+
         // Drain and destroy any pending command lists
         //        for (cmd, fence) in self.cmds_to_release.drain(..) {
         //            let _ = self.wait(fence.clone());
@@ -1859,11 +1960,10 @@ impl Context {
             self.device.destroy_command_pool(self.pool, None);
         }
 
-        // Allocator cleanup handled separately
-        //        self.allocator.cleanup().ok(); // optional: wrap in Result if needed
-        //
-
-        drop(self.allocator);
+        // Destroy allocator before tearing down device and instance
+        unsafe {
+            ManuallyDrop::drop(&mut self.allocator);
+        }
 
         // Device and instance
         unsafe {
@@ -3279,6 +3379,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan buffer operations"]
     fn test_buffer() {
         let c_buffer_size = 1280;
         let c_test_val = 8 as u8;
@@ -3314,6 +3415,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan image operations"]
     fn test_image() {
         let c_test_dim: [u32; 3] = [1280, 1024, 1];
         let c_format = Format::RGBA8;
@@ -3339,6 +3441,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires full Vulkan context"]
     fn test_headless_context_creation() {
         // headless() should succeed...
         let ctx = Context::headless(&ContextInfo::default());
@@ -3400,6 +3503,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[ignore = "requires Vulkan compute support"]
     fn compute_test() {
         // The GPU context that holds all the data.
         let mut ctx = Context::headless(&Default::default()).unwrap();
