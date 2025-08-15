@@ -422,24 +422,30 @@ mod tests {
 
     #[test]
     #[serial]
-    #[ignore]
     fn test_display_builder() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
-        let dsp = DisplayBuilder::new()
+        let result = DisplayBuilder::new()
             .title("test")
             .size(300, 200)
             .resizable(true)
             .vsync(false)
             .buffering(WindowBuffering::Triple)
-            .build(&mut ctx)
-            .unwrap();
-        ctx.destroy_display(dsp);
-        ctx.destroy();
+            .build(&mut ctx);
+
+        match result {
+            Ok(dsp) => {
+                ctx.destroy_display(dsp);
+                ctx.destroy();
+            }
+            Err(GPUError::HeadlessDisplayNotSupported) => {
+                ctx.destroy();
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
     }
 
     #[test]
     #[serial]
-    #[ignore = "requires Vulkan graphics pipeline layout"]
     fn test_graphics_pipeline_layout_builder_missing_vertex_info() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -453,7 +459,6 @@ mod tests {
 
     #[test]
     #[serial]
-    #[ignore = "requires Vulkan graphics pipeline"]
     fn test_graphics_pipeline_builder_missing_fields() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -465,7 +470,6 @@ mod tests {
 
     #[test]
     #[serial]
-    #[ignore = "requires Vulkan compute pipeline layout"]
     fn test_compute_pipeline_layout_builder_missing_shader() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -477,7 +481,6 @@ mod tests {
 
     #[test]
     #[serial]
-    #[ignore = "requires Vulkan compute pipeline"]
     fn test_compute_pipeline_builder_missing_layout() {
         let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
