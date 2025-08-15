@@ -436,7 +436,6 @@ pub struct Image {
     format: Format,
     layouts: Vec<vk::ImageLayout>,
     sub_layers: vk::ImageSubresourceLayers,
-    extent: vk::Extent3D,
 }
 
 #[derive(Debug)]
@@ -1500,11 +1499,6 @@ impl Context {
                 .mip_level(0)
                 .base_array_layer(0)
                 .aspect_mask(aspect)
-                .build(),
-            extent: vk::Extent3D::builder()
-                .width(info.dim[0] as u32)
-                .height(info.dim[1] as u32)
-                .depth(info.dim[2] as u32)
                 .build(),
             dim: info.dim,
             format: info.format,
@@ -3195,11 +3189,6 @@ impl Context {
                     .mip_level(0)
                     .base_array_layer(0)
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .build(),
-                extent: vk::Extent3D::builder()
-                    .width(size[0])
-                    .height(size[1])
-                    .depth(1)
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
                 format: vk_to_lib_image_format(wanted_format),
