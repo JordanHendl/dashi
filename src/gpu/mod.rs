@@ -1727,7 +1727,7 @@ impl Context {
 
     pub fn init_gpu_timers(&mut self, count: usize) -> Result<(), GPUError> {
         for timer in self.gpu_timers.drain(..) {
-            unsafe { self.device.destroy_query_pool(timer.pool, None) };
+            unsafe { timer.destroy(&self.device) };
         }
         let mut timers = Vec::with_capacity(count);
         for _ in 0..count {
@@ -1951,7 +1951,7 @@ impl Context {
             });
 
         for timer in self.gpu_timers.drain(..) {
-            unsafe { self.device.destroy_query_pool(timer.pool, None) };
+            unsafe { timer.destroy(&self.device) };
         }
 
         // Command pool
