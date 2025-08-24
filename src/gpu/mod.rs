@@ -2017,6 +2017,14 @@ impl Context {
         self.destroy_fence(list.fence);
     }
 
+    /// Creates a bindless bind group layout.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_bindless_bind_group_layout(
         &mut self,
         info: &BindGroupLayoutInfo,
@@ -2122,6 +2130,14 @@ impl Context {
             .unwrap());
     }
 
+    /// Creates a bind group layout for non-bindless resources.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_bind_group_layout(
         &mut self,
         info: &BindGroupLayoutInfo,
@@ -2217,6 +2233,14 @@ impl Context {
             .unwrap());
     }
 
+    /// Updates an existing bind group with new resource bindings.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) {
         let bg = self.bind_groups.get_ref(info.bg).unwrap();
         let descriptor_set = bg.set;
@@ -2342,6 +2366,14 @@ impl Context {
         }
     }
 
+    /// Creates a bind group using indexed resources.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_indexed_bind_group(
         &mut self,
         info: &IndexedBindGroupInfo,
@@ -2380,6 +2412,14 @@ impl Context {
         Ok(bg)
     }
 
+    /// Creates a bind group from the provided bindings.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_bind_group(&mut self, info: &BindGroupInfo) -> Result<Handle<BindGroup>, GPUError> {
         // Retrieve the BindGroupLayout from the handle
         let layout = self.bind_group_layouts.get_ref(info.layout).unwrap();
@@ -2558,6 +2598,14 @@ impl Context {
         Ok(shader_module)
     }
 
+    /// Builds a render pass with the supplied subpass configuration.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_render_pass(
         &mut self,
         info: &RenderPassInfo,
@@ -2668,6 +2716,14 @@ impl Context {
             })
             .unwrap());
     }
+    /// Creates a compute pipeline layout from shader and bind group layouts.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_compute_pipeline_layout(
         &mut self,
         info: &ComputePipelineLayoutInfo,
@@ -2689,6 +2745,14 @@ impl Context {
             .unwrap());
     }
 
+    /// Creates a graphics pipeline layout including shader stages and vertex setup.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_graphics_pipeline_layout(
         &mut self,
         info: &GraphicsPipelineLayoutInfo,
@@ -2827,6 +2891,14 @@ impl Context {
         self.cmds_to_release.push((list, fence));
     }
 
+    /// Builds a compute pipeline from an existing layout.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_compute_pipeline(
         &mut self,
         info: &ComputePipelineInfo,
@@ -2859,6 +2931,14 @@ impl Context {
             .unwrap());
     }
 
+    /// Builds a graphics pipeline referencing a render pass and layout.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_graphics_pipeline(
         &mut self,
         info: &GraphicsPipelineInfo,
@@ -3098,6 +3178,14 @@ impl Context {
     }
 
     #[cfg(not(feature = "dashi-openxr"))]
+    /// Creates a display and associated swapchain for presenting images.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_display(&mut self, info: &DisplayInfo) -> Result<Display, GPUError> {
         if self.headless {
             return Err(GPUError::HeadlessDisplayNotSupported);
@@ -3233,6 +3321,14 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
+    /// Creates an XR display and session for immersive rendering.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn make_xr_display(&mut self, _info: &XrDisplayInfo) -> Result<Display, GPUError> {
         let (xr_instance, session, waiter, stream, swapchain, images, views) =
             openxr_window::create_xr_session(
@@ -3259,6 +3355,14 @@ impl Context {
     }
 
     #[cfg(not(feature = "dashi-openxr"))]
+    /// Acquires the next image from a windowed swapchain.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn acquire_new_image(
         &mut self,
         dsp: &mut Display,
@@ -3291,6 +3395,14 @@ impl Context {
     }
 
     #[cfg(not(feature = "dashi-openxr"))]
+    /// Presents the current swapchain image to the display.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn present_display(
         &mut self,
         dsp: &Display,
@@ -3316,6 +3428,14 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
+    /// Acquires the next image from the XR swapchain.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn acquire_xr_image(
         &mut self,
         dsp: &mut Display,
@@ -3338,6 +3458,14 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
+    /// Presents the current frame to the XR display.
+    ///
+    /// # Prerequisites
+    /// - Correct attachment formats.
+    /// - Matching pipeline layouts.
+    /// - Swapchain acquisition order is respected.
+    /// - XR session state is valid.
+    /// - Synchronization primitives are handled during presentation.
     pub fn present_xr_display(
         &mut self,
         dsp: &mut Display,
