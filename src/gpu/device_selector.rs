@@ -75,26 +75,45 @@ pub struct DeviceFilter {
 }
 
 impl DeviceFilter {
+    /// Require the selected device's name to exactly match `name`.
+    ///
+    /// When used with [`DeviceSelector::select`], the selection will return
+    /// [`None`] if no available device satisfies all required criteria.
     pub fn add_required_name(&mut self, name: &str) -> Self {
         self.name = Some(name.to_string());
         self.clone()
     }
 
+    /// Require the selected device to be of the specified `kind`.
+    ///
+    /// Selection fails with [`None`] if no device matches every requirement.
     pub fn add_required_type(&mut self, kind: DeviceType) -> Self {
         self.kind = Some(kind);
         self.clone()
     }
 
+    /// Require the device driver version to equal `version`.
+    ///
+    /// [`DeviceSelector::select`] returns [`None`] when no device meets all
+    /// prerequisites.
     pub fn add_required_driver_version(&mut self, version: u32) -> Self {
         self.driver_version = Some(version);
         self.clone()
     }
 
+    /// Require support for bindless descriptors on the selected device.
+    ///
+    /// [`DeviceSelector::select`] will return [`None`] if this capability is
+    /// not available on any device.
     pub fn require_bindless(&mut self) -> Self {
         self.bindless_capable = Some(true);
         self.clone()
     }
 
+    /// Require that the device supports presentation to a display (swapchain).
+    ///
+    /// If no device fulfills all filter requirements, selection yields
+    /// [`None`].
     pub fn require_display(&mut self) -> Self {
         self.display_capable = Some(true);
         self.clone()
@@ -106,6 +125,10 @@ pub struct DeviceSelector {
 }
 
 impl DeviceSelector {
+    /// Enumerate available Vulkan physical devices and build a selector.
+    ///
+    /// A Vulkan instance must be creatable on the running platform; otherwise
+    /// an error is returned.
     pub fn new() -> Result<DeviceSelector, GPUError> {
         let app_info = vk::ApplicationInfo {
             api_version: vk::make_api_version(0, 1, 3, 0),
@@ -195,10 +218,16 @@ impl DeviceSelector {
         Ok(Self { devices: infos })
     }
 
+    /// Retrieve the list of devices discovered during construction.
     pub fn devices(&self) -> &[DeviceInfo] {
         &self.devices
     }
 
+    /// Select a device by its index in the discovered device list.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is out of range for `self.devices`.
     pub fn select_by_id(&self, id: usize) -> SelectedDevice {
         SelectedDevice { device_id: id, info: self.devices[id].clone() }
     }
@@ -218,6 +247,9 @@ impl DeviceSelector {
         return false;
     }
 
+    /// Select the highest scoring device that satisfies the provided `filter`.
+    ///
+    /// Returns [`None`] when no device meets every required criterion.
     pub fn select(&self, filter: DeviceFilter) -> Option<SelectedDevice> {
         let mut max_score = 0;
         let mut best_device = -1;
