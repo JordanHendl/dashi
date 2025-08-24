@@ -12,15 +12,18 @@ fn gpu_timer() {
             return;
         }
     };
+    // GPU timers must be initialized before use.
     ctx.init_gpu_timers(1).unwrap();
 
     let mut list = ctx
         .begin_command_list(&CommandListInfo { debug_name: "timer", ..Default::default() })
         .unwrap();
+    // Begin and end must bracket commands on the same list.
     ctx.gpu_timer_begin(&mut list, 0);
     // intentionally no operations to measure minimal overhead
     ctx.gpu_timer_end(&mut list, 0);
     let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+    // Timing results are valid only after submission and waiting.
     ctx.wait(fence).unwrap();
 
     let elapsed = ctx.get_elapsed_gpu_time_ms(0).unwrap();

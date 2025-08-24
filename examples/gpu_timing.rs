@@ -2,14 +2,17 @@ use dashi::*;
 
 fn main() {
     let mut ctx = gpu::Context::headless(&ContextInfo::default()).unwrap();
+    // GPU timers must be initialized before use.
     ctx.init_gpu_timers(1).unwrap();
 
     let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+    // Begin and end must bracket commands on the same list.
     ctx.gpu_timer_begin(&mut list, 0);
     // no-op workload
     ctx.gpu_timer_end(&mut list, 0);
 
     let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+    // Timing results are valid only after submission and waiting.
     ctx.wait(fence).unwrap();
 
     if let Some(ms) = ctx.get_elapsed_gpu_time_ms(0) {
