@@ -6,6 +6,14 @@ use ash::vk::Handle;
 
 /// Create an OpenXR Vulkan session and swapchain.
 ///
+/// # Prerequisites
+/// - A supported OpenXR runtime must be available.
+/// - `vk_instance` must be created with the extensions required by the runtime,
+///   such as `khr_vulkan_enable2`.
+/// - Ownership of the returned [`xr::Session`] remains with the caller. Any
+///   [`xr::Space`] created from the session is valid only while the session is
+///   active.
+///
 /// Returns the created `openxr::Instance`, `openxr::Session`, `openxr::Swapchain`,
 /// the swapchain images, and the view configuration.
 pub fn create_xr_session(
@@ -118,6 +126,14 @@ pub struct XrInput {
 
 #[cfg(feature = "dashi-openxr")]
 impl XrInput {
+    /// Create input actions and spaces for the supplied session.
+    ///
+    /// # Prerequisites
+    /// - A supported OpenXR runtime must be present.
+    /// - The session must originate from a Vulkan instance that enabled the
+    ///   required extensions.
+    /// - The session is cloned and must remain active for the lifetime of the
+    ///   returned [`XrInput`] and any [`xr::Space`] values it exposes.
     pub fn new(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> xr::Result<Self> {
         let action_set = instance.create_action_set("input", "input", 0)?;
         let left_path = instance.string_to_path("/user/hand/left")?;
@@ -157,6 +173,12 @@ impl XrInput {
         })
     }
 
+    /// Poll the current state of input actions.
+    ///
+    /// # Prerequisites
+    /// - Requires a supported OpenXR runtime and an active session created
+    ///   from a Vulkan instance with the necessary extensions.
+    /// - Any spaces referenced remain valid only while the session is active.
     pub fn poll_inputs(&mut self) -> xr::Result<XrInputState> {
         self.session.sync_actions(&[(&self.action_set).into()])?;
 
@@ -180,14 +202,32 @@ impl XrInput {
         })
     }
 
+    /// Return the space of the left controller grip.
+    ///
+    /// # Prerequisites
+    /// - Requires a supported OpenXR runtime and an active session created
+    ///   from a Vulkan instance with the required extensions.
+    /// - The returned space remains valid only while the session is active.
     pub fn left_space(&self) -> &xr::Space {
         &self.left_space
     }
 
+    /// Return the space of the right controller grip.
+    ///
+    /// # Prerequisites
+    /// - Requires a supported OpenXR runtime and an active session created
+    ///   from a Vulkan instance with the required extensions.
+    /// - The returned space remains valid only while the session is active.
     pub fn right_space(&self) -> &xr::Space {
         &self.right_space
     }
 
+    /// Return the base reference space used for locating controllers.
+    ///
+    /// # Prerequisites
+    /// - Requires a supported OpenXR runtime and an active session created
+    ///   from a Vulkan instance with the required extensions.
+    /// - The returned space remains valid only while the session is active.
     pub fn base_space(&self) -> &xr::Space {
         &self.base_space
     }
