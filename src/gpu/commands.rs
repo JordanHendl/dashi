@@ -259,7 +259,13 @@ pub enum Command {
 }
 
 impl CommandList {
-    /// Append a generic command to the list and mark dirty.
+    /// Append a generic command to the list and mark the command list dirty.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn append(&mut self, cmd: Command) {
         if self.ctx.is_null() {
             return;
@@ -281,6 +287,13 @@ impl CommandList {
         self.dirty = true;
     }
 
+    /// Copy data between two buffers.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn copy_buffer(&mut self, info: BufferCopy) {
         unsafe {
             let src = self.ctx_ref().buffers.get_ref(info.src).unwrap();
@@ -306,6 +319,13 @@ impl CommandList {
         }
     }
 
+    /// Copy data from a buffer to an image.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn copy_buffer_to_image(&mut self, rec: BufferImageCopy) {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.dst).unwrap();
@@ -350,6 +370,13 @@ impl CommandList {
         }
     }
 
+    /// Copy image data into a buffer.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn copy_image_to_buffer(&mut self, rec: ImageBufferCopy) {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(rec.src).unwrap();
@@ -394,6 +421,13 @@ impl CommandList {
         }
     }
 
+    /// Blit one image region into another.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn blit_image(&mut self, cmd: ImageBlit) {
         unsafe {
             let src_view = self.ctx_ref().image_views.get_ref(cmd.src).unwrap();
@@ -486,6 +520,13 @@ impl CommandList {
         }
     }
 
+    /// Insert a barrier for an image without changing its layout.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn image_barrier(&mut self, barrier: ImageBarrier) {
         unsafe {
             let view_data = self.ctx_ref().image_views.get_ref(barrier.view).unwrap();
@@ -510,6 +551,13 @@ impl CommandList {
         }
     }
 
+    /// Dispatch a compute pipeline with the given workgroup size.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn dispatch_compute(&mut self, cmd: Dispatch) {
         unsafe {
             // Bind pipeline
@@ -565,7 +613,13 @@ impl CommandList {
         }
     }
 
-    // Helper: begin render pass if needed
+    /// Begin a render pass if the requested one is not already active.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn begin_render_pass(&mut self, info: &RenderPassBegin) -> Result<(), GPUError> {
         if self.curr_rp.map_or(false, |rp| rp == info.render_pass) {
             return Ok(());
@@ -600,6 +654,13 @@ impl CommandList {
         Ok(())
     }
 
+    /// Issue a non-indexed draw call.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn draw(&mut self, cmd: Draw) {
         unsafe {
             self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
@@ -618,6 +679,13 @@ impl CommandList {
         }
     }
 
+    /// Issue an indexed draw call.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed(&mut self, cmd: DrawIndexed) {
         unsafe {
             self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
@@ -648,6 +716,13 @@ impl CommandList {
         }
     }
 
+    /// Draw indexed geometry using dynamic buffers.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) {
         unsafe {
             self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
@@ -690,6 +765,13 @@ impl CommandList {
         }
     }
 
+    /// Issue an indexed draw call using indirect parameters.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed_indirect(&mut self, cmd: DrawIndexedIndirect) {
         unsafe {
             let buf = self.ctx_ref().buffers.get_ref(cmd.draw_params).unwrap();
@@ -707,6 +789,13 @@ impl CommandList {
         }
     }
 
+    /// Issue a draw call using indirect parameters.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indirect(&mut self, cmd: DrawIndirect) {
         unsafe {
             let buf = self.ctx_ref().buffers.get_ref(cmd.draw_params).unwrap();
@@ -724,7 +813,13 @@ impl CommandList {
         }
     }
 
-    // Helper: bind descriptor sets for drawing
+    /// Bind descriptor sets and dynamic offsets for a draw.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn bind_draw_descriptor_sets(
         &mut self,
         dyn_bufs: &[Option<DynamicBuffer>; 4],
@@ -767,6 +862,12 @@ impl CommandList {
     /// This should be used when the bound pipeline enables the `Viewport`
     /// dynamic state. The provided [`Viewport`] is converted to Vulkan's
     /// [`vk::Viewport`] and applied using `cmd_set_viewport`.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn set_viewport(&mut self, viewport: Viewport) {
         let vk_viewport = vk::Viewport {
             x: viewport.area.x,
@@ -794,6 +895,13 @@ impl CommandList {
             );
         }
     }
+    /// Bind a graphics pipeline for subsequent draw calls.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<(), GPUError> {
         if self.curr_rp.is_none() {
             return Err(GPUError::LibraryError());
@@ -811,6 +919,12 @@ impl CommandList {
     /// Call this when the pipeline uses the `Scissor` dynamic state.
     /// The [`Rect2D`] is converted to [`vk::Rect2D`] before being passed to
     /// `cmd_set_scissor`.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn set_scissor(&mut self, rect: Rect2D) {
         let vk_rect = convert_rect2d_to_vulkan(rect);
 
@@ -821,6 +935,13 @@ impl CommandList {
         }
     }
 
+    /// Begin drawing by starting the render pass and binding the pipeline.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
         let pipeline = info.pipeline;
         let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
@@ -832,6 +953,13 @@ impl CommandList {
         self.bind_pipeline(pipeline)
     }
 
+    /// End the current render pass and reset cached state.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn end_drawing(&mut self) -> Result<(), GPUError> {
         match self.curr_rp {
             Some(_) => {
@@ -846,6 +974,13 @@ impl CommandList {
         }
     }
 
+    /// Advance to the next subpass in the active render pass.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn next_subpass(&mut self) -> Result<(), GPUError> {
         if self.curr_rp.is_none() {
             return Err(GPUError::LibraryError());
@@ -863,6 +998,13 @@ impl CommandList {
         Ok(())
     }
 
+    /// Reset the command buffer and begin recording again.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
     pub fn reset(&mut self) -> Result<(), GPUError> {
         unsafe {
             (*self.ctx)
