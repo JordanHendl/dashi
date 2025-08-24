@@ -1,6 +1,5 @@
 mod error;
 use crate::utils::{
-    offset_alloc::{self},
     Handle, Pool,
 };
 use ash::*;
@@ -359,7 +358,7 @@ impl Handle<Buffer> {
     pub fn to_unmapped_dynamic(&self, byte_offset: u32) -> DynamicBuffer {
         return DynamicBuffer {
             handle: self.clone(),
-            alloc: offset_alloc::Allocation {
+            alloc: offset_allocator::Allocation {
                 offset: byte_offset,
                 metadata: 0,
             },
@@ -372,7 +371,7 @@ impl Handle<Buffer> {
 #[derive(Debug, Clone, Copy)]
 pub struct DynamicBuffer {
     pub(crate) handle: Handle<Buffer>,
-    pub(crate) alloc: offset_alloc::Allocation,
+    pub(crate) alloc: offset_allocator::Allocation,
     pub(crate) ptr: *mut u8,
     pub(crate) size: u16,
 }
@@ -381,7 +380,7 @@ impl Default for DynamicBuffer {
     fn default() -> Self {
         Self {
             handle: Default::default(),
-            alloc: offset_alloc::Allocation {
+            alloc: offset_allocator::Allocation {
                 offset: 0,
                 metadata: 0,
             },
@@ -415,7 +414,7 @@ impl DynamicBuffer {
 
 #[derive(Clone)]
 pub struct DynamicAllocator {
-    allocator: offset_alloc::Allocator,
+    allocator: offset_allocator::Allocator,
     ptr: *mut u8,
     min_alloc_size: u32,
     pool: Handle<Buffer>,
@@ -1851,7 +1850,7 @@ impl Context {
             + (info.allocation_size
                 % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
         return Ok(DynamicAllocator {
-            allocator: offset_alloc::Allocator::new(info.byte_size, info.num_allocations),
+            allocator: offset_allocator::Allocator::new(info.byte_size, info.num_allocations),
             pool: buffer,
             ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),
             min_alloc_size,
@@ -2386,7 +2385,7 @@ impl Context {
     /// - Correct attachment formats.
     /// - Matching pipeline layouts.
     /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
+    /// - XR session state is valid. (If using OpenXR)
     /// - Synchronization primitives are handled during presentation.
     pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) {
         let bg = self.bind_groups.get_ref(info.bg).unwrap();
@@ -2503,6 +2502,8 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
+                    ShaderResource::ConstBuffer(_) => todo!(),
+                    ShaderResource::SampledImage2(_) => todo!(),
                 }
             }
         }
@@ -2694,6 +2695,8 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
+                ShaderResource::ConstBuffer(_) => todo!(),
+                ShaderResource::SampledImage2(_) => todo!(),
             }
         }
 

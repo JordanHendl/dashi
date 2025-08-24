@@ -117,7 +117,7 @@ fn main() {
             debug_name: "color_attachment",
             dim: [WIDTH, HEIGHT, 1],
             format: Format::RGBA8,
-            mip_levels: 1, // set >1 to automatically generate mipmaps
+            mip_levels: 8, // set >1 to automatically generate mipmaps
             initial_data: None,
             ..Default::default()
         })

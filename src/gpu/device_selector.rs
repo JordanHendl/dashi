@@ -54,14 +54,12 @@ pub struct SelectedDevice {
 
 impl std::fmt::Display for SelectedDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-       write!(f, "[Name {} -- Driver Ver {} -- ID {}]", self.info.name, self.info.driver_version, self.device_id) 
+       write!(f, "[Name [{}] -- Driver Ver [{}] -- PCIE ID [{}]]", self.info.name, self.info.driver_version, self.device_id) 
     }
 }
 impl Default for SelectedDevice {
     fn default() -> Self {
-        Self { device_id: 0,
-            info: Default::default(),
-        }
+        return DeviceSelector::new().unwrap().select_by_id(0);
     }
 }
 
