@@ -269,6 +269,10 @@ fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
     }
 }
 
+/// Returns the number of color channels for a [`Format`].
+///
+/// Only the formats defined in [`Format`] are supported.  If a new
+/// format is added to the enum it should also be handled here.
 pub fn channel_count(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8 => 3,
@@ -278,20 +282,25 @@ pub fn channel_count(fmt: &Format) -> u32 {
     }
 }
 
+/// Returns the number of bytes each channel in the [`Format`] occupies.
+///
+/// This function expects one of the existing [`Format`] values.  Use of
+/// an unsupported format will require extending this function.
 pub fn bytes_per_channel(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8
         | Format::BGRA8
         | Format::BGRA8Unorm
-        | Format::RGBA8 
+        | Format::RGBA8
         | Format::RGBA8Unorm
-        | Format::R8Sint 
+        | Format::R8Sint
         | Format::R8Uint => 1,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
     }
 }
 
+/// Calculates the dimensions of a mip level for a 3‑D texture.
 pub fn mip_dimensions(dim: [u32; 3], level: u32) -> [u32; 3] {
     [
         std::cmp::max(1, dim[0] >> level),
@@ -343,6 +352,10 @@ impl Clone for Buffer {
     }
 }
 impl Handle<Buffer> {
+    /// Creates a [`DynamicBuffer`] view into this buffer at `byte_offset`.
+    ///
+    /// The caller must ensure the offset is within the buffer's bounds
+    /// and correctly aligned for the data that will be written.
     pub fn to_unmapped_dynamic(&self, byte_offset: u32) -> DynamicBuffer {
         return DynamicBuffer {
             handle: self.clone(),
@@ -378,14 +391,20 @@ impl Default for DynamicBuffer {
     }
 }
 impl DynamicBuffer {
+    /// Returns the handle to the underlying [`Buffer`].
     pub fn handle(&self) -> Handle<Buffer> {
         self.handle
     }
 
+    /// Returns the byte offset into the underlying buffer.
     pub fn offset(&self) -> u32 {
         self.alloc.offset
     }
 
+    /// Provides a mutable slice over the mapped memory.
+    ///
+    /// The slice is valid only while the buffer remains mapped and the
+    /// allocator that created it has not been reset or bumped.
     pub fn slice<T>(&mut self) -> &mut [T] {
         let typed_map: *mut T = unsafe { std::mem::transmute(self.ptr) };
         return unsafe {
@@ -414,10 +433,21 @@ impl Default for DynamicAllocator {
 }
 
 impl DynamicAllocator {
+    /// Resets the allocator, invalidating all previously bumped buffers.
+    ///
+    /// # Safety
+    /// Only call this when no GPU operations are reading from the
+    /// allocations produced by this allocator.
     pub fn reset(&mut self) {
         self.allocator.reset();
     }
 
+    /// Allocates a new [`DynamicBuffer`] of `min_alloc_size` bytes.
+    ///
+    /// # Safety
+    /// The caller must ensure that no pending GPU reads exist for
+    /// buffers previously returned by this allocator before calling this
+    /// method.
     pub fn bump(&mut self) -> Option<DynamicBuffer> {
         let alloc = self.allocator.allocate(self.min_alloc_size)?;
         return Some(DynamicBuffer {
