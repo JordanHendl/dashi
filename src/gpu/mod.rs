@@ -1715,10 +1715,15 @@ impl Context {
         Ok(())
     }
 
+    /// Block until the current device finishes all queued work.
     pub fn sync_current_device(&mut self) {
         unsafe { self.device.device_wait_idle().unwrap() };
     }
 
+    /// Allocate `count` GPU timers.
+    ///
+    /// This must be called before any of the GPU timer helpers are used.
+    /// Existing timers are destroyed and replaced with the new set.
     pub fn init_gpu_timers(&mut self, count: usize) -> Result<(), GPUError> {
         for timer in self.gpu_timers.drain(..) {
             unsafe { timer.destroy(&self.device) };
@@ -1731,18 +1736,29 @@ impl Context {
         Ok(())
     }
 
+    /// Begin timing for `frame` on the provided command list.
+    ///
+    /// [`init_gpu_timers`] must be called beforehand, and the matching
+    /// [`gpu_timer_end`] must be invoked on the **same** `CommandList`.
     pub fn gpu_timer_begin(&mut self, list: &mut CommandList, frame: usize) {
         if let Some(t) = self.gpu_timers.get(frame) {
             unsafe { t.begin(&self.device, list.cmd_buf) };
         }
     }
 
+    /// End timing for `frame` on the provided command list.
+    ///
+    /// Must pair with a preceding [`gpu_timer_begin`] call on the same list.
     pub fn gpu_timer_end(&mut self, list: &mut CommandList, frame: usize) {
         if let Some(t) = self.gpu_timers.get(frame) {
             unsafe { t.end(&self.device, list.cmd_buf) };
         }
     }
 
+    /// Return the elapsed GPU time for `frame` in milliseconds.
+    ///
+    /// Only valid once the associated command list has been submitted and
+    /// the GPU has finished executing it (e.g. by waiting on the fence).
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         self.gpu_timers
             .get(frame)
