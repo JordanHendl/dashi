@@ -1891,8 +1891,24 @@ impl Context {
         }
     }
 
+    /// Completes any outstanding resource cleanup on the context.
+    ///
+    /// # Prerequisites
+    /// - The context must still be alive.
+    /// - Ensure the GPU has finished using any resources scheduled for cleanup.
+    ///
+    /// Currently this method is a no-op and exists for API completeness.
     pub fn clean_up(&mut self) {}
 
+    /// Destroys the GPU context and all resources owned by it.
+    ///
+    /// # Prerequisites
+    /// - Ensure the GPU has completed all work referencing resources created by this
+    ///   context.
+    /// - Destroy dependent objects (for example, image views before their images)
+    ///   prior to calling this method if they are still externally referenced.
+    ///
+    /// After calling this method the context and all of its resources become invalid.
     pub fn destroy(mut self) {
         if let Some(messenger) = self.debug_messenger.take() {
             if let Some(utils) = &self.debug_utils {
@@ -2011,11 +2027,22 @@ impl Context {
         }
     }
 
+    /// Destroys a [`DynamicAllocator`] and its backing buffer.
+    ///
+    /// # Prerequisites
+    /// - All allocations made from the allocator must no longer be in use by the GPU.
+    /// - The allocator's buffer must not be mapped.
+    /// - The context must still be alive.
     pub fn destroy_dynamic_allocator(&mut self, alloc: DynamicAllocator) {
         self.unmap_buffer(alloc.pool).unwrap();
         self.destroy_buffer(alloc.pool);
     }
 
+    /// Destroys a buffer and frees its memory.
+    ///
+    /// # Prerequisites
+    /// - Ensure all GPU work using the buffer has completed.
+    /// - The context must still be alive.
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
         let buf = self.buffers.get_mut_ref(handle).unwrap();
         if !buf.suballocated {
@@ -2024,29 +2051,57 @@ impl Context {
         self.buffers.release(handle);
     }
 
+    /// Destroys a semaphore.
+    ///
+    /// # Prerequisites
+    /// - The semaphore must not be in use by the GPU.
+    /// - The context must still be alive.
     pub fn destroy_semaphore(&mut self, handle: Handle<Semaphore>) {
         let sem = self.semaphores.get_mut_ref(handle).unwrap();
         unsafe { self.device.destroy_semaphore(sem.raw, None) };
         self.semaphores.release(handle);
     }
 
+    /// Destroys a fence.
+    ///
+    /// # Prerequisites
+    /// - Wait for the fence to be signaled before destroying it.
+    /// - The context must still be alive.
     pub fn destroy_fence(&mut self, handle: Handle<Fence>) {
         let fence = self.fences.get_mut_ref(handle).unwrap();
         unsafe { self.device.destroy_fence(fence.raw, None) };
         self.fences.release(handle);
     }
 
+    /// Destroys an image view.
+    ///
+    /// # Prerequisites
+    /// - Ensure no GPU work references the image view.
+    /// - Destroy views before destroying the underlying image.
+    /// - The context must still be alive.
     pub fn destroy_image_view(&mut self, handle: Handle<ImageView>) {
         let img = self.image_views.get_mut_ref(handle).unwrap();
         unsafe { self.device.destroy_image_view(img.view, None) };
         self.image_views.release(handle);
     }
+
+    /// Destroys an image and frees its memory.
+    ///
+    /// # Prerequisites
+    /// - All views created from the image must be destroyed first.
+    /// - Ensure the GPU has finished using the image.
+    /// - The context must still be alive.
     pub fn destroy_image(&mut self, handle: Handle<Image>) {
         let img = self.images.get_mut_ref(handle).unwrap();
         unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
         self.images.release(handle);
     }
 
+    /// Destroys a render pass and its associated framebuffers.
+    ///
+    /// # Prerequisites
+    /// - Ensure no GPU work is using the render pass or its framebuffers.
+    /// - The context must still be alive.
     pub fn destroy_render_pass(&mut self, handle: Handle<RenderPass>) {
         let rp = self.render_passes.get_ref(handle).unwrap();
         for (_id, sb) in &rp.subpasses {
@@ -2058,6 +2113,12 @@ impl Context {
         self.render_passes.release(handle);
     }
 
+    /// Destroys a command list and its associated fence.
+    ///
+    /// # Prerequisites
+    /// - Wait for the command list's fence to signal, ensuring the GPU has finished
+    ///   executing the list.
+    /// - The context must still be alive.
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
         unsafe { self.device.free_command_buffers(self.pool, &[list.cmd_buf]) };
         self.destroy_fence(list.fence);
@@ -3160,6 +3221,12 @@ impl Context {
     }
 
     #[cfg(not(feature = "dashi-openxr"))]
+    /// Destroys a windowing display and its swapchain.
+    ///
+    /// # Prerequisites
+    /// - Ensure the GPU has finished using all swapchain images.
+    /// - Image views should be destroyed before their images and swapchain.
+    /// - The context must still be alive.
     pub fn destroy_display(&mut self, dsp: Display) {
         for img in &dsp.images {
             self.images.release(*img);
@@ -3180,6 +3247,13 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-openxr")]
+    /// Destroys an OpenXR display.
+    ///
+    /// # Prerequisites
+    /// - Ensure the GPU has finished using any swapchain images provided by OpenXR.
+    /// - The context must still be alive.
+    ///
+    /// OpenXR resources are cleaned up by their `Drop` implementations.
     pub fn destroy_display(&mut self, _dsp: Display) {
         // OpenXR resources are cleaned up by Drop implementations
     }
