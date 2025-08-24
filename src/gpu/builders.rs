@@ -305,7 +305,6 @@ impl ComputePipelineBuilder {
 pub struct BindGroupLayoutBuilder<'a> {
     debug_name: &'a str,
     shaders: Vec<crate::ShaderInfo<'a>>,
-    bindless: bool,
 }
 
 impl<'a> BindGroupLayoutBuilder<'a> {
@@ -314,7 +313,6 @@ impl<'a> BindGroupLayoutBuilder<'a> {
         Self {
             debug_name,
             shaders: Vec::new(),
-            bindless: false,
         }
     }
 
@@ -324,23 +322,13 @@ impl<'a> BindGroupLayoutBuilder<'a> {
         self
     }
 
-    /// When true, creates a bindless descriptor layout.
-    pub fn bindless(mut self, flag: bool) -> Self {
-        self.bindless = flag;
-        self
-    }
-
     /// Finalize and create the BindGroupLayout.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<BindGroupLayout>, GPUError> {
         let info = crate::BindGroupLayoutInfo {
             debug_name: self.debug_name,
             shaders: &self.shaders,
         };
-        if self.bindless {
-            ctx.make_bindless_bind_group_layout(&info)
-        } else {
-            ctx.make_bind_group_layout(&info)
-        }
+        ctx.make_bind_group_layout(&info)
     }
 }
 

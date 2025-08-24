@@ -1,8 +1,8 @@
 use super::{
-    BindGroupLayout, Buffer, ComputePipelineLayout, DynamicAllocator, GraphicsPipelineLayout,
-    Image, ImageView, RenderPass, Sampler, SelectedDevice,
+    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
+    GraphicsPipelineLayout, Image, ImageView, RenderPass, Sampler, SelectedDevice,
 };
-use crate::{utils::Handle, BindGroup, Semaphore};
+use crate::{utils::Handle, BindGroup, BindTable, Semaphore};
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "dashi-serde")]
@@ -538,6 +538,11 @@ pub struct BindGroupUpdateInfo<'a> {
     pub bindings: &'a [IndexedBindingInfo<'a>],
 }
 
+pub struct BindTableUpdateInfo<'a> {
+    pub table: Handle<BindTable>,
+    pub bindings: &'a [IndexedBindingInfo<'a>],
+}
+
 pub struct IndexedBindGroupInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
@@ -563,14 +568,25 @@ pub struct BindGroupInfo<'a> {
     pub set: u32,
 }
 
-pub struct BindlessBindGroupInfo<'a> {
+pub struct BindTableInfo<'a> {
     pub debug_name: &'a str,
-    pub layout: Handle<BindGroupLayout>,
-    pub bindings: &'a [BindingInfo<'a>],
+    pub layout: Handle<BindTableLayout>,
+    pub bindings: &'a [IndexedBindingInfo<'a>],
     pub set: u32,
 }
 
 impl<'a> Default for BindGroupInfo<'a> {
+    fn default() -> Self {
+        Self {
+            layout: Default::default(),
+            bindings: &[],
+            set: 0,
+            debug_name: "",
+        }
+    }
+}
+
+impl<'a> Default for BindTableInfo<'a> {
     fn default() -> Self {
         Self {
             layout: Default::default(),
