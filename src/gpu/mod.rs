@@ -498,12 +498,26 @@ pub struct BindGroupLayout {
     pool: vk::DescriptorPool,
     layout: vk::DescriptorSetLayout,
     variables: Vec<BindGroupVariable>,
-    bindless: bool,
 }
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct BindGroup {
+    set: vk::DescriptorSet,
+    set_id: u32,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct BindTableLayout {
+    pool: vk::DescriptorPool,
+    layout: vk::DescriptorSetLayout,
+    variables: Vec<BindGroupVariable>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct BindTable {
     set: vk::DescriptorSet,
     set_id: u32,
 }
@@ -731,6 +745,8 @@ pub struct Context {
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
     pub(super) bind_groups: Pool<BindGroup>,
+    pub(super) bind_table_layouts: Pool<BindTableLayout>,
+    pub(super) bind_tables: Pool<BindTable>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
@@ -1019,6 +1035,8 @@ impl Context {
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
+            bind_table_layouts: Default::default(),
+            bind_tables: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
@@ -1104,6 +1122,8 @@ impl Context {
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
+            bind_table_layouts: Default::default(),
+            bind_tables: Default::default(),
             gfx_pipeline_layouts: Default::default(),
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
@@ -1976,6 +1996,14 @@ impl Context {
                 self.device.destroy_descriptor_pool(layout.pool, None);
             });
 
+        // Bind table layouts
+        self.bind_table_layouts
+            .for_each_occupied_mut(|layout| unsafe {
+                self.device
+                    .destroy_descriptor_set_layout(layout.layout, None);
+                self.device.destroy_descriptor_pool(layout.pool, None);
+            });
+
         // Semaphores
         self.semaphores.for_each_occupied_mut(|s| {
             unsafe { self.device.destroy_semaphore(s.raw, None) };
@@ -2163,7 +2191,7 @@ impl Context {
         self.destroy_fence(list.fence);
     }
 
-    /// Creates a bindless bind group layout.
+    /// Creates a bind table layout used for bindless resources.
     ///
     /// # Prerequisites
     /// - Correct attachment formats.
@@ -2171,10 +2199,10 @@ impl Context {
     /// - Swapchain acquisition order is respected.
     /// - XR session state is valid.
     /// - Synchronization primitives are handled during presentation.
-    pub fn make_bindless_bind_group_layout(
+    pub fn make_bind_table_layout(
         &mut self,
         info: &BindGroupLayoutInfo,
-    ) -> Result<Handle<BindGroupLayout>, GPUError> {
+    ) -> Result<Handle<BindTableLayout>, GPUError> {
         const MAX_DESCRIPTOR_SETS: u32 = 2048;
 
         let mut flags = Vec::new();
@@ -2260,20 +2288,20 @@ impl Context {
             vk::ObjectType::DESCRIPTOR_POOL,
         );
 
-        // Step 4: Return the BindlessBindGroupLayout
-        return Ok(self
-            .bind_group_layouts
-            .insert(BindGroupLayout {
-                pool: descriptor_pool,
-                layout: descriptor_set_layout,
-                variables: info
-                    .shaders
-                    .iter()
-                    .flat_map(|shader| shader.variables.iter().cloned())
-                    .collect(),
-                bindless: true,
-            })
-            .unwrap());
+        // Step 4: Return the BindTableLayout
+        return Ok(
+            self.bind_table_layouts
+                .insert(BindTableLayout {
+                    pool: descriptor_pool,
+                    layout: descriptor_set_layout,
+                    variables: info
+                        .shaders
+                        .iter()
+                        .flat_map(|shader| shader.variables.iter().cloned())
+                        .collect(),
+                })
+                .unwrap(),
+        );
     }
 
     /// Creates a bind group layout for non-bindless resources.
@@ -2374,7 +2402,6 @@ impl Context {
                     .iter()
                     .flat_map(|shader| shader.variables.iter().cloned())
                     .collect(),
-                bindless: false,
             })
             .unwrap());
     }
@@ -2476,6 +2503,133 @@ impl Context {
                             .dst_set(descriptor_set)
                             .dst_binding(binding_info.binding)
                             .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::StorageBuffer(handle) => {
+                        let buffer = self.buffers.get_ref(*handle).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(buffer.offset as u64)
+                            .range(buffer.size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .dst_array_element(res.slot)
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::ConstBuffer(_) => todo!(),
+                    ShaderResource::SampledImage2(_) => todo!(),
+                }
+            }
+        }
+
+        unsafe {
+            self.device
+                .update_descriptor_sets(&write_descriptor_sets, &[]);
+        }
+    }
+
+    /// Updates an existing bind table with new resource bindings.
+    pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) {
+        let table = self.bind_tables.get_ref(info.table).unwrap();
+        let descriptor_set = table.set;
+
+        let mut write_descriptor_sets = Vec::new();
+        let mut buffer_infos = Vec::new();
+        let mut image_infos = Vec::new();
+
+        for binding_info in info.bindings.iter() {
+            for res in binding_info.resources {
+                match &res.resource {
+                    ShaderResource::Buffer(handle) => {
+                        let buffer = self.buffers.get_ref(*handle).unwrap();
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(buffer.offset as u64)
+                            .range(buffer.size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .dst_array_element(res.slot)
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::SampledImage(image_handle, sampler) => {
+                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                        let sampler = self.samplers.get_ref(*sampler).unwrap();
+
+                        let image_info = vk::DescriptorImageInfo::builder()
+                            .image_view(image.view)
+                            .image_layout(vk::ImageLayout::GENERAL)
+                            .sampler(sampler.sampler)
+                            .build();
+
+                        image_infos.push(image_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .dst_array_element(res.slot)
+                            .image_info(&image_infos[image_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::Dynamic(alloc) => {
+                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(alloc.min_alloc_size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::DynamicStorage(alloc) => {
+                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
+
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(0)
+                            .range(alloc.min_alloc_size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC)
                             .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
                             .build();
 
@@ -2712,6 +2866,38 @@ impl Context {
         };
 
         Ok(self.bind_groups.insert(bind_group).unwrap())
+    }
+
+    /// Creates a bind table and initializes it with the provided bindings.
+    pub fn make_bind_table(&mut self, info: &BindTableInfo) -> Result<Handle<BindTable>, GPUError> {
+        let layout = self.bind_table_layouts.get_ref(info.layout).unwrap();
+
+        let alloc_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(layout.pool)
+            .set_layouts(&[layout.layout])
+            .build();
+
+        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
+        let descriptor_set = descriptor_sets[0];
+
+        self.set_name(
+            descriptor_set,
+            info.debug_name,
+            vk::ObjectType::DESCRIPTOR_SET,
+        );
+
+        let bind_table = BindTable {
+            set: descriptor_set,
+            set_id: info.set,
+        };
+
+        let table = self.bind_tables.insert(bind_table).unwrap();
+        self.update_bind_table(&BindTableUpdateInfo {
+            table,
+            bindings: info.bindings,
+        });
+
+        Ok(table)
     }
 
     fn create_pipeline_layout(
