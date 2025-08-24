@@ -965,6 +965,12 @@ impl Context {
         ));
     }
 
+    /// Construct a [`Context`] without any windowing support.
+    ///
+    /// This variant skips surface creation and is intended for off-screen
+    /// rendering or compute-only workloads. For general usage requirements
+    /// (device selection, fence lifetimes, and queue limitations) see
+    /// [`Self::new`].
     pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
@@ -1035,6 +1041,16 @@ impl Context {
         Ok(ctx)
     }
 
+    /// Construct a [`Context`] with windowing support.
+    ///
+    /// # Requirements
+    /// - A physical device must be selected using a `DeviceSelector`.
+    /// - The window backend used here must match the backend supported by
+    ///   the selected device.
+    /// - Fences returned from [`Self::submit`] must remain valid until
+    ///   [`Self::wait`] or [`Self::release_list_on_next_submit`] is called.
+    /// - Vulkan queues require command lists to be finished before submission;
+    ///   [`Self::submit`] will end a still-recording list automatically.
     pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
@@ -1111,6 +1127,10 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-sdl2")]
+    /// Access the underlying SDL context for window creation.
+    ///
+    /// Only available when the `dashi-sdl2` feature is enabled. Contexts
+    /// created with [`Self::headless`] do not initialize SDL.
     pub fn get_sdl_ctx(&mut self) -> &mut sdl2::Sdl {
         return &mut self.sdl_context;
     }
@@ -1136,6 +1156,11 @@ impl Context {
         }
     }
 
+    /// Block until `fence` signals and reset it for reuse.
+    ///
+    /// The fence must have been obtained from [`Self::submit`]. This call
+    /// ensures the associated GPU work is complete before the fence is
+    /// reused or the command list is destroyed.
     pub fn wait(&mut self, fence: Handle<Fence>) -> Result<(), GPUError> {
         let fence = self.fences.get_ref(fence).unwrap();
         let _res = unsafe {
@@ -1148,6 +1173,11 @@ impl Context {
         Ok(())
     }
 
+    /// Allocate and begin recording a new command list.
+    ///
+    /// The returned [`CommandList`] starts in the recording state and may be
+    /// submitted once. [`Self::submit`] will end the list automatically if it
+    /// is still recording.
     pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
         let cmd = unsafe {
             self.device.allocate_command_buffers(
@@ -1350,6 +1380,16 @@ impl Context {
         );
     }
 
+    /// Finish recording and submit a command list to the graphics queue.
+    ///
+    /// Returns a fence handle that can be waited on to know when the GPU has
+    /// completed the work.
+    ///
+    /// # Requirements
+    /// - The command list must be finished before submission. If it is still
+    ///   recording, this function calls `vkEndCommandBuffer` automatically.
+    /// - The returned fence must remain valid until the work has completed and
+    ///   [`Self::wait`] or [`Self::release_list_on_next_submit`] is called.
     pub fn submit(
         &mut self,
         cmd: &mut CommandList,
@@ -2994,6 +3034,15 @@ impl Context {
             .unwrap());
     }
 
+    /// Schedule a command list to be released after the next submission waits
+    /// on `fence`.
+    ///
+    /// The list is destroyed once the provided fence signals during a
+    /// subsequent [`Self::submit`].
+    ///
+    /// # Requirements
+    /// - `fence` must correspond to the work that uses `list`; the list is
+    ///   kept alive until that fence signals.
     pub fn release_list_on_next_submit(&mut self, fence: Handle<Fence>, list: CommandList) {
         self.cmds_to_release.push((list, fence));
     }
