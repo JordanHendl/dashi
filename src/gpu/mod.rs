@@ -887,7 +887,7 @@ impl Context {
             .uniform_and_storage_buffer16_bit_access(true)
             .build();
 
-        // Bindless enabled
+        // Bind table enabled
         if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
             && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind <= 0
             && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing <= 0
@@ -2191,7 +2191,7 @@ impl Context {
         self.destroy_fence(list.fence);
     }
 
-    /// Creates a bind table layout used for bindless resources.
+    /// Creates a bind table layout used for bind table resources.
     ///
     /// # Prerequisites
     /// - Correct attachment formats.
@@ -2201,7 +2201,7 @@ impl Context {
     /// - Synchronization primitives are handled during presentation.
     pub fn make_bind_table_layout(
         &mut self,
-        info: &BindGroupLayoutInfo,
+        info: &BindTableLayoutInfo,
     ) -> Result<Handle<BindTableLayout>, GPUError> {
         const MAX_DESCRIPTOR_SETS: u32 = 2048;
 
@@ -2304,7 +2304,7 @@ impl Context {
         );
     }
 
-    /// Creates a bind group layout for non-bindless resources.
+    /// Creates a bind group layout for standard resources.
     ///
     /// # Prerequisites
     /// - Correct attachment formats.
@@ -4131,10 +4131,10 @@ void main() {
 
     #[test]
     #[serial]
-    fn bindless_test() {
+    fn bind_table_test() {
         // The GPU context that holds all the data.
         let ctx = Context::headless(&Default::default()).unwrap();
-        // Bindless support is optional; ensure context can be created and cleaned up.
+        // Bind table support is optional; ensure context can be created and cleaned up.
         ctx.destroy();
     }
 }
