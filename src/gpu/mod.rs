@@ -704,6 +704,7 @@ pub struct CommandList {
     curr_pipeline: Option<Handle<GraphicsPipeline>>,
     last_op_access: vk::AccessFlags,
     last_op_stage: vk::PipelineStageFlags,
+    queue_type: QueueType,
 }
 
 impl Default for CommandList {
@@ -717,6 +718,7 @@ impl Default for CommandList {
             curr_pipeline: None,
             last_op_access: vk::AccessFlags::TRANSFER_READ,
             last_op_stage: vk::PipelineStageFlags::ALL_COMMANDS,
+            queue_type: QueueType::Graphics,
         }
     }
 }
@@ -1370,10 +1372,19 @@ impl Context {
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
     pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
+        let pool = match info.queue_type {
+            QueueType::Graphics => self.gfx_pool,
+            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .or(self.compute_pool)
+                .unwrap_or(self.gfx_pool),
+        };
+
         let cmd = unsafe {
             self.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(self.gfx_pool)
+                    .command_pool(pool)
                     .command_buffer_count(1)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .build(),
@@ -1407,6 +1418,7 @@ impl Context {
             fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
+            queue_type: info.queue_type,
             ..Default::default()
         });
     }
@@ -1571,7 +1583,7 @@ impl Context {
         );
     }
 
-    /// Finish recording and submit a command list to the graphics queue.
+    /// Finish recording and submit a command list to the specified queue.
     ///
     /// Returns a fence handle that can be waited on to know when the GPU has
     /// completed the work.
@@ -1593,20 +1605,44 @@ impl Context {
 
         let raw_wait_sems: Vec<vk::Semaphore> = info
             .wait_sems
-            .into_iter()
+            .iter()
             .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
             .collect();
 
         let raw_signal_sems: Vec<vk::Semaphore> = info
             .signal_sems
-            .into_iter()
+            .iter()
             .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
             .collect();
 
-        let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+        let stage_masks: Vec<vk::PipelineStageFlags> = raw_wait_sems
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let stage = info
+                    .wait_stages
+                    .get(i)
+                    .copied()
+                    .unwrap_or(PipelineStage::AllCommands);
+                match stage {
+                    PipelineStage::TopOfPipe => vk::PipelineStageFlags::TOP_OF_PIPE,
+                    PipelineStage::DrawIndirect => vk::PipelineStageFlags::DRAW_INDIRECT,
+                    PipelineStage::VertexInput => vk::PipelineStageFlags::VERTEX_INPUT,
+                    PipelineStage::VertexShader => vk::PipelineStageFlags::VERTEX_SHADER,
+                    PipelineStage::FragmentShader => vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    PipelineStage::ComputeShader => vk::PipelineStageFlags::COMPUTE_SHADER,
+                    PipelineStage::Transfer => vk::PipelineStageFlags::TRANSFER,
+                    PipelineStage::ColorAttachmentOutput => vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    PipelineStage::BottomOfPipe => vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                    PipelineStage::Host => vk::PipelineStageFlags::HOST,
+                    PipelineStage::AllCommands => vk::PipelineStageFlags::ALL_COMMANDS,
+                }
+            })
+            .collect();
+
         unsafe {
             self.device.queue_submit(
-                self.gfx_queue.queue,
+                self.queue(info.queue_type),
                 &[vk::SubmitInfo::builder()
                     .command_buffers(&[cmd.cmd_buf])
                     .signal_semaphores(&raw_signal_sems)
@@ -2365,7 +2401,15 @@ impl Context {
     ///   executing the list.
     /// - The context must still be alive.
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
-        unsafe { self.device.free_command_buffers(self.gfx_pool, &[list.cmd_buf]) };
+        let pool = match list.queue_type {
+            QueueType::Graphics => self.gfx_pool,
+            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .or(self.compute_pool)
+                .unwrap_or(self.gfx_pool),
+        };
+        unsafe { self.device.free_command_buffers(pool, &[list.cmd_buf]) };
         self.destroy_fence(list.fence);
     }
 

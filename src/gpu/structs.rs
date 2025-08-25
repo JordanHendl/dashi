@@ -33,6 +33,22 @@ pub enum QueueType {
     Transfer,
 }
 
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum PipelineStage {
+    TopOfPipe,
+    DrawIndirect,
+    VertexInput,
+    VertexShader,
+    FragmentShader,
+    ComputeShader,
+    Transfer,
+    ColorAttachmentOutput,
+    BottomOfPipe,
+    Host,
+    AllCommands,
+}
+
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
@@ -329,6 +345,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
 pub struct CommandListInfo<'a> {
     pub debug_name: &'a str,
     pub should_cleanup: bool,
+    pub queue_type: QueueType,
 }
 
 impl<'a> Default for CommandListInfo<'a> {
@@ -336,19 +353,24 @@ impl<'a> Default for CommandListInfo<'a> {
         Self {
             debug_name: "",
             should_cleanup: true,
+            queue_type: QueueType::Graphics,
         }
     }
 }
 
 pub struct SubmitInfo<'a> {
+    pub queue_type: QueueType,
     pub wait_sems: &'a [Handle<Semaphore>],
+    pub wait_stages: &'a [PipelineStage],
     pub signal_sems: &'a [Handle<Semaphore>],
 }
 
 impl<'a> Default for SubmitInfo<'a> {
     fn default() -> Self {
         Self {
+            queue_type: QueueType::Graphics,
             wait_sems: &[],
+            wait_stages: &[],
             signal_sems: &[],
         }
     }
