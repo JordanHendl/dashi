@@ -6,9 +6,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use super::{convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderPass};
 use crate::utils::Handle;
 use crate::{
-    Attachment, BarrierPoint, BindGroup, Buffer, CommandList, ComputePipeline, Context,
-    DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand,
-    IndirectCommand, Rect2D, SubpassContainer, Viewport,
+    Attachment, BarrierPoint, BindGroup, BindTable, Buffer, CommandList, ComputePipeline,
+    Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
+    IndexedIndirectCommand, IndirectCommand, Rect2D, SubpassContainer, Viewport,
 };
 // Converts an Attachment's clear value into a Vulkan clear value
 impl Attachment {
@@ -90,6 +90,7 @@ pub struct Dispatch {
     pub compute: Handle<ComputePipeline>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub workgroup_size: [u32; 3],
 }
 
@@ -99,6 +100,7 @@ impl Default for Dispatch {
             compute: Default::default(),
             dynamic_buffers: Default::default(),
             bind_groups: Default::default(),
+            bind_tables: Default::default(),
             workgroup_size: Default::default(),
         }
     }
@@ -116,6 +118,7 @@ pub struct Draw {
     pub vertices: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub instance_count: u32,
     pub count: u32,
 }
@@ -126,6 +129,7 @@ pub struct DrawIndexedDynamic {
     pub indices: DynamicBuffer,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub index_count: u32,
     pub instance_count: u32,
     pub first_instance: u32,
@@ -140,6 +144,7 @@ impl Default for DrawIndexedDynamic {
             instance_count: 1,
             first_instance: 0,
             bind_groups: [None, None, None, None],
+            bind_tables: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
         }
     }
@@ -163,6 +168,7 @@ pub struct DrawIndexed {
     pub indices: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub index_count: u32,
     pub instance_count: u32,
     pub first_instance: u32,
@@ -177,6 +183,7 @@ impl Default for DrawIndexed {
             instance_count: 1,
             first_instance: 0,
             bind_groups: [None, None, None, None],
+            bind_tables: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
         }
     }
@@ -187,6 +194,7 @@ pub struct DrawIndexedIndirect {
     pub draw_params: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub offset: u32,
     pub draw_count: u32,
     pub stride: u32,
@@ -197,6 +205,7 @@ impl Default for DrawIndexedIndirect {
         Self {
             draw_params: Default::default(),
             bind_groups: [None, None, None, None],
+            bind_tables: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
             offset: 0,
             draw_count: 0,
@@ -210,6 +219,7 @@ pub struct DrawIndirect {
     pub draw_params: Handle<Buffer>,
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub offset: u32,
     pub draw_count: u32,
     pub stride: u32,
@@ -220,6 +230,7 @@ impl Default for DrawIndirect {
         Self {
             draw_params: Default::default(),
             bind_groups: [None, None, None, None],
+            bind_tables: [None, None, None, None],
             dynamic_buffers: [None, None, None, None],
             offset: 0,
             draw_count: 0,
@@ -578,25 +589,19 @@ impl CommandList {
                 pipeline.raw,
             );
 
-            // Bind descriptor sets with dynamic offsets
-            for (set_idx, bg_opt) in cmd.bind_groups.iter().enumerate() {
-                if let Some(bg) = bg_opt {
-                    let bg_data = self.ctx_ref().bind_groups.get_ref(*bg).unwrap();
-                    let offsets: Vec<u32> = cmd
-                        .dynamic_buffers
-                        .get(set_idx)
-                        .iter()
-                        .filter_map(|&d| d.map(|b| b.alloc.offset))
-                        .collect();
-                    self.ctx_ref().device.cmd_bind_descriptor_sets(
-                        self.cmd_buf,
-                        vk::PipelineBindPoint::COMPUTE,
-                        layout,
-                        bg_data.set_id,
-                        &[bg_data.set],
-                        &offsets,
-                    );
-                }
+            // Bind descriptor sets, preferring bind tables when available
+            for i in 0..cmd.bind_tables.len() {
+                let offsets: Vec<u32> = cmd.dynamic_buffers[i]
+                    .into_iter()
+                    .map(|b| b.alloc.offset)
+                    .collect();
+                self.bind_descriptor_set(
+                    vk::PipelineBindPoint::COMPUTE,
+                    layout,
+                    cmd.bind_tables[i],
+                    cmd.bind_groups[i],
+                    &offsets,
+                );
             }
 
             // Dispatch
@@ -663,7 +668,11 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw(&mut self, cmd: Draw) {
         unsafe {
-            self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
+            self.bind_draw_descriptor_sets(
+                &cmd.dynamic_buffers,
+                &cmd.bind_groups,
+                &cmd.bind_tables,
+            );
             let buf = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
             static OFFSET: vk::DeviceSize = 0;
             self.ctx_ref()
@@ -688,7 +697,11 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed(&mut self, cmd: DrawIndexed) {
         unsafe {
-            self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
+            self.bind_draw_descriptor_sets(
+                &cmd.dynamic_buffers,
+                &cmd.bind_groups,
+                &cmd.bind_tables,
+            );
             let v_buf = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
             let i_buf = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
             static OFFSET: vk::DeviceSize = 0;
@@ -725,7 +738,11 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) {
         unsafe {
-            self.bind_draw_descriptor_sets(&cmd.dynamic_buffers, &cmd.bind_groups);
+            self.bind_draw_descriptor_sets(
+                &cmd.dynamic_buffers,
+                &cmd.bind_groups,
+                &cmd.bind_tables,
+            );
             let v_buf = self
                 .ctx_ref()
                 .buffers
@@ -824,36 +841,31 @@ impl CommandList {
         &mut self,
         dyn_bufs: &[Option<DynamicBuffer>; 4],
         bgs: &[Option<Handle<BindGroup>>; 4],
+        bts: &[Option<Handle<BindTable>>; 4],
     ) {
-        for (_i, bg_opt) in bgs.iter().enumerate() {
-            if let Some(bg) = bg_opt {
-                let bg_data = self.ctx_ref().bind_groups.get_ref(*bg).unwrap();
-                let offsets: Vec<u32> = dyn_bufs
-                    .iter()
-                    .filter_map(|&d| d.map(|b| b.alloc.offset))
-                    .collect();
-                let p = self
-                    .ctx_ref()
-                    .gfx_pipelines
-                    .get_ref(self.curr_pipeline.unwrap())
-                    .unwrap();
-                let p_layout = self
-                    .ctx_ref()
-                    .gfx_pipeline_layouts
-                    .get_ref(p.layout)
-                    .unwrap()
-                    .layout;
-                unsafe {
-                    self.ctx_ref().device.cmd_bind_descriptor_sets(
-                        self.cmd_buf,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        p_layout,
-                        bg_data.set_id,
-                        &[bg_data.set],
-                        &offsets,
-                    );
-                }
-            }
+        let p = self
+            .ctx_ref()
+            .gfx_pipelines
+            .get_ref(self.curr_pipeline.unwrap())
+            .unwrap();
+        let p_layout = self
+            .ctx_ref()
+            .gfx_pipeline_layouts
+            .get_ref(p.layout)
+            .unwrap()
+            .layout;
+        let offsets: Vec<u32> = dyn_bufs
+            .iter()
+            .filter_map(|&d| d.map(|b| b.alloc.offset))
+            .collect();
+        for i in 0..bts.len() {
+            self.bind_descriptor_set(
+                vk::PipelineBindPoint::GRAPHICS,
+                p_layout,
+                bts[i],
+                bgs[i],
+                &offsets,
+            );
         }
     }
 
@@ -1097,7 +1109,7 @@ impl CommandList {
         self.last_op_access = access;
     }
 
-    fn ctx_ref(&self) -> &'static mut Context {
+    pub(crate) fn ctx_ref(&self) -> &'static mut Context {
         unsafe { &mut *self.ctx }
     }
 
