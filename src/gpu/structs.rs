@@ -428,27 +428,16 @@ pub struct BindGroupLayoutInfo<'a> {
 }
 
 #[derive(Hash, Clone, Debug)]
-pub struct BindlessBindGroupLayoutInfo<'a> {
+pub struct BindTableLayoutInfo<'a> {
     pub debug_name: &'a str,
-    pub sampler_binding: u32,
-    pub sampler_length: u32,
-    pub const_buffer_binding: u32,
-    pub const_buffer_length: u32,
-    pub mutable_buffer_binding: u32,
-    pub mutable_buffer_length: u32,
+    pub shaders: &'a [ShaderInfo<'a>],
 }
 
-impl<'a> Default for BindlessBindGroupLayoutInfo<'a> {
+impl<'a> Default for BindTableLayoutInfo<'a> {
     fn default() -> Self {
-        const DEFAULT_BINDLESS_LEN: u32 = 2048;
         Self {
             debug_name: "Default",
-            sampler_binding: 0,
-            sampler_length: DEFAULT_BINDLESS_LEN,
-            const_buffer_binding: 1,
-            const_buffer_length: DEFAULT_BINDLESS_LEN,
-            mutable_buffer_binding: 2,
-            mutable_buffer_length: DEFAULT_BINDLESS_LEN,
+            shaders: &[],
         }
     }
 }

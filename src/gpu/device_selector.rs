@@ -24,7 +24,7 @@ pub struct DeviceInfo {
     name: String,
     kind: DeviceType,
     driver_version: u32,
-    bindless_capable: bool,
+    bind_table_capable: bool,
     display_capable: bool,
     dashi_capable: bool,
 }
@@ -40,7 +40,7 @@ impl From<vk::PhysicalDeviceProperties> for DeviceInfo {
             },
             kind: value.device_type.into(),
             driver_version: value.driver_version,
-            bindless_capable: false,
+            bind_table_capable: false,
             display_capable: false,
             dashi_capable: false,
         }
@@ -68,7 +68,7 @@ pub struct DeviceFilter {
     name: Option<String>,
     kind: Option<DeviceType>,
     driver_version: Option<u32>,
-    bindless_capable: Option<bool>,
+    bind_table_capable: Option<bool>,
     display_capable: Option<bool>,
 }
 
@@ -99,12 +99,12 @@ impl DeviceFilter {
         self.clone()
     }
 
-    /// Require support for bindless descriptors on the selected device.
+    /// Require support for bind tables on the selected device.
     ///
     /// [`DeviceSelector::select`] will return [`None`] if this capability is
     /// not available on any device.
-    pub fn require_bindless(&mut self) -> Self {
-        self.bindless_capable = Some(true);
+    pub fn require_bind_table(&mut self) -> Self {
+        self.bind_table_capable = Some(true);
         self.clone()
     }
 
@@ -200,7 +200,7 @@ impl DeviceSelector {
                 && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing > 0
                 && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind > 0
             {
-                info.bindless_capable = true;
+                info.bind_table_capable = true;
             }
 
             if Self::has_swapchain_extension(&enabled_extensions) {
@@ -262,7 +262,7 @@ impl DeviceSelector {
             if Self::check(&device.display_capable, filter.display_capable.as_ref()) {
                 score += 1;
             }
-            if Self::check(&device.bindless_capable, filter.bindless_capable.as_ref()) {
+            if Self::check(&device.bind_table_capable, filter.bind_table_capable.as_ref()) {
                 score += 1;
             }
 
