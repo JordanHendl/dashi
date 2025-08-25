@@ -60,6 +60,7 @@ fn pipeline_switch() {
             debug_name: "layout_red",
             vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
             bg_layouts: [None, None, None, None],
+            bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
                 PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag_red, specialization: &[] },
@@ -73,6 +74,7 @@ fn pipeline_switch() {
             debug_name: "layout_green",
             vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
             bg_layouts: [None, None, None, None],
+            bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
                 PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag_green, specialization: &[] },

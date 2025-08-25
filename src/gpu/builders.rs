@@ -122,6 +122,7 @@ pub struct GraphicsPipelineLayoutBuilder<'a> {
     debug_name: &'a str,
     vertex_info: Option<VertexDescriptionInfo<'a>>,
     bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
+    bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     shaders: Vec<PipelineShaderInfo<'a>>,
     details: GraphicsPipelineDetails,
 }
@@ -133,6 +134,7 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
             debug_name,
             vertex_info: None,
             bg_layouts: [None, None, None, None],
+            bt_layouts: [None, None, None, None],
             shaders: Vec::new(),
             details: GraphicsPipelineDetails::default(),
         }
@@ -148,6 +150,14 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
     pub fn bind_group_layout(mut self, index: usize, layout: Handle<BindGroupLayout>) -> Self {
         if index < 4 {
             self.bg_layouts[index] = Some(layout);
+        }
+        self
+    }
+
+    /// Attach a bind table layout at a given index (0..3).
+    pub fn bind_table_layout(mut self, index: usize, layout: Handle<BindTableLayout>) -> Self {
+        if index < 4 {
+            self.bt_layouts[index] = Some(layout);
         }
         self
     }
@@ -176,6 +186,7 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
             debug_name: self.debug_name,
             vertex_info: self.vertex_info.expect("vertex_info is required"),
             bg_layouts: self.bg_layouts,
+            bt_layouts: self.bt_layouts,
             shaders: &self.shaders,
             details: self.details,
         };
@@ -235,6 +246,7 @@ impl GraphicsPipelineBuilder {
 /// Builds a ComputePipelineLayout via the builder pattern.
 pub struct ComputePipelineLayoutBuilder<'a> {
     bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
+    bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     shader: Option<PipelineShaderInfo<'a>>,
 }
 
@@ -243,6 +255,7 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     pub fn new() -> Self {
         Self {
             bg_layouts: [None, None, None, None],
+            bt_layouts: [None, None, None, None],
             shader: None,
         }
     }
@@ -251,6 +264,14 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     pub fn bind_group_layout(mut self, index: usize, layout: Handle<BindGroupLayout>) -> Self {
         if index < 4 {
             self.bg_layouts[index] = Some(layout);
+        }
+        self
+    }
+
+    /// Attach a bind table layout at a given index.
+    pub fn bind_table_layout(mut self, index: usize, layout: Handle<BindTableLayout>) -> Self {
+        if index < 4 {
+            self.bt_layouts[index] = Some(layout);
         }
         self
     }
@@ -265,6 +286,7 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     pub fn build(self, ctx: &mut Context) -> Result<Handle<ComputePipelineLayout>, GPUError> {
         let info = ComputePipelineLayoutInfo {
             bg_layouts: self.bg_layouts,
+            bt_layouts: self.bt_layouts,
             shader: &self.shader.expect("shader is required"),
         };
         ctx.make_compute_pipeline_layout(&info)

@@ -239,11 +239,13 @@ impl Default for DrawIndirect {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct BindPipeline {
     pub gfx: Option<Handle<GraphicsPipeline>>,
     pub compute: Option<Handle<ComputePipeline>>,
-    pub bg: Handle<BindGroup>,
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
 }
 
 #[derive(Clone, Copy)]
@@ -263,7 +265,7 @@ pub enum Command {
     DrawIndexedDynamic(DrawIndexedDynamic),
     DrawIndexedIndirect(DrawIndexedIndirect),
     DrawIndirect(DrawIndirect),
-    BindPipeline(Handle<GraphicsPipeline>),
+    BindPipeline(BindPipeline),
     Blit(ImageBlit),
     ImageBarrier(ImageBarrier),
     Dispatch(Dispatch),
@@ -897,16 +899,65 @@ impl CommandList {
         }
     }
   
-    fn cmd_bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) {
+    fn cmd_bind_pipeline(&mut self, info: BindPipeline) {
         unsafe {
-               let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
-            self.ctx_ref().device.cmd_bind_pipeline(
-                self.cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                gfx.raw,
-            );
+            if let Some(pipeline) = info.gfx {
+                let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+                let layout = self
+                    .ctx_ref()
+                    .gfx_pipeline_layouts
+                    .get_ref(gfx.layout)
+                    .unwrap()
+                    .layout;
+                self.ctx_ref().device.cmd_bind_pipeline(
+                    self.cmd_buf,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    gfx.raw,
+                );
+                for i in 0..info.bind_tables.len() {
+                    let offsets: Vec<u32> = info.dynamic_buffers[i]
+                        .into_iter()
+                        .map(|b| b.alloc.offset)
+                        .collect();
+                    self.bind_descriptor_set(
+                        vk::PipelineBindPoint::GRAPHICS,
+                        layout,
+                        info.bind_tables[i],
+                        info.bind_groups[i],
+                        &offsets,
+                    );
+                }
+            }
+            if let Some(pipeline) = info.compute {
+                let comp = self.ctx_ref().compute_pipelines.get_ref(pipeline).unwrap();
+                let layout = self
+                    .ctx_ref()
+                    .compute_pipeline_layouts
+                    .get_ref(comp.layout)
+                    .unwrap()
+                    .layout;
+                self.ctx_ref().device.cmd_bind_pipeline(
+                    self.cmd_buf,
+                    vk::PipelineBindPoint::COMPUTE,
+                    comp.raw,
+                );
+                for i in 0..info.bind_tables.len() {
+                    let offsets: Vec<u32> = info.dynamic_buffers[i]
+                        .into_iter()
+                        .map(|b| b.alloc.offset)
+                        .collect();
+                    self.bind_descriptor_set(
+                        vk::PipelineBindPoint::COMPUTE,
+                        layout,
+                        info.bind_tables[i],
+                        info.bind_groups[i],
+                        &offsets,
+                    );
+                }
+            }
         }
     }
+
     /// Bind a graphics pipeline for subsequent draw calls.
     ///
     /// # Vulkan prerequisites
@@ -922,7 +973,10 @@ impl CommandList {
             return Ok(());
         }
         self.curr_pipeline = Some(pipeline);
-        self.cmd_bind_pipeline(pipeline);
+        self.cmd_bind_pipeline(BindPipeline {
+            gfx: Some(pipeline),
+            ..Default::default()
+        });
         Ok(())
     }
 

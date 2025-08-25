@@ -168,6 +168,7 @@ fn main() {
                 rate: VertexRate::Vertex,
             },
             bg_layouts: [Some(bg_layout), None, None, None],
+            bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
