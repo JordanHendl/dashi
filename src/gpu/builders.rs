@@ -418,7 +418,7 @@ impl<'a> BindTableLayoutBuilder<'a> {
 
     /// Finalize and create the [`BindTableLayout`].
     pub fn build(self, ctx: &mut Context) -> Result<Handle<BindTableLayout>, GPUError> {
-        let info = crate::BindGroupLayoutInfo {
+        let info = crate::BindTableLayoutInfo {
             debug_name: self.debug_name,
             shaders: &self.shaders,
         };

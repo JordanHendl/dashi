@@ -721,6 +721,41 @@ impl Default for CommandList {
     }
 }
 
+impl CommandList {
+    pub(crate) fn bind_descriptor_set(
+        &mut self,
+        bind_point: vk::PipelineBindPoint,
+        layout: vk::PipelineLayout,
+        table: Option<Handle<BindTable>>,
+        group: Option<Handle<BindGroup>>,
+        offsets: &[u32],
+    ) {
+        unsafe {
+            if let Some(bt) = table {
+                let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                self.ctx_ref().device.cmd_bind_descriptor_sets(
+                    self.cmd_buf,
+                    bind_point,
+                    layout,
+                    bt_data.set_id,
+                    &[bt_data.set],
+                    &[],
+                );
+            } else if let Some(bg) = group {
+                let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
+                self.ctx_ref().device.cmd_bind_descriptor_sets(
+                    self.cmd_buf,
+                    bind_point,
+                    layout,
+                    bg_data.set_id,
+                    &[bg_data.set],
+                    offsets,
+                );
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Queue {
     queue: vk::Queue,
