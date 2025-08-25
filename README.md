@@ -55,6 +55,10 @@ list.append(Command::Draw(other_draw));
 list.end_drawing()?;
 ```
 
+### Resource Binding
+
+Dashi supports both the classic `BindGroup` pattern and a bindless `BindTable` API for descriptor indexing. The [`hello_triangle`](examples/hello_triangle.rs) example demonstrates `BindGroup` usage, while [`bindless_triangle`](examples/bindless_triangle.rs) shows how to build and bind resources with `BindTable`.
+
 ### Window Backends
 
 Dashi ships with multiple window backends. The default `dashi-winit` feature
