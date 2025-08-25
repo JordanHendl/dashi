@@ -1,10 +1,9 @@
 use dashi::builders::{BindTableBuilder, BindTableLayoutBuilder};
 use dashi::*;
 
-#[cfg(feature = "dashi-tests")]
-fn main() {
+fn main() -> Result<(), GPUError> {
     // Create a headless context.
-    let mut ctx = gpu::Context::headless(&ContextInfo::default()).unwrap();
+    let mut ctx = gpu::Context::headless(&ContextInfo::default())?;
 
     // Describe a single dynamic uniform buffer at binding 0.
     let shader_info = ShaderInfo {
@@ -16,14 +15,14 @@ fn main() {
         }],
     };
 
-    // Build layout and table, binding a dynamic allocator.
+    // Build the layout and table.
     let layout = BindTableLayoutBuilder::new("bindless_layout")
         .shader(shader_info)
-        .build(&mut ctx)
-        .unwrap();
+        .build(&mut ctx)?;
 
-    let allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    let _table = BindTableBuilder::new("bindless_table")
+    // Allocate a dynamic buffer and bind it.
+    let allocator = ctx.make_dynamic_allocator(&Default::default())?;
+    let table = BindTableBuilder::new("bindless_table")
         .layout(layout)
         .binding(
             0,
@@ -32,9 +31,8 @@ fn main() {
                 resource: ShaderResource::Dynamic(&allocator),
             }],
         )
-        .build(&mut ctx)
-        .unwrap();
-}
+        .build(&mut ctx)?;
 
-#[cfg(not(feature = "dashi-tests"))]
-fn main() {}
+    println!("Created bind table: {:?}", table);
+    Ok(())
+}
