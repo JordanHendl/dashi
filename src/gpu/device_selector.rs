@@ -24,6 +24,7 @@ pub struct DeviceInfo {
     name: String,
     kind: DeviceType,
     driver_version: u32,
+    /// Indicates support for bindless `BindTable` descriptors.
     bind_table_capable: bool,
     display_capable: bool,
     dashi_capable: bool,
@@ -68,6 +69,7 @@ pub struct DeviceFilter {
     name: Option<String>,
     kind: Option<DeviceType>,
     driver_version: Option<u32>,
+    /// Require devices to support bindless `BindTable` descriptors.
     bind_table_capable: Option<bool>,
     display_capable: Option<bool>,
 }
@@ -99,7 +101,7 @@ impl DeviceFilter {
         self.clone()
     }
 
-    /// Require support for bind tables on the selected device.
+    /// Require support for bindless `BindTable` descriptors on the selected device.
     ///
     /// [`DeviceSelector::select`] will return [`None`] if this capability is
     /// not available on any device.
