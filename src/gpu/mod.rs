@@ -2938,16 +2938,22 @@ impl Context {
     fn create_pipeline_layout(
         &self,
         bind_group_layout_handle: &[Option<Handle<BindGroupLayout>>],
+        bind_table_layout_handle: &[Option<Handle<BindTableLayout>>],
     ) -> Result<vk::PipelineLayout, GPUError> {
-        let mut bgs = Vec::new();
-        for bg in bind_group_layout_handle {
+        let mut layouts = Vec::new();
+        for (bg, bt) in bind_group_layout_handle
+            .iter()
+            .zip(bind_table_layout_handle.iter())
+        {
             if let Some(b) = bg {
-                bgs.push(self.bind_group_layouts.get_ref(*b).unwrap().layout);
+                layouts.push(self.bind_group_layouts.get_ref(*b).unwrap().layout);
+            } else if let Some(t) = bt {
+                layouts.push(self.bind_table_layouts.get_ref(*t).unwrap().layout);
             }
         }
 
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .set_layouts(&bgs)
+            .set_layouts(&layouts)
             .push_constant_ranges(&[]) // Add push constant ranges if needed
             .build();
 
@@ -3105,7 +3111,7 @@ impl Context {
             .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
             .build();
 
-        let layout = self.create_pipeline_layout(&info.bg_layouts)?;
+        let layout = self.create_pipeline_layout(&info.bg_layouts, &info.bt_layouts)?;
 
         return Ok(self
             .compute_pipeline_layouts
@@ -3223,7 +3229,7 @@ impl Context {
         };
 
         // Step 9: Create Pipeline Layout (assume we have a layout creation function)
-        let layout = self.create_pipeline_layout(&info.bg_layouts)?;
+        let layout = self.create_pipeline_layout(&info.bg_layouts, &info.bt_layouts)?;
 
         self.set_name(layout, info.debug_name, vk::ObjectType::PIPELINE_LAYOUT);
 
@@ -4044,6 +4050,7 @@ mod tests {
         let pipeline_layout = ctx
             .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
                 bg_layouts: [Some(bg_layout), None, None, None],
+                bt_layouts: [None, None, None, None],
                 shader: &PipelineShaderInfo {
                     stage: ShaderType::Compute,
                     spirv: inline_spirv::inline_spirv!(

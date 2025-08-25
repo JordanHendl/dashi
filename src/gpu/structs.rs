@@ -856,6 +856,7 @@ pub struct PipelineShaderInfo<'a> {
 #[derive(Debug)]
 pub struct ComputePipelineLayoutInfo<'a> {
     pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
+    pub bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     pub shader: &'a PipelineShaderInfo<'a>,
 }
 
@@ -864,6 +865,7 @@ pub struct GraphicsPipelineLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub vertex_info: VertexDescriptionInfo<'a>,
     pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
+    pub bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
 }
