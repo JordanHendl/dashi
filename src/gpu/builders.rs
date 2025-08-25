@@ -2,9 +2,9 @@
 
 use crate::utils::Handle;
 use crate::{
-    AttachmentDescription, BindGroupLayout, ComputePipeline, ComputePipelineInfo,
-    ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo, GraphicsPipeline,
-    GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
+    AttachmentDescription, BindGroupLayout, BindTable, BindTableLayout, ComputePipeline,
+    ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
+    GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
     GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
     SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering, DynamicState,
 };
@@ -380,6 +380,122 @@ impl<'a> BindGroupBuilder<'a> {
         ctx.make_bind_group(&info)
     }
 }
+
+/// Builds a [`BindTableLayout`] via the builder pattern.
+///
+/// # Example
+/// ```no_run
+/// use dashi::{Context, ContextInfo, ShaderInfo, ShaderType};
+/// use dashi::builders::BindTableLayoutBuilder;
+/// # fn main() -> Result<(), dashi::GPUError> {
+/// let mut ctx = Context::headless(&ContextInfo::default())?;
+/// let shader_info = ShaderInfo { shader_type: ShaderType::All, variables: &[] };
+/// let layout = BindTableLayoutBuilder::new("btl")
+///     .shader(shader_info)
+///     .build(&mut ctx)?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct BindTableLayoutBuilder<'a> {
+    debug_name: &'a str,
+    shaders: Vec<crate::ShaderInfo<'a>>,
+}
+
+impl<'a> BindTableLayoutBuilder<'a> {
+    /// Start a new builder with a debug name.
+    pub fn new(debug_name: &'a str) -> Self {
+        Self {
+            debug_name,
+            shaders: Vec::new(),
+        }
+    }
+
+    /// Add a shader stage with its variable descriptors.
+    pub fn shader(mut self, shader_info: crate::ShaderInfo<'a>) -> Self {
+        self.shaders.push(shader_info);
+        self
+    }
+
+    /// Finalize and create the [`BindTableLayout`].
+    pub fn build(self, ctx: &mut Context) -> Result<Handle<BindTableLayout>, GPUError> {
+        let info = crate::BindGroupLayoutInfo {
+            debug_name: self.debug_name,
+            shaders: &self.shaders,
+        };
+        ctx.make_bind_table_layout(&info)
+    }
+}
+
+/// Builds a [`BindTable`] via the builder pattern.
+///
+/// # Example
+/// ```no_run
+/// use dashi::{Context, ContextInfo, ShaderInfo, ShaderType};
+/// use dashi::builders::{BindTableBuilder, BindTableLayoutBuilder};
+/// # fn main() -> Result<(), dashi::GPUError> {
+/// let mut ctx = Context::headless(&ContextInfo::default())?;
+/// let shader_info = ShaderInfo { shader_type: ShaderType::All, variables: &[] };
+/// let layout = BindTableLayoutBuilder::new("btl")
+///     .shader(shader_info)
+///     .build(&mut ctx)?;
+/// let table = BindTableBuilder::new("bt")
+///     .layout(layout)
+///     .build(&mut ctx)?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct BindTableBuilder<'a> {
+    debug_name: &'a str,
+    layout: Handle<BindTableLayout>,
+    bindings: Vec<crate::IndexedBindingInfo<'a>>,
+    set: u32,
+}
+
+impl<'a> BindTableBuilder<'a> {
+    /// Start a new builder for a bind table.
+    pub fn new(debug_name: &'a str) -> Self {
+        Self {
+            debug_name,
+            layout: Handle::default(),
+            bindings: Vec::new(),
+            set: 0,
+        }
+    }
+
+    /// Specify the layout handle to allocate from.
+    pub fn layout(mut self, layout: Handle<BindTableLayout>) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    /// Add indexed resources at a binding slot.
+    pub fn binding(
+        mut self,
+        binding: u32,
+        resources: &'a [crate::IndexedResource<'a>],
+    ) -> Self {
+        self.bindings
+            .push(crate::IndexedBindingInfo { binding, resources });
+        self
+    }
+
+    /// Set the descriptor set index.
+    pub fn set(mut self, set: u32) -> Self {
+        self.set = set;
+        self
+    }
+
+    /// Finalize and create the [`BindTable`].
+    pub fn build(self, ctx: &mut Context) -> Result<Handle<BindTable>, GPUError> {
+        let info = crate::BindTableInfo {
+            debug_name: self.debug_name,
+            layout: self.layout,
+            bindings: &self.bindings,
+            set: self.set,
+        };
+        ctx.make_bind_table(&info)
+    }
+}
 // Unit tests for each builder
 #[cfg(test)]
 mod tests {
@@ -511,6 +627,40 @@ mod tests {
             .build(&mut ctx)
             .unwrap();
         //    ctx.destroy_bind_group(_bg);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn test_bind_table_layout_builder() {
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
+        let shader_info = crate::ShaderInfo {
+            shader_type: crate::ShaderType::All,
+            variables: &[],
+        };
+        let _btl = BindTableLayoutBuilder::new("btl")
+            .shader(shader_info)
+            .build(&mut ctx)
+            .unwrap();
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn test_bind_table_builder() {
+        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
+        let shader_info = crate::ShaderInfo {
+            shader_type: crate::ShaderType::All,
+            variables: &[],
+        };
+        let btl = BindTableLayoutBuilder::new("btl")
+            .shader(shader_info)
+            .build(&mut ctx)
+            .unwrap();
+        let _bt = BindTableBuilder::new("bt")
+            .layout(btl)
+            .build(&mut ctx)
+            .unwrap();
         ctx.destroy();
     }
 
