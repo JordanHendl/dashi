@@ -25,6 +25,14 @@ pub enum BufferUsage {
     STORAGE,
 }
 
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum QueueType {
+    Graphics,
+    Compute,
+    Transfer,
+}
+
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {

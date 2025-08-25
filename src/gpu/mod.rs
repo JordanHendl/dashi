@@ -757,6 +757,7 @@ impl CommandList {
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 pub(super) struct Queue {
     queue: vk::Queue,
     family: u32,
@@ -768,9 +769,13 @@ pub struct Context {
     pub(super) pdevice: vk::PhysicalDevice,
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
-    pub(super) pool: vk::CommandPool,
+    pub(super) gfx_pool: vk::CommandPool,
+    pub(super) compute_pool: Option<vk::CommandPool>,
+    pub(super) transfer_pool: Option<vk::CommandPool>,
     pub(super) allocator: ManuallyDrop<vk_mem::Allocator>,
     pub(super) gfx_queue: Queue,
+    pub(super) compute_queue: Option<Queue>,
+    pub(super) transfer_queue: Option<Queue>,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
     pub(super) semaphores: Pool<Semaphore>,
@@ -833,8 +838,12 @@ impl Context {
             ash::Device,
             ash::vk::PhysicalDeviceProperties,
             vk::CommandPool,
+            Option<vk::CommandPool>,
+            Option<vk::CommandPool>,
             vk_mem::Allocator,
             Queue,
+            Option<Queue>,
+            Option<Queue>,
         ),
         GPUError,
     > {
@@ -893,17 +902,61 @@ impl Context {
         let queue_prop = unsafe { instance.get_physical_device_queue_family_properties(pdevice) };
         let _features = unsafe { instance.get_physical_device_features(pdevice) };
 
-        let mut queue_family: u32 = 0;
+        let mut gfx_family = None;
+        let mut compute_family = None;
+        let mut transfer_family = None;
 
-        let mut gfx_queue = Queue::default();
-        for prop in queue_prop.iter() {
-            if prop.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-                gfx_queue.family = queue_family;
+        for (idx, prop) in queue_prop.iter().enumerate() {
+            if prop.queue_flags.contains(vk::QueueFlags::GRAPHICS) && gfx_family.is_none() {
+                gfx_family = Some(idx as u32);
             }
-            queue_family += 1;
+            if prop.queue_flags.contains(vk::QueueFlags::COMPUTE) && compute_family.is_none() {
+                compute_family = Some(idx as u32);
+            }
+            if prop.queue_flags.contains(vk::QueueFlags::TRANSFER) && transfer_family.is_none() {
+                transfer_family = Some(idx as u32);
+            }
         }
 
+        let gfx_family = gfx_family.unwrap();
+        let compute_family = compute_family.unwrap_or(gfx_family);
+        let transfer_family = transfer_family.unwrap_or(compute_family);
+
+        let mut gfx_queue = Queue { family: gfx_family, ..Default::default() };
+        let mut compute_queue = if compute_family != gfx_family {
+            Some(Queue {
+                family: compute_family,
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+        let mut transfer_queue = if transfer_family != compute_family {
+            Some(Queue {
+                family: transfer_family,
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+
         let priorities = [1.0];
+        let mut unique_families = vec![gfx_family];
+        if compute_family != gfx_family {
+            unique_families.push(compute_family);
+        }
+        if transfer_family != compute_family && transfer_family != gfx_family {
+            unique_families.push(transfer_family);
+        }
+        let queue_infos: Vec<_> = unique_families
+            .iter()
+            .map(|&family| {
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(family)
+                    .queue_priorities(&priorities)
+                    .build()
+            })
+            .collect();
 
         let mut descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
@@ -976,10 +1029,7 @@ impl Context {
                 pdevice,
                 &vk::DeviceCreateInfo::builder()
                     .enabled_extension_names(&extensions_to_enable)
-                    .queue_create_infos(&[vk::DeviceQueueCreateInfo::builder()
-                        .queue_family_index(gfx_queue.family)
-                        .queue_priorities(&priorities)
-                        .build()])
+                    .queue_create_infos(&queue_infos)
                     .push_next(&mut features2)
                     .push_next(&mut features16bit)
                     .build(),
@@ -987,21 +1037,53 @@ impl Context {
             )
         }?;
 
-        gfx_queue.queue = unsafe { device.get_device_queue(gfx_queue.family, 0) };
+        gfx_queue.queue = unsafe { device.get_device_queue(gfx_family, 0) };
+        if let Some(ref mut q) = compute_queue {
+            q.queue = unsafe { device.get_device_queue(compute_family, 0) };
+        }
+        if let Some(ref mut q) = transfer_queue {
+            q.queue = unsafe { device.get_device_queue(transfer_family, 0) };
+        }
 
         let allocator = vk_mem::Allocator::new(vk_mem::AllocatorCreateInfo::new(
             &instance, &device, pdevice,
         ))?;
 
-        let pool = unsafe {
+        let gfx_pool = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(gfx_queue.family)
+                    .queue_family_index(gfx_family)
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
                     .build(),
                 None,
             )
         }?;
+        let compute_pool = if compute_family != gfx_family {
+            Some(unsafe {
+                device.create_command_pool(
+                    &vk::CommandPoolCreateInfo::builder()
+                        .queue_family_index(compute_family)
+                        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                        .build(),
+                    None,
+                )
+            }?)
+        } else {
+            None
+        };
+        let transfer_pool = if transfer_family != compute_family && transfer_family != gfx_family {
+            Some(unsafe {
+                device.create_command_pool(
+                    &vk::CommandPoolCreateInfo::builder()
+                        .queue_family_index(transfer_family)
+                        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                        .build(),
+                    None,
+                )
+            }?)
+        } else {
+            None
+        };
 
         return Ok((
             entry,
@@ -1009,9 +1091,13 @@ impl Context {
             pdevice,
             device,
             device_prop,
-            pool,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
             allocator,
             gfx_queue,
+            compute_queue,
+            transfer_queue,
         ));
     }
 
@@ -1023,8 +1109,20 @@ impl Context {
     /// [`Self::new`].
     pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
-        let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
-            Self::init_core(info, false, enable_validation)?;
+        let (
+            entry,
+            instance,
+            pdevice,
+            device,
+            properties,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
+            allocator,
+            gfx_queue,
+            compute_queue,
+            transfer_queue,
+        ) = Self::init_core(info, false, enable_validation)?;
 
         let (debug_utils, debug_messenger) = if enable_validation {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
@@ -1057,9 +1155,13 @@ impl Context {
             pdevice,
             device,
             properties,
-            pool,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
             allocator: ManuallyDrop::new(allocator),
             gfx_queue,
+            compute_queue,
+            transfer_queue,
 
             buffers: Default::default(),
             render_passes: Default::default(),
@@ -1105,8 +1207,20 @@ impl Context {
     ///   [`Self::submit`] will end a still-recording list automatically.
     pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
-        let (entry, instance, pdevice, device, properties, pool, allocator, gfx_queue) =
-            Self::init_core(info, true, enable_validation)?;
+        let (
+            entry,
+            instance,
+            pdevice,
+            device,
+            properties,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
+            allocator,
+            gfx_queue,
+            compute_queue,
+            transfer_queue,
+        ) = Self::init_core(info, true, enable_validation)?;
 
         let (debug_utils, debug_messenger) = if enable_validation {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
@@ -1144,9 +1258,13 @@ impl Context {
             pdevice,
             device,
             properties,
-            pool,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
             allocator: ManuallyDrop::new(allocator),
             gfx_queue,
+            compute_queue,
+            transfer_queue,
 
             buffers: Default::default(),
             render_passes: Default::default(),
@@ -1227,6 +1345,25 @@ impl Context {
         Ok(())
     }
 
+    /// Retrieve a queue handle for the requested type, applying fallback
+    /// semantics if a dedicated queue was not created.
+    pub fn queue(&self, ty: QueueType) -> vk::Queue {
+        match ty {
+            QueueType::Graphics => self.gfx_queue.queue,
+            QueueType::Compute => self
+                .compute_queue
+                .as_ref()
+                .unwrap_or(&self.gfx_queue)
+                .queue,
+            QueueType::Transfer => self
+                .transfer_queue
+                .as_ref()
+                .or(self.compute_queue.as_ref())
+                .unwrap_or(&self.gfx_queue)
+                .queue,
+        }
+    }
+
     /// Allocate and begin recording a new command list.
     ///
     /// The returned [`CommandList`] starts in the recording state and may be
@@ -1236,7 +1373,7 @@ impl Context {
         let cmd = unsafe {
             self.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(self.pool)
+                    .command_pool(self.gfx_pool)
                     .command_buffer_count(1)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .build(),
@@ -2013,7 +2150,7 @@ impl Context {
         // Drain and destroy any pending command lists
         //        for (cmd, fence) in self.cmds_to_release.drain(..) {
         //            let _ = self.wait(fence.clone());
-        //            unsafe { self.device.free_command_buffers(self.pool, &[cmd.cmd_buf]) };
+        //            unsafe { self.device.free_command_buffers(self.gfx_pool, &[cmd.cmd_buf]) };
         //            let fence = self.fences.get_mut_ref(fence).unwrap();
         //            unsafe { self.device.destroy_fence(fence.raw, None) };
         //        }
@@ -2114,7 +2251,13 @@ impl Context {
 
         // Command pool
         unsafe {
-            self.device.destroy_command_pool(self.pool, None);
+            self.device.destroy_command_pool(self.gfx_pool, None);
+            if let Some(pool) = self.compute_pool {
+                self.device.destroy_command_pool(pool, None);
+            }
+            if let Some(pool) = self.transfer_pool {
+                self.device.destroy_command_pool(pool, None);
+            }
         }
 
         // Destroy allocator before tearing down device and instance
@@ -2222,7 +2365,7 @@ impl Context {
     ///   executing the list.
     /// - The context must still be alive.
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
-        unsafe { self.device.free_command_buffers(self.pool, &[list.cmd_buf]) };
+        unsafe { self.device.free_command_buffers(self.gfx_pool, &[list.cmd_buf]) };
         self.destroy_fence(list.fence);
     }
 
