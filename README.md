@@ -57,7 +57,9 @@ list.end_drawing()?;
 
 ### Resource Binding
 
-Dashi supports both the classic `BindGroup` pattern and a bindless `BindTable` API for descriptor indexing. The [`hello_triangle`](examples/hello_triangle.rs) example demonstrates `BindGroup` usage, while [`bindless_triangle`](examples/bindless_triangle.rs) shows how to build and bind resources with `BindTable`.
+Dashi supports both the classic `BindGroup` pattern and a bindless `BindTable` API for descriptor indexing. The [`hello_triangle`](examples/hello_triangle.rs) example demonstrates `BindGroup` usage, while [`bindless_triangle`](examples/bindless_triangle.rs) and [`hello_bindless`](examples/hello_bindless.rs) show how to build and bind resources with `BindTable`.
+
+Use a `BindGroup` when the number of resources is small and mostly static. Opt for a `BindTable` when you need to index many resources dynamically or update bindings frequently.
 
 ### Window Backends
 
