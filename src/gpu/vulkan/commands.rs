@@ -8,8 +8,9 @@ use crate::utils::Handle;
 use crate::{
     Attachment, BarrierPoint, BindGroup, BindTable, Buffer, CommandList, ComputePipeline,
     Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
-    IndexedIndirectCommand, IndirectCommand, Rect2D, SubpassContainer, Viewport,
+    IndexedIndirectCommand, IndirectCommand, Rect2D, Viewport,
 };
+use super::SubpassContainer;
 // Converts an Attachment's clear value into a Vulkan clear value
 impl Attachment {
     fn to_vk_clear_value(&self) -> vk::ClearValue {
