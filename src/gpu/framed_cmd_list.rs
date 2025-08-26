@@ -1,20 +1,22 @@
-use crate::{utils::Handle, CommandList, CommandListInfo, Context, Fence, SubmitInfo};
+use crate::{utils::Handle, CommandList, CommandListInfo, Context, Fence, SubmitInfo, QueueType};
 
 pub struct FramedCommandList {
     cmds: Vec<CommandList>,
     fences: Vec<Option<Handle<Fence>>>,
     ctx: *mut Context,
     curr: u16,
+    queue_type: QueueType,
 }
 
 impl FramedCommandList {
-    pub fn new(ctx: &mut Context, name: &str, frame_count: usize) -> Self {
+    pub fn new(ctx: &mut Context, name: &str, frame_count: usize, queue_type: QueueType) -> Self {
         let mut cmds = Vec::new();
         for _i in 0..frame_count {
             cmds.push(
                 ctx.begin_command_list(&CommandListInfo {
                     debug_name: name,
                     should_cleanup: false,
+                    queue_type,
                 })
                 .unwrap(),
             );
@@ -27,6 +29,7 @@ impl FramedCommandList {
             fences,
             curr: 0,
             ctx,
+            queue_type,
         }
     }
 
@@ -69,9 +72,16 @@ impl FramedCommandList {
     }
 
     pub fn submit(&mut self, info: &SubmitInfo) {
+        let submit_info = SubmitInfo {
+            queue_type: self.queue_type,
+            wait_sems: info.wait_sems,
+            wait_stages: info.wait_stages,
+            signal_sems: info.signal_sems,
+        };
+
         self.fences[self.curr as usize] = Some(unsafe {
             (*self.ctx)
-                .submit(&mut self.cmds[self.curr as usize], info)
+                .submit(&mut self.cmds[self.curr as usize], &submit_info)
                 .unwrap()
         });
 
@@ -162,7 +172,7 @@ mod tests {
         // create a headless context
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // 3 frames
-        let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3);
+        let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3, QueueType::Graphics);
 
         // do 10 cycles of append + submit
         for _ in 0..10 {
@@ -189,7 +199,7 @@ mod tests {
     fn record_and_record_enumerated_indices() {
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // choose 3 frames so we see at least two distinct indices
-        let mut fcl = FramedCommandList::new(&mut ctx, "enum", 3);
+        let mut fcl = FramedCommandList::new(&mut ctx, "enum", 3, QueueType::Graphics);
 
         let mut seen_plain = Vec::new();
         let mut seen_enum = Vec::new();
