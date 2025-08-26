@@ -5,7 +5,6 @@ pub use driver::types::{
     BindTableHandle, BufferHandle, IndexType, PipelineHandle, TextureHandle, UsageBits,
 };
 
-#[cfg(feature = "vulkan")]
 pub mod gpu;
 #[cfg(feature = "dx12")]
 pub mod gpu_dx12;
@@ -24,7 +23,6 @@ compile_error!(
 );
 
 
-#[cfg(feature = "vulkan")]
 pub use gpu::*;
 #[cfg(feature = "dx12")]
 #[allow(unused_imports)]
