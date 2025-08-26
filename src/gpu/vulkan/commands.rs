@@ -4,6 +4,7 @@ use ash::vk;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::{convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderPass};
+use crate::driver::command::CommandSink;
 use crate::utils::Handle;
 use crate::{
     Attachment, BarrierPoint, BindGroup, BindTable, Buffer, CommandList, ComputePipeline,
@@ -1197,3 +1198,129 @@ impl CommandList {
         Ok(rp.subpasses.get(&key).unwrap().clone())
     }
 }
+
+ impl CommandSink for CommandList {
+     fn begin_render_pass(&mut self, pass: &crate::driver::command::BeginRenderPass) {
+//        let mut attachments: Vec<Attachment> = Vec::new();
+//        for i in 0..pass.color_count as usize {
+//            let color = pass.colors[i];
+//            attachments.push(Attachment {
+//                img: color.handle,
+//                clear: crate::ClearValue::Color(color.clear),
+//            });
+//        }
+//        if pass.has_depth == 1 {
+//            attachments.push(Attachment {
+//                img: Handle::new(pass.depth.handle.index(), pass.depth.handle.version()),
+//                clear: crate::ClearValue::DepthStencil {
+//                    depth: pass.depth.clear,
+//                    stencil: 0,
+//                },
+//            });
+//        }
+//        let render_pass_begin = RenderPassBegin {
+//            render_pass: Handle::new(0, 0),
+//            viewport: crate::Viewport {
+//                area: crate::FRect2D {
+//                    x: 0.0,
+//                    y: 0.0,
+//                    w: 1024.0,
+//                    h: 768.0,
+//                },
+//                scissor: crate::Rect2D {
+//                    x: 0,
+//                    y: 0,
+//                    w: 1024,
+//                    h: 768,
+//                },
+//                min_depth: 0.0,
+//                max_depth: 1.0,
+//            },
+//            attachments: &attachments,
+//        };
+//        self.begin_render_pass(&render_pass_begin).unwrap();
+     }
+ 
+     fn end_render_pass(&mut self, pass: &crate::driver::command::EndRenderPass) {
+        unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
+        self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+        self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+        self.curr_rp = None;
+        self.curr_pipeline = None;
+     }
+ 
+     fn bind_pipeline(&mut self, cmd: &crate::driver::command::BindPipeline) {
+        let bind_pipeline = BindPipeline {
+            gfx: Some(Handle::new(cmd.pipeline.slot, cmd.pipeline.generation)),
+            ..Default::default()
+        };
+        self.cmd_bind_pipeline(bind_pipeline);
+     }
+ 
+     fn bind_table(&mut self, cmd: &crate::driver::command::BindTableCmd) {
+        let table = Handle::new(cmd.table.slot, cmd.table.generation);
+        let p = self
+            .ctx_ref()
+            .gfx_pipelines
+            .get_ref(self.curr_pipeline.unwrap())
+            .unwrap();
+        let p_layout = self
+            .ctx_ref()
+            .gfx_pipeline_layouts
+            .get_ref(p.layout)
+            .unwrap()
+            .layout;
+        self.bind_descriptor_set(vk::PipelineBindPoint::GRAPHICS, p_layout, Some(table), None, &[]);
+     }
+ 
+     fn draw(&mut self, cmd: &crate::driver::command::Draw) {
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_draw(self.cmd_buf, cmd.vertex_count, cmd.instance_count, 0, 0);
+            self.update_last_access(
+                vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            );
+        }
+     }
+ 
+     fn dispatch(&mut self, cmd: &crate::driver::command::Dispatch) {
+        unsafe {
+            self.ctx_ref().device.cmd_dispatch(self.cmd_buf, cmd.x, cmd.y, cmd.z);
+            self.update_last_access(
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::AccessFlags::SHADER_WRITE,
+            );
+        }
+     }
+ 
+     fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
+        let info = BufferCopy { src: cmd.src, dst: cmd.dst, src_offset: 0, dst_offset: 0, size: 0 };
+        self.copy_buffer(info);
+     }
+ 
+     fn copy_texture(&mut self, cmd: &crate::driver::command::CopyImage) {
+     }
+ 
+     fn texture_barrier(&mut self, cmd: &crate::driver::command::ImageBarrier) {
+//        let barrier = ImageBarrier { view: Handle::new(cmd.texture.index(), cmd.texture.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };
+//        self.image_barrier(barrier);
+     }
+ 
+     fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
+        // Buffer barriers are not directly supported in Vulkan, so we need to use a memory barrier
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]);
+        }
+     }
+ 
+     fn debug_marker_begin(&mut self, cmd: &crate::driver::command::DebugMarkerBegin) {
+        // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
+        unsafe { self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]) };
+     }
+
+    fn debug_marker_end(&mut self, cmd: &crate::driver::command::DebugMarkerEnd) {
+        todo!()
+    }
+ }

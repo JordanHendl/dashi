@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
+use crate::{Buffer, Image};
+
 use super::{
-    command::{BufferBarrier, TextureBarrier},
-    types::{Buffer, Texture, UsageBits, Handle},
+    command::{BufferBarrier, ImageBarrier},
+    types::{UsageBits, Handle},
 };
 
 use bytemuck::{Pod, Zeroable};
@@ -24,7 +26,7 @@ impl SubresourceRange {
 
 #[derive(Default)]
 pub struct StateTracker {
-    textures: HashMap<(Handle<Texture>, SubresourceRange), UsageBits>,
+    textures: HashMap<(Handle<Image>, SubresourceRange), UsageBits>,
     buffers: HashMap<Handle<Buffer>, UsageBits>,
 }
 
@@ -35,15 +37,15 @@ impl StateTracker {
 
     pub fn request_texture_state(
         &mut self,
-        texture: Handle<Texture>,
+        texture: Handle<Image>,
         range: SubresourceRange,
         usage: UsageBits,
-    ) -> Option<TextureBarrier> {
+    ) -> Option<ImageBarrier> {
         let key = (texture, range);
         let current = self.textures.get(&key).copied().unwrap_or_default();
         if current != usage {
             self.textures.insert(key, usage);
-            Some(TextureBarrier { texture, range })
+            Some(ImageBarrier { texture, range })
         } else {
             None
         }
@@ -113,7 +115,7 @@ mod tests {
     #[test]
     fn texture_state_changes() {
         let mut tracker = StateTracker::new();
-        let tex = Handle::<Texture>::new(1, 0);
+        let tex = Handle::<Image>::new(1, 0);
         let range = SubresourceRange::new(0, 1, 0, 1);
         assert!(tracker.request_texture_state(tex, range, UsageBits::SAMPLED).is_some());
         assert!(tracker.request_texture_state(tex, range, UsageBits::SAMPLED).is_none());

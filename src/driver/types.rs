@@ -5,9 +5,6 @@ pub use crate::utils::handle::Handle;
 pub struct Pipeline;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Buffer;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Texture;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

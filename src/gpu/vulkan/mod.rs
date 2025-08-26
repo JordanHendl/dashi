@@ -267,7 +267,6 @@ pub struct Context {
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
     pub(super) compute_pipelines: Pool<ComputePipeline>,
-    pub(super) cmds_to_release: Vec<(CommandList, Handle<Fence>)>,
 
     pub(super) gpu_timers: Vec<GpuTimer>,
     pub(super) timestamp_period: f32,
@@ -654,7 +653,6 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
-            cmds_to_release: Default::default(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
             headless: true,
@@ -757,7 +755,6 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
-            cmds_to_release: Default::default(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
             headless: false,
@@ -1092,13 +1089,6 @@ impl Context {
                 self.fences.get_ref(cmd.fence).unwrap().raw.clone(),
             )?
         };
-
-        for (cmd, fence) in self.cmds_to_release.clone() {
-            self.wait(fence.clone())?;
-            self.destroy_cmd_list(cmd);
-        }
-
-        self.cmds_to_release.clear();
 
         return Ok(cmd.fence.clone());
     }
@@ -1622,19 +1612,6 @@ impl Context {
                 unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
             }
         }
-
-        // Drain and destroy any pending command lists
-        //        for (cmd, fence) in self.cmds_to_release.drain(..) {
-        //            let _ = self.wait(fence.clone());
-        //            unsafe { self.device.free_command_buffers(self.gfx_pool, &[cmd.cmd_buf]) };
-        //            let fence = self.fences.get_mut_ref(fence).unwrap();
-        //            unsafe { self.device.destroy_fence(fence.raw, None) };
-        //        }
-
-        //        // Bind groups
-        //        self.bind_groups.for_each_occupied_mut(|bg| unsafe {
-        //            self.device.free_descriptor_sets(bg.set, &[bg.set]).ok();
-        //        });
 
         // Bind group layouts
         self.bind_group_layouts
@@ -2881,19 +2858,6 @@ impl Context {
                 dynamic_states,
             })
             .unwrap());
-    }
-
-    /// Schedule a command list to be released after the next submission waits
-    /// on `fence`.
-    ///
-    /// The list is destroyed once the provided fence signals during a
-    /// subsequent [`Self::submit`].
-    ///
-    /// # Requirements
-    /// - `fence` must correspond to the work that uses `list`; the list is
-    ///   kept alive until that fence signals.
-    pub fn release_list_on_next_submit(&mut self, fence: Handle<Fence>, list: CommandList) {
-        self.cmds_to_release.push((list, fence));
     }
 
     /// Builds a compute pipeline from an existing layout.

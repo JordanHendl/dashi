@@ -1,8 +1,10 @@
 use bytemuck::{bytes_of, from_bytes, Pod, Zeroable};
 
+use crate::{Image, Buffer};
+
 use super::{
     state::{StateTracker, SubresourceRange},
-    types::{BindTable as BindTableRes, Buffer, Pipeline, Texture, UsageBits, Handle},
+    types::{BindTable as BindTableRes, Pipeline, UsageBits, Handle},
 };
 
 //===----------------------------------------------------------------------===//
@@ -19,8 +21,8 @@ pub enum Op {
     Draw = 4,
     Dispatch = 5,
     CopyBuffer = 6,
-    CopyTexture = 7,
-    TextureBarrier = 8,
+    CopyImage = 7,
+    ImageBarrier = 8,
     BufferBarrier = 9,
     DebugMarkerBegin = 10,
     DebugMarkerEnd = 11,
@@ -50,7 +52,7 @@ unsafe impl Pod for StoreOp {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq)]
 pub struct ColorAttachment {
-    pub handle: Handle<Texture>,
+    pub handle: Handle<Image>,
     pub range: SubresourceRange,
     pub clear: [f32; 4],
     pub load: LoadOp,
@@ -61,7 +63,7 @@ pub struct ColorAttachment {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq)]
 pub struct DepthAttachment {
-    pub handle: Handle<Texture>,
+    pub handle: Handle<Image>,
     pub range: SubresourceRange,
     pub clear: f32,
     pub load: LoadOp,
@@ -123,15 +125,15 @@ pub struct CopyBuffer {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
-pub struct CopyTexture {
-    pub src: Handle<Texture>,
-    pub dst: Handle<Texture>,
+pub struct CopyImage {
+    pub src: Handle<Image>,
+    pub dst: Handle<Image>,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
-pub struct TextureBarrier {
-    pub texture: Handle<Texture>,
+pub struct ImageBarrier {
+    pub texture: Handle<Image>,
     pub range: SubresourceRange,
 }
 
@@ -198,7 +200,7 @@ impl CommandEncoder {
             if let Some(bar) =
                 self.state.request_texture_state(att.handle, att.range, UsageBits::RT_WRITE)
             {
-                self.push(Op::TextureBarrier, &bar);
+                self.push(Op::ImageBarrier, &bar);
             }
             payload.colors[i] = *att;
         }
@@ -206,7 +208,7 @@ impl CommandEncoder {
             if let Some(bar) =
                 self.state.request_texture_state(depth.handle, depth.range, UsageBits::DEPTH_WRITE)
             {
-                self.push(Op::TextureBarrier, &bar);
+                self.push(Op::ImageBarrier, &bar);
             }
             payload.depth = depth;
         }
@@ -257,18 +259,18 @@ impl CommandEncoder {
     /// Copy data between textures, emitting required barriers.
     pub fn copy_texture(
         &mut self,
-        src: Handle<Texture>,
-        dst: Handle<Texture>,
+        src: Handle<Image>,
+        dst: Handle<Image>,
         range: SubresourceRange,
     ) {
         if let Some(bar) = self.state.request_texture_state(src, range, UsageBits::COPY_SRC) {
-            self.push(Op::TextureBarrier, &bar);
+            self.push(Op::ImageBarrier, &bar);
         }
         if let Some(bar) = self.state.request_texture_state(dst, range, UsageBits::COPY_DST) {
-            self.push(Op::TextureBarrier, &bar);
+            self.push(Op::ImageBarrier, &bar);
         }
-        let payload = CopyTexture { src, dst };
-        self.push(Op::CopyTexture, &payload);
+        let payload = CopyImage { src, dst };
+        self.push(Op::CopyImage, &payload);
     }
 
     /// Begin a debug marker region.
@@ -292,8 +294,8 @@ impl CommandEncoder {
                 Op::Draw => sink.draw(cmd.payload()),
                 Op::Dispatch => sink.dispatch(cmd.payload()),
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
-                Op::CopyTexture => sink.copy_texture(cmd.payload()),
-                Op::TextureBarrier => sink.texture_barrier(cmd.payload()),
+                Op::CopyImage => sink.copy_texture(cmd.payload()),
+                Op::ImageBarrier => sink.texture_barrier(cmd.payload()),
                 Op::BufferBarrier => sink.buffer_barrier(cmd.payload()),
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload()),
                 Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload()),
@@ -361,8 +363,8 @@ impl Op {
             x if x == Op::Draw as u16 => Some(Op::Draw),
             x if x == Op::Dispatch as u16 => Some(Op::Dispatch),
             x if x == Op::CopyBuffer as u16 => Some(Op::CopyBuffer),
-            x if x == Op::CopyTexture as u16 => Some(Op::CopyTexture),
-            x if x == Op::TextureBarrier as u16 => Some(Op::TextureBarrier),
+            x if x == Op::CopyImage as u16 => Some(Op::CopyImage),
+            x if x == Op::ImageBarrier as u16 => Some(Op::ImageBarrier),
             x if x == Op::BufferBarrier as u16 => Some(Op::BufferBarrier),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
@@ -379,8 +381,8 @@ pub trait CommandSink {
     fn draw(&mut self, cmd: &Draw);
     fn dispatch(&mut self, cmd: &Dispatch);
     fn copy_buffer(&mut self, cmd: &CopyBuffer);
-    fn copy_texture(&mut self, cmd: &CopyTexture);
-    fn texture_barrier(&mut self, cmd: &TextureBarrier);
+    fn copy_texture(&mut self, cmd: &CopyImage);
+    fn texture_barrier(&mut self, cmd: &ImageBarrier);
     fn buffer_barrier(&mut self, cmd: &BufferBarrier);
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);
@@ -392,12 +394,14 @@ pub trait CommandSink {
 
 #[cfg(test)]
 mod tests {
+    use crate::Image;
+
     use super::*;
 
     #[test]
     fn barriers_are_emitted() {
         let mut enc = CommandEncoder::new();
-        let tex = Handle::<Texture>::new(1, 0);
+        let tex = Handle::<Image>::new(1, 0);
         let range = SubresourceRange::new(0, 1, 0, 1);
         let color = ColorAttachment {
             handle: tex,
@@ -410,7 +414,7 @@ mod tests {
         enc.begin_render_pass(RenderPassDesc { colors: &[color], depth: None });
         enc.end_render_pass();
         let cmds: Vec<_> = enc.iter().collect();
-        assert_eq!(cmds[0].op, Op::TextureBarrier);
+        assert_eq!(cmds[0].op, Op::ImageBarrier);
         assert_eq!(cmds[1].op, Op::BeginRenderPass);
         assert_eq!(cmds[2].op, Op::EndRenderPass);
     }
@@ -436,7 +440,7 @@ mod tests {
         let draw = Draw { vertex_count: 3, instance_count: 1 };
         let dispatch = Dispatch { x: 1, y: 2, z: 3 };
         let copy = CopyBuffer { src: Handle::<Buffer>::new(4, 0), dst: Handle::<Buffer>::new(5, 0) };
-        let tex_barrier = TextureBarrier { texture: Handle::<Texture>::new(7, 0), range: SubresourceRange::new(0,1,0,1) };
+        let tex_barrier = ImageBarrier { texture: Handle::<Image>::new(7, 0), range: SubresourceRange::new(0,1,0,1) };
         let buf_barrier = BufferBarrier { buffer: Handle::<Buffer>::new(9, 0) };
         let marker_begin = DebugMarkerBegin {};
         let marker_end = DebugMarkerEnd {};
@@ -447,7 +451,7 @@ mod tests {
         enc.push(Op::Draw, &draw);
         enc.push(Op::Dispatch, &dispatch);
         enc.push(Op::CopyBuffer, &copy);
-        enc.push(Op::TextureBarrier, &tex_barrier);
+        enc.push(Op::ImageBarrier, &tex_barrier);
         enc.push(Op::BufferBarrier, &buf_barrier);
         enc.push(Op::DebugMarkerBegin, &marker_begin);
         enc.push(Op::DebugMarkerEnd, &marker_end);
@@ -479,8 +483,8 @@ mod tests {
         assert_eq!(*cmd6.payload::<CopyBuffer>(), copy);
 
         let cmd7 = iter.next().unwrap();
-        assert_eq!(cmd7.op, Op::TextureBarrier);
-        assert_eq!(*cmd7.payload::<TextureBarrier>(), tex_barrier);
+        assert_eq!(cmd7.op, Op::ImageBarrier);
+        assert_eq!(*cmd7.payload::<ImageBarrier>(), tex_barrier);
 
         let cmd8 = iter.next().unwrap();
         assert_eq!(cmd8.op, Op::BufferBarrier);
