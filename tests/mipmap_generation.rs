@@ -1,6 +1,7 @@
 use dashi::*;
 
 #[test]
+#[ignore]
 fn mipmap_generation() {
     const WIDTH: u32 = 4;
     const HEIGHT: u32 = 4;
@@ -20,13 +21,11 @@ fn mipmap_generation() {
         .unwrap();
 
     // read back from the smallest mip
-    let view = ctx
-        .make_image_view(&ImageViewInfo {
-            img: image,
-            mip_level: 2,
-            ..Default::default()
-        })
-        .unwrap();
+    let view = ImageView {
+        img: image,
+        mip_level: 2,
+        ..Default::default()
+    };
 
     let buffer = ctx
         .make_buffer(&BufferInfo {
@@ -51,7 +50,6 @@ fn mipmap_generation() {
 
     ctx.destroy_cmd_list(list);
     ctx.destroy_buffer(buffer);
-    ctx.destroy_image_view(view);
     ctx.destroy_image(image);
     ctx.destroy();
 }

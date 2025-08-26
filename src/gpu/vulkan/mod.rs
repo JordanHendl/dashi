@@ -5,6 +5,7 @@ use crate::utils::{
 use ash::*;
 pub use error::*;
 use std::{
+    collections::HashMap,
     ffi::{c_char, c_void, CStr, CString},
     mem::ManuallyDrop,
 };
@@ -257,7 +258,8 @@ pub struct Context {
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
-    pub(super) image_views: Pool<ImageView>,
+    pub(super) image_views: Pool<VkImageView>,
+    pub(super) image_view_cache: HashMap<ImageView, Handle<VkImageView>>,
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
     pub(super) bind_groups: Pool<BindGroup>,
@@ -645,6 +647,7 @@ impl Context {
             fences: Default::default(),
             images: Default::default(),
             image_views: Default::default(),
+            image_view_cache: HashMap::new(),
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
@@ -748,6 +751,7 @@ impl Context {
             fences: Default::default(),
             images: Default::default(),
             image_views: Default::default(),
+            image_view_cache: HashMap::new(),
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
@@ -885,29 +889,23 @@ impl Context {
             ..Default::default()
         });
     }
-    fn oneshot_transition_image(&mut self, img: Handle<ImageView>, layout: vk::ImageLayout) {
+    fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
+        let view_handle = self.get_or_create_image_view(&img).unwrap();
         let mut list = self
             .begin_command_list(&CommandListInfo {
                 debug_name: "",
                 ..Default::default()
             })
             .unwrap();
-        self.transition_image(list.cmd_buf, img, layout);
+        self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
     }
 
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
-        let tmp_view = self
-            .make_image_view(&ImageViewInfo {
-                debug_name: "oneshot_view",
-                img: img,
-                layer: 0,
-                mip_level: 0,
-                ..Default::default()
-            })
-            .unwrap();
+        let tmp_view = ImageView { img, layer: 0, mip_level: 0, aspect: Default::default() };
+        let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
         let mut list = self
             .begin_command_list(&CommandListInfo {
@@ -915,7 +913,7 @@ impl Context {
                 ..Default::default()
             })
             .unwrap();
-        self.transition_image(list.cmd_buf, tmp_view, layout);
+        self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
@@ -924,7 +922,7 @@ impl Context {
     fn transition_image_stages(
         &mut self,
         cmd: vk::CommandBuffer,
-        img: Handle<ImageView>,
+        img: Handle<VkImageView>,
         layout: vk::ImageLayout,
         src: vk::PipelineStageFlags,
         dst: vk::PipelineStageFlags,
@@ -1032,7 +1030,7 @@ impl Context {
     fn transition_image(
         &mut self,
         cmd: vk::CommandBuffer,
-        img: Handle<ImageView>,
+        img: Handle<VkImageView>,
         layout: vk::ImageLayout,
     ) {
         self.transition_image_stages(
@@ -1140,11 +1138,16 @@ impl Context {
         }
     }
 
-    pub fn make_image_view(&mut self, info: &ImageViewInfo) -> Result<Handle<ImageView>, GPUError> {
+    pub(crate) fn get_or_create_image_view(
+        &mut self,
+        info: &ImageView,
+    ) -> Result<Handle<VkImageView>, GPUError> {
+        if let Some(h) = self.image_view_cache.get(info) {
+            return Ok(*h);
+        }
+
         let img = self.images.get_ref(info.img).unwrap();
-
         let aspect: vk::ImageAspectFlags = info.aspect.into();
-
         let sub_range = vk::ImageSubresourceRange::builder()
             .base_array_layer(info.layer)
             .layer_count(1)
@@ -1165,16 +1168,17 @@ impl Context {
             )?
         };
 
-        self.set_name(view, info.debug_name, vk::ObjectType::IMAGE_VIEW);
-
-        match self.image_views.insert(ImageView {
+        let handle = match self.image_views.insert(VkImageView {
             view,
             range: sub_range,
             img: info.img,
         }) {
-            Some(h) => return Ok(h),
+            Some(h) => h,
             None => return Err(GPUError::SlotError()),
-        }
+        };
+
+        self.image_view_cache.insert(*info, handle);
+        Ok(handle)
     }
 
     pub fn make_image(&mut self, info: &ImageInfo) -> Result<Handle<Image>, GPUError> {
@@ -1317,31 +1321,31 @@ impl Context {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<(), GPUError> {
-        let tmp_view = self.make_image_view(&ImageViewInfo {
-            debug_name: "view",
+        let tmp_view = ImageView {
             img: image,
             layer: 0,
             mip_level: 0,
             aspect: match info.format {
                 Format::R8Sint
-                | Format::R8Uint
-                | Format::RGB8
-                | Format::BGRA8
-                | Format::BGRA8Unorm
-                | Format::RGBA8
-                | Format::RGBA32F => AspectMask::Color,
+                    | Format::R8Uint
+                    | Format::RGB8
+                    | Format::BGRA8
+                    | Format::BGRA8Unorm
+                    | Format::RGBA8
+                    | Format::RGBA32F => AspectMask::Color,
                 Format::D24S8 => AspectMask::DepthStencil,
                 _ => AspectMask::Color,
             },
-        })?;
+        };
+        let tmp_view_handle = self.get_or_create_image_view(&tmp_view)?;
 
         let mut list = self.begin_command_list(&Default::default())?;
         if info.initial_data.is_none() {
-            self.transition_image(list.cmd_buf, tmp_view, vk::ImageLayout::GENERAL);
+            self.transition_image(list.cmd_buf, tmp_view_handle, vk::ImageLayout::GENERAL);
             let fence = self.submit(&mut list, &Default::default())?;
             self.wait(fence)?;
             self.destroy_cmd_list(list);
-            self.destroy_image_view(tmp_view);
+            self.destroy_image_view(tmp_view_handle);
             return Ok(());
         }
 
@@ -1362,7 +1366,7 @@ impl Context {
         // 1) barrier: UNDEFINED -> TRANSFER_DST_OPTIMAL
         self.transition_image_stages(
             list.cmd_buf,
-            tmp_view,
+            tmp_view_handle,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::PipelineStageFlags::BOTTOM_OF_PIPE,
             vk::PipelineStageFlags::TRANSFER,
@@ -1379,7 +1383,7 @@ impl Context {
         // 3) barrier: TRANSFER_DST_OPTIMAL -> GENERAL
         self.transition_image_stages(
             list.cmd_buf,
-            tmp_view,
+            tmp_view_handle,
             vk::ImageLayout::GENERAL,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
@@ -1389,33 +1393,31 @@ impl Context {
 
         if info.mip_levels > 1 {
             for i in 0..info.mip_levels - 1 {
-                let src_view = self
-                    .make_image_view(&ImageViewInfo {
-                        debug_name: "mip_src",
-                        img: image,
-                        layer: 0,
-                        mip_level: i,
-                        aspect: if info.format == Format::D24S8 {
-                            AspectMask::DepthStencil
-                        } else {
-                            AspectMask::Color
-                        },
-                    })?;
-                let dst_view = self
-                    .make_image_view(&ImageViewInfo {
-                        debug_name: "mip_dst",
-                        img: image,
-                        layer: 0,
-                        mip_level: i + 1,
-                        aspect: if info.format == Format::D24S8 {
-                            AspectMask::DepthStencil
-                        } else {
-                            AspectMask::Color
-                        },
-                    })?;
+                let src_view = ImageView {
+                    img: image,
+                    layer: 0,
+                    mip_level: i,
+                    aspect: if info.format == Format::D24S8 {
+                        AspectMask::DepthStencil
+                    } else {
+                        AspectMask::Color
+                    },
+                };
+                let src_view_handle = self.get_or_create_image_view(&src_view)?;
+                let dst_view = ImageView {
+                    img: image,
+                    layer: 0,
+                    mip_level: i + 1,
+                    aspect: if info.format == Format::D24S8 {
+                        AspectMask::DepthStencil
+                    } else {
+                        AspectMask::Color
+                    },
+                };
+                let dst_view_handle = self.get_or_create_image_view(&dst_view)?;
 
-                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-                self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+                self.transition_image(list.cmd_buf, src_view_handle, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
 
                 list.append(Command::Blit(ImageBlit {
                     src: src_view,
@@ -1424,15 +1426,15 @@ impl Context {
                     ..Default::default()
                 }));
 
-                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::GENERAL);
+                self.transition_image(list.cmd_buf, src_view_handle, vk::ImageLayout::GENERAL);
                 if i + 1 < info.mip_levels - 1 {
-                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                    self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
                 } else {
-                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::GENERAL);
+                    self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::GENERAL);
                 }
 
-                self.destroy_image_view(src_view);
-                self.destroy_image_view(dst_view);
+                self.destroy_image_view(src_view_handle);
+                self.destroy_image_view(dst_view_handle);
             }
         }
 
@@ -1440,7 +1442,7 @@ impl Context {
         self.wait(fence)?;
         self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
-        self.destroy_image_view(tmp_view);
+        self.destroy_image_view(tmp_view_handle);
         Ok(())
     }
 
@@ -1650,6 +1652,7 @@ impl Context {
         self.image_views.for_each_occupied_mut(|view| {
             unsafe { self.device.destroy_image_view(view.view, None) };
         });
+        self.image_view_cache.clear();
 
         // Images
         self.images.for_each_occupied_mut(|img| {
@@ -1781,9 +1784,11 @@ impl Context {
     /// - Ensure no GPU work references the image view.
     /// - Destroy views before destroying the underlying image.
     /// - The context must still be alive.
-    pub fn destroy_image_view(&mut self, handle: Handle<ImageView>) {
-        let img = self.image_views.get_mut_ref(handle).unwrap();
-        unsafe { self.device.destroy_image_view(img.view, None) };
+    pub fn destroy_image_view(&mut self, handle: Handle<VkImageView>) {
+        if let Some(img) = self.image_views.get_mut_ref(handle) {
+            unsafe { self.device.destroy_image_view(img.view, None) };
+        }
+        self.image_view_cache.retain(|_, v| *v != handle);
         self.image_views.release(handle);
     }
 
@@ -1794,6 +1799,21 @@ impl Context {
     /// - Ensure the GPU has finished using the image.
     /// - The context must still be alive.
     pub fn destroy_image(&mut self, handle: Handle<Image>) {
+        // Destroy any cached views associated with this image
+        let to_destroy: Vec<Handle<VkImageView>> = self
+            .image_view_cache
+            .iter()
+            .filter_map(|(info, view_handle)| if info.img == handle { Some(*view_handle) } else { None })
+            .collect();
+        for view_handle in &to_destroy {
+            if let Some(view) = self.image_views.get_ref(*view_handle) {
+                unsafe { self.device.destroy_image_view(view.view, None) };
+            }
+            self.image_views.release(*view_handle);
+        }
+        self.image_view_cache
+            .retain(|_, view_handle| !to_destroy.contains(view_handle));
+
         let img = self.images.get_mut_ref(handle).unwrap();
         unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
         self.images.release(handle);
@@ -2055,7 +2075,7 @@ impl Context {
     /// - Swapchain acquisition order is respected.
     /// - XR session state is valid. (If using OpenXR)
     /// - Synchronization primitives are handled during presentation.
-    pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) {
+    pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<(), GPUError> {
         let bg = self.bind_groups.get_ref(info.bg).unwrap();
         let descriptor_set = bg.set;
 
@@ -2087,8 +2107,9 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::SampledImage(image_handle, sampler) => {
-                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                    ShaderResource::SampledImage(image_view, sampler) => {
+                        let handle = self.get_or_create_image_view(image_view)?;
+                        let image = self.image_views.get_ref(handle).unwrap();
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                         let image_info = vk::DescriptorImageInfo::builder()
@@ -2171,7 +2192,6 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => todo!(),
-                    ShaderResource::SampledImage2(_) => todo!(),
                 }
             }
         }
@@ -2180,10 +2200,12 @@ impl Context {
             self.device
                 .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
+
+        Ok(())
     }
 
     /// Updates an existing bind table with new resource bindings.
-    pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) {
+    pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) -> Result<(), GPUError> {
         let table = self.bind_tables.get_ref(info.table).unwrap();
         let descriptor_set = table.set;
 
@@ -2214,8 +2236,9 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::SampledImage(image_handle, sampler) => {
-                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                    ShaderResource::SampledImage(image_view, sampler) => {
+                        let handle = self.get_or_create_image_view(image_view)?;
+                        let image = self.image_views.get_ref(handle).unwrap();
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                         let image_info = vk::DescriptorImageInfo::builder()
@@ -2298,7 +2321,6 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => todo!(),
-                    ShaderResource::SampledImage2(_) => todo!(),
                 }
             }
         }
@@ -2307,6 +2329,8 @@ impl Context {
             self.device
                 .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
+
+        Ok(())
     }
 
     /// Creates a bind group using indexed resources.
@@ -2350,7 +2374,7 @@ impl Context {
         self.update_bind_group(&BindGroupUpdateInfo {
             bg,
             bindings: info.bindings,
-        });
+        })?;
 
         Ok(bg)
     }
@@ -2409,8 +2433,9 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
-                ShaderResource::SampledImage(image_handle, sampler) => {
-                    let image = self.image_views.get_ref(*image_handle).unwrap();
+                ShaderResource::SampledImage(image_view, sampler) => {
+                    let handle = self.get_or_create_image_view(image_view)?;
+                    let image = self.image_views.get_ref(handle).unwrap();
                     let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                     let image_info = vk::DescriptorImageInfo::builder()
@@ -2491,7 +2516,6 @@ impl Context {
                     write_descriptor_sets.push(write_descriptor_set);
                 }
                 ShaderResource::ConstBuffer(_) => todo!(),
-                ShaderResource::SampledImage2(_) => todo!(),
             }
         }
 
@@ -2536,7 +2560,7 @@ impl Context {
         self.update_bind_table(&BindTableUpdateInfo {
             table,
             bindings: info.bindings,
-        });
+        })?;
 
         Ok(table)
     }
@@ -2722,8 +2746,9 @@ impl Context {
         let mut height = u32::MAX;
 
         for (img_view, fmt) in info.attachments.iter().zip(attachment_formats.iter()) {
+            let handle = self.get_or_create_image_view(img_view)?;
             let (image_format, image_dim, vk_view) = {
-                let view = self.image_views.get_ref(*img_view).unwrap();
+                let view = self.image_views.get_ref(handle).unwrap();
                 let image = self.images.get_ref(view.img).unwrap();
                 (image.format, image.dim, view.view)
             };

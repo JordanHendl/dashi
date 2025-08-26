@@ -112,9 +112,7 @@ fn main() {
             ..Default::default()
         })
         .unwrap();
-    let fb_view = ctx
-        .make_image_view(&ImageViewInfo { img: fb, ..Default::default() })
-        .unwrap();
+    let fb_view = ImageView { img: fb, ..Default::default() };
 
     let bg_layout = ctx
         .make_bind_group_layout(&BindGroupLayoutInfo {

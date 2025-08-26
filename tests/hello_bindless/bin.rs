@@ -78,7 +78,8 @@ fn main() {
                 resource: ShaderResource::Dynamic(&allocator),
             }],
         }],
-    });
+    })
+    .unwrap();
 
     // Bind the table in a command list and dispatch.
     let mut list = ctx.begin_command_list(&Default::default()).unwrap();

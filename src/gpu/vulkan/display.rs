@@ -2,8 +2,8 @@ use crate::utils::Handle;
 use ash::vk;
 
 use super::{
-    Context, DisplayInfo, Fence, GPUError, Image, ImageView, ImageViewInfo, Semaphore,
-    WindowBuffering, WindowInfo,
+    Context, DisplayInfo, Fence, GPUError, Image, ImageView, Semaphore, WindowBuffering,
+    WindowInfo,
 };
 
 #[cfg(feature = "dashi-openxr")]
@@ -33,7 +33,7 @@ pub struct Display {
     #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) images: Vec<Handle<Image>>,
     #[cfg(not(feature = "dashi-openxr"))]
-    pub(crate) views: Vec<Handle<ImageView>>,
+    pub(crate) views: Vec<vk::ImageView>,
     #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) loader: ash::extensions::khr::Surface,
     #[cfg(not(feature = "dashi-openxr"))]
@@ -138,8 +138,8 @@ impl Context {
             self.images.release(*img);
         }
 
-        for img in &dsp.views {
-            self.destroy_image_view(*img);
+        for view in dsp.views {
+            unsafe { self.device.destroy_image_view(view, None) };
         }
         unsafe { dsp.sc_loader.destroy_swapchain(dsp.swapchain, None) };
         unsafe { dsp.loader.destroy_surface(dsp.surface, None) };
@@ -292,10 +292,11 @@ impl Context {
         // Now, we need to make the images!
         let images = unsafe { swap_loader.get_swapchain_images(swapchain)? };
         let mut handles: Vec<Handle<Image>> = Vec::with_capacity(images.len() as usize);
-        let mut view_handles: Vec<Handle<ImageView>> = Vec::with_capacity(images.len() as usize);
+        let mut view_handles: Vec<vk::ImageView> = Vec::with_capacity(images.len() as usize);
         for img in images {
+            let raw_img = img;
             match self.images.insert(Image {
-                img,
+                img: raw_img,
                 alloc: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
                 layouts: vec![vk::ImageLayout::UNDEFINED],
                 sub_layers: vk::ImageSubresourceLayers::builder()
@@ -312,13 +313,24 @@ impl Context {
                         handle,
                         vk::ImageLayout::PRESENT_SRC_KHR,
                     );
-                    let h = self.make_image_view(&ImageViewInfo {
-                        debug_name: &info.window.title,
-                        img: handle,
-                        layer: 0,
-                        mip_level: 0,
-                        ..Default::default()
-                    })?;
+                    let sub_range = vk::ImageSubresourceRange::builder()
+                        .base_array_layer(0)
+                        .layer_count(1)
+                        .base_mip_level(0)
+                        .level_count(1)
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .build();
+                    let h = unsafe {
+                        self.device.create_image_view(
+                            &vk::ImageViewCreateInfo::builder()
+                                .image(raw_img)
+                                .format(wanted_format)
+                                .subresource_range(sub_range)
+                                .view_type(vk::ImageViewType::TYPE_2D)
+                                .build(),
+                            None,
+                        )?
+                    };
 
                     view_handles.push(h);
                     handles.push(handle)
@@ -395,7 +407,7 @@ impl Context {
     pub fn acquire_new_image(
         &mut self,
         dsp: &mut Display,
-    ) -> Result<(Handle<ImageView>, Handle<Semaphore>, u32, bool), GPUError> {
+    ) -> Result<(ImageView, Handle<Semaphore>, u32, bool), GPUError> {
         let signal_sem_handle = dsp.semaphores[dsp.frame_idx as usize].clone();
         let fence = dsp.fences[dsp.frame_idx as usize];
 
@@ -420,7 +432,8 @@ impl Context {
         }?;
 
         dsp.frame_idx = res.0;
-        Ok((dsp.views[res.0 as usize], signal_sem_handle, res.0, res.1))
+        let view = ImageView { img: dsp.images[res.0 as usize], layer: 0, mip_level: 0, aspect: Default::default() };
+        Ok((view, signal_sem_handle, res.0, res.1))
     }
 
     #[cfg(not(feature = "dashi-openxr"))]

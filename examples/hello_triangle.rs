@@ -123,12 +123,7 @@ fn main() {
         })
         .unwrap();
 
-    let fb_view = ctx
-        .make_image_view(&ImageViewInfo {
-            img: fb,
-            ..Default::default()
-        })
-        .unwrap();
+    let fb_view = ImageView { img: fb, ..Default::default() };
 
     // Make the bind group layout. This describes the bindings into a shader.
     let bg_layout = ctx
