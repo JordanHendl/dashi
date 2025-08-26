@@ -1,9 +1,7 @@
 pub mod utils;
 pub mod driver;
 
-pub use driver::types::{
-    BindTableHandle, BufferHandle, IndexType, PipelineHandle, TextureHandle, UsageBits,
-};
+pub use driver::types::{Handle, IndexType, UsageBits};
 
 pub mod gpu;
 #[cfg(feature = "dx12")]

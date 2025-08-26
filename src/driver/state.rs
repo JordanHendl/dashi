@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
 use super::{
-    ir::{BufferBarrier, TextureBarrier},
-    types::{BufferHandle, TextureHandle, UsageBits},
+    command::{BufferBarrier, TextureBarrier},
+    types::{Buffer, Texture, UsageBits, Handle},
 };
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Pod, Zeroable)]
 pub struct SubresourceRange {
     pub base_mip: u32,
     pub level_count: u32,
@@ -21,8 +24,8 @@ impl SubresourceRange {
 
 #[derive(Default)]
 pub struct StateTracker {
-    textures: HashMap<(TextureHandle, SubresourceRange), UsageBits>,
-    buffers: HashMap<BufferHandle, UsageBits>,
+    textures: HashMap<(Handle<Texture>, SubresourceRange), UsageBits>,
+    buffers: HashMap<Handle<Buffer>, UsageBits>,
 }
 
 impl StateTracker {
@@ -32,7 +35,7 @@ impl StateTracker {
 
     pub fn request_texture_state(
         &mut self,
-        texture: TextureHandle,
+        texture: Handle<Texture>,
         range: SubresourceRange,
         usage: UsageBits,
     ) -> Option<TextureBarrier> {
@@ -40,7 +43,7 @@ impl StateTracker {
         let current = self.textures.get(&key).copied().unwrap_or_default();
         if current != usage {
             self.textures.insert(key, usage);
-            Some(TextureBarrier { texture_id: texture.0 })
+            Some(TextureBarrier { texture, range })
         } else {
             None
         }
@@ -48,13 +51,13 @@ impl StateTracker {
 
     pub fn request_buffer_state(
         &mut self,
-        buffer: BufferHandle,
+        buffer: Handle<Buffer>,
         usage: UsageBits,
     ) -> Option<BufferBarrier> {
         let current = self.buffers.get(&buffer).copied().unwrap_or_default();
         if current != usage {
             self.buffers.insert(buffer, usage);
-            Some(BufferBarrier { buffer_id: buffer.0 })
+            Some(BufferBarrier { buffer })
         } else {
             None
         }
@@ -110,7 +113,7 @@ mod tests {
     #[test]
     fn texture_state_changes() {
         let mut tracker = StateTracker::new();
-        let tex = TextureHandle(1);
+        let tex = Handle::<Texture>::new(1, 0);
         let range = SubresourceRange::new(0, 1, 0, 1);
         assert!(tracker.request_texture_state(tex, range, UsageBits::SAMPLED).is_some());
         assert!(tracker.request_texture_state(tex, range, UsageBits::SAMPLED).is_none());
@@ -120,7 +123,7 @@ mod tests {
     #[test]
     fn buffer_state_changes() {
         let mut tracker = StateTracker::new();
-        let buf = BufferHandle(1);
+        let buf = Handle::<Buffer>::new(1, 0);
         assert!(tracker.request_buffer_state(buf, UsageBits::COPY_SRC).is_some());
         assert!(tracker.request_buffer_state(buf, UsageBits::COPY_SRC).is_none());
         assert!(tracker.request_buffer_state(buf, UsageBits::COPY_DST).is_some());

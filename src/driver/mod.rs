@@ -1,4 +1,3 @@
-pub mod ir;
+pub mod command;
 pub mod types;
 pub mod state;
-pub mod encoder;

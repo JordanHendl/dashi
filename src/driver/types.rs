@@ -1,20 +1,17 @@
 use bitflags::bitflags;
+pub use crate::utils::handle::Handle;
 
-#[repr(transparent)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct PipelineHandle(pub u32);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Pipeline;
 
-#[repr(transparent)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct BufferHandle(pub u32);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Buffer;
 
-#[repr(transparent)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct TextureHandle(pub u32);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct Texture;
 
-#[repr(transparent)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct BindTableHandle(pub u32);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct BindTable;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Format {
