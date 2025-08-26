@@ -5,7 +5,6 @@ use crate::utils::{
 use ash::*;
 pub use error::*;
 use std::{
-    collections::HashMap,
     ffi::{c_char, c_void, CStr, CString},
     mem::ManuallyDrop,
 };
@@ -62,16 +61,16 @@ unsafe extern "system" fn vulkan_debug_callback(
 }
 
 #[derive(Clone, Default)]
-pub(super) struct SubpassContainer {
-    pub(super) fb: vk::Framebuffer,
-    pub(super) clear_values: Vec<vk::ClearValue>,
-}
-
-#[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) viewport: Viewport,
-    pub(super) subpasses: HashMap<u64, SubpassContainer>,
+    pub(super) attachment_formats: Vec<Format>,
+}
+
+#[derive(Clone, Default)]
+pub struct RenderTarget {
+    pub(super) fb: vk::Framebuffer,
+    pub(super) render_pass: Handle<RenderPass>,
 }
 
 #[allow(dead_code)]
@@ -254,6 +253,7 @@ pub struct Context {
     pub(super) transfer_queue: Option<Queue>,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
+    pub(super) render_targets: Pool<RenderTarget>,
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
@@ -640,6 +640,7 @@ impl Context {
 
             buffers: Default::default(),
             render_passes: Default::default(),
+            render_targets: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
@@ -742,6 +743,7 @@ impl Context {
 
             buffers: Default::default(),
             render_passes: Default::default(),
+            render_targets: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
@@ -1661,11 +1663,13 @@ impl Context {
             }
         });
 
+        // Render targets
+        self.render_targets.for_each_occupied_mut(|rt| {
+            unsafe { self.device.destroy_framebuffer(rt.fb, None) };
+        });
+
         // Render passes
         self.render_passes.for_each_occupied_mut(|rp| {
-            for (_, subpass) in &rp.subpasses {
-                unsafe { self.device.destroy_framebuffer(subpass.fb, None) };
-            }
             unsafe { self.device.destroy_render_pass(rp.raw, None) };
         });
 
@@ -1795,20 +1799,26 @@ impl Context {
         self.images.release(handle);
     }
 
-    /// Destroys a render pass and its associated framebuffers.
+    /// Destroys a render pass.
     ///
     /// # Prerequisites
-    /// - Ensure no GPU work is using the render pass or its framebuffers.
+    /// - Ensure no GPU work is using the render pass.
     /// - The context must still be alive.
     pub fn destroy_render_pass(&mut self, handle: Handle<RenderPass>) {
         let rp = self.render_passes.get_ref(handle).unwrap();
-        for (_id, sb) in &rp.subpasses {
-            unsafe { self.device.destroy_framebuffer(sb.fb, None) };
-        }
-
         unsafe { self.device.destroy_render_pass(rp.raw, None) };
-
         self.render_passes.release(handle);
+    }
+
+    /// Destroys a render target and its framebuffer.
+    ///
+    /// # Prerequisites
+    /// - Ensure no GPU work is using the render target.
+    /// - The context must still be alive.
+    pub fn destroy_render_target(&mut self, handle: Handle<RenderTarget>) {
+        let rt = self.render_targets.get_ref(handle).unwrap();
+        unsafe { self.device.destroy_framebuffer(rt.fb, None) };
+        self.render_targets.release(handle);
     }
 
     /// Destroys a command list and its associated fence.
@@ -2587,6 +2597,7 @@ impl Context {
         let mut color_attachment_refs = Vec::with_capacity(256);
         let mut subpasses = Vec::with_capacity(256);
         let mut deps = Vec::with_capacity(256);
+        let mut attachment_formats = Vec::with_capacity(256);
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
             let attachment_offset = attachments.len();
@@ -2612,6 +2623,7 @@ impl Context {
 
                 attachments.push(attachment_desc);
                 color_attachment_refs.push(attachment_ref);
+                attachment_formats.push(color_attachment.format);
             }
 
             // Process depth-stencil attachment
@@ -2632,6 +2644,7 @@ impl Context {
                     attachment: (attachments.len() - 1) as u32,
                     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 });
+                attachment_formats.push(depth_stencil_attachment.format);
             }
 
             let colors = if color_attachment_refs.is_empty() {
@@ -2679,15 +2692,75 @@ impl Context {
 
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
-        //        let fbs = self.create_framebuffers(render_pass, info)?;
-        return Ok(self
-            .render_passes
-            .insert(RenderPass {
-                raw: render_pass,
-                viewport: info.viewport,
-                subpasses: Default::default(),
-            })
-            .unwrap());
+        return Ok(
+            self.render_passes
+                .insert(RenderPass {
+                    raw: render_pass,
+                    viewport: info.viewport,
+                    attachment_formats,
+                })
+                .unwrap(),
+        );
+    }
+
+    /// Create a render target from a set of image views and a render pass.
+    pub fn make_render_target(
+        &mut self,
+        info: &RenderTargetInfo,
+    ) -> Result<Handle<RenderTarget>, GPUError> {
+        let (attachment_formats, raw_rp) = {
+            let rp = self.render_passes.get_ref(info.render_pass).unwrap();
+            (rp.attachment_formats.clone(), rp.raw)
+        };
+
+        if attachment_formats.len() != info.attachments.len() {
+            return Err(GPUError::LibraryError());
+        }
+
+        let mut views = Vec::with_capacity(info.attachments.len());
+        let mut width = u32::MAX;
+        let mut height = u32::MAX;
+
+        for (img_view, fmt) in info.attachments.iter().zip(attachment_formats.iter()) {
+            let (image_format, image_dim, vk_view) = {
+                let view = self.image_views.get_ref(*img_view).unwrap();
+                let image = self.images.get_ref(view.img).unwrap();
+                (image.format, image.dim, view.view)
+            };
+            if image_format != *fmt {
+                return Err(GPUError::LibraryError());
+            }
+            let is_depth = matches!(fmt, Format::D24S8);
+            let layout = if is_depth {
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            } else {
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+            };
+            self.oneshot_transition_image(*img_view, layout);
+            width = width.min(image_dim[0]);
+            height = height.min(image_dim[1]);
+            views.push(vk_view);
+        }
+
+        let fb_info = vk::FramebufferCreateInfo {
+            render_pass: raw_rp,
+            attachment_count: views.len() as u32,
+            p_attachments: views.as_ptr(),
+            width,
+            height,
+            layers: 1,
+            ..Default::default()
+        };
+        let fb = unsafe { self.device.create_framebuffer(&fb_info, None)? };
+        self.set_name(fb, info.debug_name, vk::ObjectType::FRAMEBUFFER);
+        Ok(
+            self.render_targets
+                .insert(RenderTarget {
+                    fb,
+                    render_pass: info.render_pass,
+                })
+                .unwrap(),
+        )
     }
     /// Creates a compute pipeline layout from shader and bind group layouts.
     ///
@@ -3013,74 +3086,6 @@ impl Context {
             .unwrap());
     }
 
-    pub(super) fn make_framebuffer(
-        &mut self,
-        info: &RenderPassBegin,
-    ) -> Result<vk::Framebuffer, GPUError> {
-        //    ) -> Result<Vec<(vk::Framebuffer, Vec<Handle<Image>>)>, GPUError> {
-        let mut width = std::u32::MAX;
-        let mut height = std::u32::MAX;
-        // Loop through each subpass and create a framebuffer
-        let mut attachments = Vec::new();
-
-        let mut created_images = Vec::new();
-        // Collect the image views for color attachments
-        for attachment in info.attachments.iter() {
-            match attachment.clear {
-                ClearValue::Color(_) | ClearValue::IntColor(_) | ClearValue::UintColor(_) => {
-                    let created_image_handle = attachment.img;
-                    self.oneshot_transition_image(
-                        attachment.img,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    );
-                    let view = self.image_views.get_ref(created_image_handle).unwrap();
-                    let image = self.images.get_ref(view.img).unwrap();
-                    let color_view = view.view;
-
-                    width = std::cmp::min(image.dim[0], width);
-                    height = std::cmp::min(image.dim[1], height);
-                    attachments.push(color_view);
-                    created_images.push(view.img);
-                }
-                ClearValue::DepthStencil {
-                    depth: _,
-                    stencil: _,
-                } => {
-                    let view = attachment.img;
-                    self.oneshot_transition_image(
-                        view,
-                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    );
-                    let depth_view_info = self.image_views.get_ref(view).unwrap();
-                    let depth_img = self.images.get_ref(depth_view_info.img).unwrap();
-                    let depth_view = depth_view_info.view;
-                    width = std::cmp::min(depth_img.dim[0], width);
-                    height = std::cmp::min(depth_img.dim[1], height);
-
-                    attachments.push(depth_view);
-                    created_images.push(depth_view_info.img);
-                }
-            }
-        }
-
-        let rp = self.render_passes.get_ref(info.render_pass).unwrap();
-        // Create framebuffer
-        let framebuffer_info = vk::FramebufferCreateInfo {
-            render_pass: rp.raw,
-            attachment_count: attachments.len() as u32,
-            p_attachments: attachments.as_ptr(),
-            width,
-            height,
-            layers: 1,
-            ..Default::default()
-        };
-
-        return Ok(unsafe {
-            self.device
-                .create_framebuffer(&framebuffer_info, None)
-                .expect("Failed to create framebuffer")
-        });
-    }
 }
 
 #[cfg(test)]

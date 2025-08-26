@@ -38,6 +38,14 @@ fn pipeline_switch() {
         })
         .unwrap();
 
+    let rt = ctx
+        .make_render_target(&RenderTargetInfo {
+            debug_name: "rt",
+            render_pass: rp,
+            attachments: &[view],
+        })
+        .unwrap();
+
     let vert = inline_spirv::inline_spirv!(r"#version 450
         vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
         void main() {
@@ -122,7 +130,8 @@ fn pipeline_switch() {
             ..Default::default()
         },
         pipeline: pipe_red,
-        attachments: &[Attachment { img: view, clear: ClearValue::Color([0.0,0.0,0.0,1.0]) }],
+        render_target: rt,
+        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
     }).unwrap();
 
     list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
