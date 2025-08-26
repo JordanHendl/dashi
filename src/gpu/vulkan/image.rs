@@ -19,7 +19,7 @@ pub struct Sampler {
     pub(crate) sampler: vk::Sampler,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ImageView {
     pub(crate) img: Handle<Image>,
     pub(crate) range: vk::ImageSubresourceRange,
