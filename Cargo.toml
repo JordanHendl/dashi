@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [features]
-default = ["dashi-winit", "dashi-vulkan"]
+default = ["dashi-winit", "vulkan"]
 dashi-winit = ["dep:winit"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]
@@ -13,11 +13,12 @@ dashi-openxr = ["dep:openxr"]
 dashi-serde = ["dep:serde"]
 debug_offset_alloc = []
 use_16_bit_node_indices = []
-dashi-vulkan = ["dep:ash", "dep:vk-mem", "dep:ash-window"]
-dashi-dx12 = ["dep:windows"]
+vulkan = ["dep:ash", "dep:vk-mem", "dep:ash-window"]
+dx12 = ["dep:windows"]
+metal = ["dep:metal"]
 
 [dependencies]
-ash = { version = "0.37.3", optional = true }
+ash = { version = "0.37", optional = true }
 vk-mem = { version = "0.3.0", optional = true }
 sdl2 = {version = "0.37.0", features = ["bundled", "static-link", "raw-window-handle"], optional = true}
 ash-window = { version = "0.11", optional = true }
@@ -28,6 +29,10 @@ openxr = { version = "0.19", optional = true }
 raw-window-handle = "0.4"
 serde = {version = "1.0.210", features = ["derive"], optional = true}
 windows = { version = "0.52.0", optional = true, features = ["Win32_Graphics_Direct3D12"] }
+metal = { version = "0.32.0", optional = true }
+bitflags = "2.6"
+bytemuck = { version = "1.16", features = ["derive"] }
+smallvec = "1.13"
 
 [patch.crates-io]
 orbclient = { path = "orbclient_stub" }

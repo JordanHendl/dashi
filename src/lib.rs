@@ -1,5 +1,11 @@
-pub mod gpu;
 pub mod utils;
+
+#[cfg(feature = "vulkan")]
+pub mod gpu;
+#[cfg(feature = "dx12")]
+pub mod gpu_dx12;
+#[cfg(feature = "metal")]
+pub mod gpu_metal;
 
 #[cfg(
     any(
@@ -13,7 +19,11 @@ compile_error!(
 );
 
 
-#[cfg(all(feature = "dashi-vulkan", feature = "dashi-dx12"))]
-compile_error!("GPU backends are mutually exclusive; enable only one of `dashi-vulkan` or `dashi-dx12`");
-
+#[cfg(feature = "vulkan")]
 pub use gpu::*;
+#[cfg(feature = "dx12")]
+#[allow(unused_imports)]
+pub use gpu_dx12::*;
+#[cfg(feature = "metal")]
+#[allow(unused_imports)]
+pub use gpu_metal::*;
