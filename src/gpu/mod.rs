@@ -505,6 +505,7 @@ pub struct BindGroupLayout {
 pub struct BindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
+    layout: Handle<BindGroupLayout>,
 }
 
 #[allow(dead_code)]
@@ -520,6 +521,7 @@ pub struct BindTableLayout {
 pub struct BindTable {
     set: vk::DescriptorSet,
     set_id: u32,
+    layout: Handle<BindTableLayout>,
 }
 
 #[allow(dead_code)]
@@ -2155,26 +2157,37 @@ impl Context {
         //            unsafe { self.device.destroy_fence(fence.raw, None) };
         //        }
 
-        //        // Bind groups
-        //        self.bind_groups.for_each_occupied_mut(|bg| unsafe {
-        //            self.device.free_descriptor_sets(bg.set, &[bg.set]).ok();
-        //        });
+        // Bind tables
+        let mut bt_handles = Vec::new();
+        self.bind_tables
+            .for_each_occupied_handle(|h| bt_handles.push(h));
+        for h in bt_handles {
+            self.destroy_bind_table(h);
+        }
 
-        // Bind group layouts
-        self.bind_group_layouts
-            .for_each_occupied_mut(|layout| unsafe {
-                self.device
-                    .destroy_descriptor_set_layout(layout.layout, None);
-                self.device.destroy_descriptor_pool(layout.pool, None);
-            });
+        // Bind groups
+        let mut bg_handles = Vec::new();
+        self.bind_groups
+            .for_each_occupied_handle(|h| bg_handles.push(h));
+        for h in bg_handles {
+            self.destroy_bind_group(h);
+        }
 
         // Bind table layouts
+        let mut btl_handles = Vec::new();
         self.bind_table_layouts
-            .for_each_occupied_mut(|layout| unsafe {
-                self.device
-                    .destroy_descriptor_set_layout(layout.layout, None);
-                self.device.destroy_descriptor_pool(layout.pool, None);
-            });
+            .for_each_occupied_handle(|h| btl_handles.push(h));
+        for h in btl_handles {
+            self.destroy_bind_table_layout(h);
+        }
+
+        // Bind group layouts
+        let mut bgl_handles = Vec::new();
+        self.bind_group_layouts
+            .for_each_occupied_handle(|h| bgl_handles.push(h));
+        for h in bgl_handles {
+            self.destroy_bind_group_layout(h);
+        }
 
         // Semaphores
         self.semaphores.for_each_occupied_mut(|s| {
@@ -2369,6 +2382,52 @@ impl Context {
         self.destroy_fence(list.fence);
     }
 
+    /// Destroys a bind group and frees its descriptor set back to the pool.
+    pub fn destroy_bind_group(&mut self, handle: Handle<BindGroup>) {
+        let bg = self.bind_groups.get_ref(handle).unwrap();
+        let layout = self.bind_group_layouts.get_ref(bg.layout).unwrap();
+        unsafe {
+            self.device
+                .free_descriptor_sets(layout.pool, &[bg.set])
+                .ok();
+        }
+        self.bind_groups.release(handle);
+    }
+
+    /// Destroys a bind group layout and its associated descriptor pool.
+    pub fn destroy_bind_group_layout(&mut self, handle: Handle<BindGroupLayout>) {
+        let layout = self.bind_group_layouts.get_ref(handle).unwrap();
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(layout.layout, None);
+            self.device.destroy_descriptor_pool(layout.pool, None);
+        }
+        self.bind_group_layouts.release(handle);
+    }
+
+    /// Destroys a bind table and frees its descriptor set back to the pool.
+    pub fn destroy_bind_table(&mut self, handle: Handle<BindTable>) {
+        let table = self.bind_tables.get_ref(handle).unwrap();
+        let layout = self.bind_table_layouts.get_ref(table.layout).unwrap();
+        unsafe {
+            self.device
+                .free_descriptor_sets(layout.pool, &[table.set])
+                .ok();
+        }
+        self.bind_tables.release(handle);
+    }
+
+    /// Destroys a bind table layout and its associated descriptor pool.
+    pub fn destroy_bind_table_layout(&mut self, handle: Handle<BindTableLayout>) {
+        let layout = self.bind_table_layouts.get_ref(handle).unwrap();
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(layout.layout, None);
+            self.device.destroy_descriptor_pool(layout.pool, None);
+        }
+        self.bind_table_layouts.release(handle);
+    }
+
     /// Creates a bind table layout used for bind table resources.
     ///
     /// # Prerequisites
@@ -2453,7 +2512,16 @@ impl Context {
             .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(MAX_DESCRIPTOR_SETS);
 
-        let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
+        let descriptor_pool = unsafe {
+            self
+                .device
+                .create_descriptor_pool(&pool_info, None)
+                .map_err(|e| {
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    GPUError::from(e)
+                })?
+        };
 
         self.set_name(
             descriptor_set_layout,
@@ -2556,7 +2624,16 @@ impl Context {
             .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(max_descriptor_sets);
 
-        let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
+        let descriptor_pool = unsafe {
+            self
+                .device
+                .create_descriptor_pool(&pool_info, None)
+                .map_err(|e| {
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    GPUError::from(e)
+                })?
+        };
 
         self.set_name(
             descriptor_set_layout,
@@ -2881,6 +2958,7 @@ impl Context {
         let bind_group = BindGroup {
             set: descriptor_set,
             set_id: info.set,
+            layout: info.layout,
         };
 
         let bg = self.bind_groups.insert(bind_group).unwrap();
@@ -3041,6 +3119,7 @@ impl Context {
         let bind_group = BindGroup {
             set: descriptor_set,
             set_id: info.set,
+            layout: info.layout,
         };
 
         Ok(self.bind_groups.insert(bind_group).unwrap())
@@ -3067,6 +3146,7 @@ impl Context {
         let bind_table = BindTable {
             set: descriptor_set,
             set_id: info.set,
+            layout: info.layout,
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();
