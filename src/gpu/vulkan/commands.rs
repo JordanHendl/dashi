@@ -50,7 +50,7 @@ impl Default for BufferCopy {
 
 #[derive(Clone, Default)]
 pub struct ImageBufferCopy {
-    pub src: Handle<ImageView>,
+    pub src: ImageView,
     pub dst: Handle<Buffer>,
     pub dst_offset: usize,
 }
@@ -58,14 +58,14 @@ pub struct ImageBufferCopy {
 #[derive(Clone, Default)]
 pub struct BufferImageCopy {
     pub src: Handle<Buffer>,
-    pub dst: Handle<ImageView>,
+    pub dst: ImageView,
     pub src_offset: usize,
 }
 
 #[derive(Clone)]
 pub struct ImageBlit {
-    pub src: Handle<ImageView>,
-    pub dst: Handle<ImageView>,
+    pub src: ImageView,
+    pub dst: ImageView,
     pub filter: Filter,
     pub src_region: Rect2D,
     pub dst_region: Rect2D,
@@ -249,7 +249,7 @@ pub struct BindPipeline {
 
 #[derive(Clone, Copy)]
 pub struct ImageBarrier {
-    pub view: Handle<ImageView>,
+    pub view: ImageView,
     pub src: BarrierPoint,
     pub dst: BarrierPoint,
 }
@@ -340,12 +340,12 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn copy_buffer_to_image(&mut self, rec: BufferImageCopy) {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(rec.dst).unwrap();
+            let view_data = rec.dst;
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
             let mip = view_data.range.base_mip_level as usize;
             let old_layout = img_data.layouts[mip];
             self.transition_image(
-                rec.dst,
+                &view_data,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_WRITE,
             );
@@ -370,7 +370,7 @@ impl CommandList {
             );
 
             self.transition_image_layout(
-                rec.dst,
+                &view_data,
                 old_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_READ,
@@ -391,12 +391,12 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn copy_image_to_buffer(&mut self, rec: ImageBufferCopy) {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(rec.src).unwrap();
+            let view_data = rec.src;
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
             let mip = view_data.range.base_mip_level as usize;
             let old_layout = img_data.layouts[mip];
             self.transition_image(
-                rec.src,
+                &view_data,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_READ,
             );
@@ -421,7 +421,7 @@ impl CommandList {
             );
 
             self.transition_image_layout(
-                rec.src,
+                &view_data,
                 old_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::MEMORY_READ,
@@ -442,8 +442,8 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn blit_image(&mut self, cmd: ImageBlit) {
         unsafe {
-            let src_view = self.ctx_ref().image_views.get_ref(cmd.src).unwrap();
-            let dst_view = self.ctx_ref().image_views.get_ref(cmd.dst).unwrap();
+            let src_view = cmd.src;
+            let dst_view = cmd.dst;
             let src_data = self.ctx_ref().images.get_ref(src_view.img).unwrap();
             let dst_data = self.ctx_ref().images.get_ref(dst_view.img).unwrap();
             let src_dim = crate::gpu::mip_dimensions(src_data.dim, src_view.range.base_mip_level);
@@ -492,13 +492,13 @@ impl CommandList {
             let dst_layout = dst_data.layouts[dst_mip];
 
             self.transition_image_layout(
-                cmd.src,
+                &src_view,
                 vk::ImageLayout::GENERAL,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
             );
             self.transition_image_layout(
-                cmd.dst,
+                &dst_view,
                 vk::ImageLayout::GENERAL,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
@@ -514,13 +514,13 @@ impl CommandList {
             );
 
             self.transition_image_layout(
-                cmd.src,
+                &src_view,
                 src_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
             );
             self.transition_image_layout(
-                cmd.dst,
+                &dst_view,
                 dst_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
@@ -541,7 +541,7 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn image_barrier(&mut self, barrier: ImageBarrier) {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(barrier.view).unwrap();
+            let view_data = barrier.view;
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
             let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
@@ -1101,13 +1101,13 @@ impl CommandList {
     /// Transition image with stage/access based on last_op
     fn transition_image_layout(
         &mut self,
-        view: Handle<ImageView>,
+        view: &ImageView,
         layout: vk::ImageLayout,
         new_stage: vk::PipelineStageFlags,
         new_access: vk::AccessFlags,
     ) {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
+            let view_data = *view;
             let img_data = self.ctx_ref().images.get_mut_ref(view_data.img).unwrap();
             let mip = view_data.range.base_mip_level as usize;
             let (src_stage, src_access, dst_stage, dst_access) = self
@@ -1138,12 +1138,12 @@ impl CommandList {
     /// Transition image with stage/access based on last_op
     fn transition_image(
         &mut self,
-        view: Handle<ImageView>,
+        view: &ImageView,
         new_stage: vk::PipelineStageFlags,
         new_access: vk::AccessFlags,
     ) {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
+            let view_data = *view;
             let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
             let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(

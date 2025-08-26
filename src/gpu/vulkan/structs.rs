@@ -2,6 +2,7 @@ use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
     GraphicsPipelineLayout, Image, ImageView, RenderPass, Sampler, SelectedDevice,
 };
+use ash::vk;
 use crate::{utils::Handle, BindGroup, BindTable, Semaphore};
 use std::hash::{Hash, Hasher};
 
@@ -461,50 +462,13 @@ impl BufferView {
     }
 }
 
-pub struct ImageView2 {
-    pub handle: Handle<Image>,
-    pub sampler: Handle<Sampler>,
-    pub layer: u32,
-    pub mip_level: u32,
-    pub aspect: AspectMask,
-}
-
-impl ImageView2 {
-    pub fn default(handle: Handle<Image>, sampler: Handle<Sampler>) -> Self {
-        Self {
-            handle,
-            sampler,
-            layer: 0,
-            mip_level: 0,
-            aspect: Default::default(),
-        }
-    }
-
-    pub fn new(
-        handle: Handle<Image>,
-        sampler: Handle<Sampler>,
-        layer: u32,
-        mip_level: u32,
-        aspect: AspectMask,
-    ) -> Self {
-        Self {
-            handle,
-            sampler,
-            layer,
-            mip_level,
-            aspect,
-        }
-    }
-}
-
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
     ConstBuffer(BufferView),
     StorageBuffer(Handle<Buffer>),
     Dynamic(&'a DynamicAllocator),
     DynamicStorage(&'a DynamicAllocator),
-    SampledImage(Handle<ImageView>, Handle<Sampler>),
-    SampledImage2(ImageView2),
+    SampledImage(ImageView, Handle<Sampler>),
 }
 
 pub struct BindingInfo<'a> {
@@ -815,14 +779,14 @@ pub enum AttachmentType {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Attachment {
-    pub img: Handle<ImageView>,
+    pub img: ImageView,
     pub clear: ClearValue,
 }
 
 impl Default for Attachment {
     fn default() -> Self {
         Self {
-            img: Default::default(),
+            img: ImageView { img: Default::default(), range: vk::ImageSubresourceRange::default(), view: vk::ImageView::null() },
             clear: ClearValue::Color([0.0, 0.0, 0.0, 1.0]),
         }
     }
@@ -830,7 +794,7 @@ impl Default for Attachment {
 
 impl Hash for Attachment {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.img.hash(state);
+        self.img.view.hash(state);
         self.clear.hash(state);
     }
 }
@@ -850,7 +814,7 @@ pub struct RenderPassInfo<'a> {
 pub struct RenderTargetInfo<'a> {
     pub debug_name: &'a str,
     pub render_pass: Handle<RenderPass>,
-    pub attachments: &'a [Handle<ImageView>],
+    pub attachments: &'a [ImageView],
 }
 
 #[derive(Hash, Debug, Clone)]

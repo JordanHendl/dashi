@@ -33,7 +33,7 @@ pub struct Display {
     #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) images: Vec<Handle<Image>>,
     #[cfg(not(feature = "dashi-openxr"))]
-    pub(crate) views: Vec<Handle<ImageView>>,
+    pub(crate) views: Vec<ImageView>,
     #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) loader: ash::extensions::khr::Surface,
     #[cfg(not(feature = "dashi-openxr"))]
@@ -292,7 +292,7 @@ impl Context {
         // Now, we need to make the images!
         let images = unsafe { swap_loader.get_swapchain_images(swapchain)? };
         let mut handles: Vec<Handle<Image>> = Vec::with_capacity(images.len() as usize);
-        let mut view_handles: Vec<Handle<ImageView>> = Vec::with_capacity(images.len() as usize);
+        let mut views: Vec<ImageView> = Vec::with_capacity(images.len() as usize);
         for img in images {
             match self.images.insert(Image {
                 img,
@@ -320,7 +320,7 @@ impl Context {
                         ..Default::default()
                     })?;
 
-                    view_handles.push(h);
+                    views.push(h);
                     handles.push(handle)
                 }
                 None => todo!(),
@@ -345,7 +345,7 @@ impl Context {
             frame_idx: 0,
             semaphores: sems,
             fences,
-            views: view_handles,
+            views,
         })
     }
 
@@ -395,7 +395,7 @@ impl Context {
     pub fn acquire_new_image(
         &mut self,
         dsp: &mut Display,
-    ) -> Result<(Handle<ImageView>, Handle<Semaphore>, u32, bool), GPUError> {
+    ) -> Result<(ImageView, Handle<Semaphore>, u32, bool), GPUError> {
         let signal_sem_handle = dsp.semaphores[dsp.frame_idx as usize].clone();
         let fence = dsp.fences[dsp.frame_idx as usize];
 

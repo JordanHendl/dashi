@@ -86,6 +86,7 @@ pub struct BindGroupLayout {
 pub struct BindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
+    views: Vec<ImageView>,
 }
 
 #[allow(dead_code)]
@@ -101,6 +102,7 @@ pub struct BindTableLayout {
 pub struct BindTable {
     set: vk::DescriptorSet,
     set_id: u32,
+    views: Vec<ImageView>,
 }
 
 #[allow(dead_code)]
@@ -108,6 +110,7 @@ pub struct BindTable {
 pub struct IndexedBindGroup {
     set: vk::DescriptorSet,
     set_id: u32,
+    views: Vec<ImageView>,
 }
 
 
@@ -257,7 +260,6 @@ pub struct Context {
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
-    pub(super) image_views: Pool<ImageView>,
     pub(super) samplers: Pool<Sampler>,
     pub(super) bind_group_layouts: Pool<BindGroupLayout>,
     pub(super) bind_groups: Pool<BindGroup>,
@@ -644,7 +646,6 @@ impl Context {
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
-            image_views: Default::default(),
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
@@ -747,7 +748,6 @@ impl Context {
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
-            image_views: Default::default(),
             samplers: Default::default(),
             bind_group_layouts: Default::default(),
             bind_groups: Default::default(),
@@ -885,14 +885,14 @@ impl Context {
             ..Default::default()
         });
     }
-    fn oneshot_transition_image(&mut self, img: Handle<ImageView>, layout: vk::ImageLayout) {
+    fn oneshot_transition_image(&mut self, view: &ImageView, layout: vk::ImageLayout) {
         let mut list = self
             .begin_command_list(&CommandListInfo {
                 debug_name: "",
                 ..Default::default()
             })
             .unwrap();
-        self.transition_image(list.cmd_buf, img, layout);
+        self.transition_image(list.cmd_buf, view, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
@@ -915,23 +915,24 @@ impl Context {
                 ..Default::default()
             })
             .unwrap();
-        self.transition_image(list.cmd_buf, tmp_view, layout);
+        self.transition_image(list.cmd_buf, &tmp_view, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
         self.destroy_cmd_list(list);
+        self.destroy_image_view(tmp_view);
     }
 
     fn transition_image_stages(
         &mut self,
         cmd: vk::CommandBuffer,
-        img: Handle<ImageView>,
+        view: &ImageView,
         layout: vk::ImageLayout,
         src: vk::PipelineStageFlags,
         dst: vk::PipelineStageFlags,
         src_access: vk::AccessFlags,
         dst_access: vk::AccessFlags,
     ) {
-        let view = self.image_views.get_mut_ref(img).unwrap();
+        let view = *view;
         let img = self.images.get_mut_ref(view.img).unwrap();
         let base = view.range.base_mip_level as usize;
         let count = view.range.level_count as usize;
@@ -1032,12 +1033,12 @@ impl Context {
     fn transition_image(
         &mut self,
         cmd: vk::CommandBuffer,
-        img: Handle<ImageView>,
+        view: &ImageView,
         layout: vk::ImageLayout,
     ) {
         self.transition_image_stages(
             cmd,
-            img,
+            view,
             layout,
             vk::PipelineStageFlags::BOTTOM_OF_PIPE,
             vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -1140,7 +1141,7 @@ impl Context {
         }
     }
 
-    pub fn make_image_view(&mut self, info: &ImageViewInfo) -> Result<Handle<ImageView>, GPUError> {
+    pub fn make_image_view(&mut self, info: &ImageViewInfo) -> Result<ImageView, GPUError> {
         let img = self.images.get_ref(info.img).unwrap();
 
         let aspect: vk::ImageAspectFlags = info.aspect.into();
@@ -1167,14 +1168,11 @@ impl Context {
 
         self.set_name(view, info.debug_name, vk::ObjectType::IMAGE_VIEW);
 
-        match self.image_views.insert(ImageView {
+        Ok(ImageView {
             view,
             range: sub_range,
             img: info.img,
-        }) {
-            Some(h) => return Ok(h),
-            None => return Err(GPUError::SlotError()),
-        }
+        })
     }
 
     pub fn make_image(&mut self, info: &ImageInfo) -> Result<Handle<Image>, GPUError> {
@@ -1337,7 +1335,7 @@ impl Context {
 
         let mut list = self.begin_command_list(&Default::default())?;
         if info.initial_data.is_none() {
-            self.transition_image(list.cmd_buf, tmp_view, vk::ImageLayout::GENERAL);
+            self.transition_image(list.cmd_buf, &tmp_view, vk::ImageLayout::GENERAL);
             let fence = self.submit(&mut list, &Default::default())?;
             self.wait(fence)?;
             self.destroy_cmd_list(list);
@@ -1362,7 +1360,7 @@ impl Context {
         // 1) barrier: UNDEFINED -> TRANSFER_DST_OPTIMAL
         self.transition_image_stages(
             list.cmd_buf,
-            tmp_view,
+            &tmp_view,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             vk::PipelineStageFlags::BOTTOM_OF_PIPE,
             vk::PipelineStageFlags::TRANSFER,
@@ -1379,7 +1377,7 @@ impl Context {
         // 3) barrier: TRANSFER_DST_OPTIMAL -> GENERAL
         self.transition_image_stages(
             list.cmd_buf,
-            tmp_view,
+            &tmp_view,
             vk::ImageLayout::GENERAL,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::TRANSFER,
@@ -1414,8 +1412,8 @@ impl Context {
                         },
                     })?;
 
-                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-                self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+                self.transition_image(list.cmd_buf, &src_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                self.transition_image(list.cmd_buf, &dst_view, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
 
                 list.append(Command::Blit(ImageBlit {
                     src: src_view,
@@ -1424,11 +1422,11 @@ impl Context {
                     ..Default::default()
                 }));
 
-                self.transition_image(list.cmd_buf, src_view, vk::ImageLayout::GENERAL);
+                self.transition_image(list.cmd_buf, &src_view, vk::ImageLayout::GENERAL);
                 if i + 1 < info.mip_levels - 1 {
-                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                    self.transition_image(list.cmd_buf, &dst_view, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
                 } else {
-                    self.transition_image(list.cmd_buf, dst_view, vk::ImageLayout::GENERAL);
+                    self.transition_image(list.cmd_buf, &dst_view, vk::ImageLayout::GENERAL);
                 }
 
                 self.destroy_image_view(src_view);
@@ -1646,11 +1644,6 @@ impl Context {
             unsafe { self.device.destroy_sampler(s.sampler, None) };
         });
 
-        // Image views
-        self.image_views.for_each_occupied_mut(|view| {
-            unsafe { self.device.destroy_image_view(view.view, None) };
-        });
-
         // Images
         self.images.for_each_occupied_mut(|img| {
             unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
@@ -1781,10 +1774,8 @@ impl Context {
     /// - Ensure no GPU work references the image view.
     /// - Destroy views before destroying the underlying image.
     /// - The context must still be alive.
-    pub fn destroy_image_view(&mut self, handle: Handle<ImageView>) {
-        let img = self.image_views.get_mut_ref(handle).unwrap();
-        unsafe { self.device.destroy_image_view(img.view, None) };
-        self.image_views.release(handle);
+    pub fn destroy_image_view(&mut self, view: ImageView) {
+        unsafe { self.device.destroy_image_view(view.view, None) };
     }
 
     /// Destroys an image and frees its memory.
@@ -2056,7 +2047,7 @@ impl Context {
     /// - XR session state is valid. (If using OpenXR)
     /// - Synchronization primitives are handled during presentation.
     pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) {
-        let bg = self.bind_groups.get_ref(info.bg).unwrap();
+        let bg = self.bind_groups.get_mut_ref(info.bg).unwrap();
         let descriptor_set = bg.set;
 
         // Step 2: Prepare the write operations for the descriptor set
@@ -2087,12 +2078,11 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::SampledImage(image_handle, sampler) => {
-                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                    ShaderResource::SampledImage(view, sampler) => {
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                         let image_info = vk::DescriptorImageInfo::builder()
-                            .image_view(image.view)
+                            .image_view(view.view)
                             .image_layout(vk::ImageLayout::GENERAL)
                             .sampler(sampler.sampler)
                             .build();
@@ -2108,6 +2098,7 @@ impl Context {
                             .build();
 
                         write_descriptor_sets.push(write_descriptor_set);
+                        bg.views.push(*view);
                     }
                     ShaderResource::Dynamic(alloc) => {
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
@@ -2171,7 +2162,6 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => todo!(),
-                    ShaderResource::SampledImage2(_) => todo!(),
                 }
             }
         }
@@ -2184,7 +2174,7 @@ impl Context {
 
     /// Updates an existing bind table with new resource bindings.
     pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) {
-        let table = self.bind_tables.get_ref(info.table).unwrap();
+        let table = self.bind_tables.get_mut_ref(info.table).unwrap();
         let descriptor_set = table.set;
 
         let mut write_descriptor_sets = Vec::new();
@@ -2214,12 +2204,11 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::SampledImage(image_handle, sampler) => {
-                        let image = self.image_views.get_ref(*image_handle).unwrap();
+                    ShaderResource::SampledImage(view, sampler) => {
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                         let image_info = vk::DescriptorImageInfo::builder()
-                            .image_view(image.view)
+                            .image_view(view.view)
                             .image_layout(vk::ImageLayout::GENERAL)
                             .sampler(sampler.sampler)
                             .build();
@@ -2235,6 +2224,7 @@ impl Context {
                             .build();
 
                         write_descriptor_sets.push(write_descriptor_set);
+                        table.views.push(*view);
                     }
                     ShaderResource::Dynamic(alloc) => {
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
@@ -2298,7 +2288,6 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => todo!(),
-                    ShaderResource::SampledImage2(_) => todo!(),
                 }
             }
         }
@@ -2344,6 +2333,7 @@ impl Context {
         let bind_group = BindGroup {
             set: descriptor_set,
             set_id: info.set,
+            views: Vec::new(),
         };
 
         let bg = self.bind_groups.insert(bind_group).unwrap();
@@ -2387,6 +2377,7 @@ impl Context {
         let mut write_descriptor_sets = Vec::new();
         let mut buffer_infos = Vec::new();
         let mut image_infos = Vec::new();
+        let mut owned_views = Vec::new();
 
         for binding_info in info.bindings.iter() {
             match &binding_info.resource {
@@ -2409,12 +2400,11 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
-                ShaderResource::SampledImage(image_handle, sampler) => {
-                    let image = self.image_views.get_ref(*image_handle).unwrap();
+                ShaderResource::SampledImage(view, sampler) => {
                     let sampler = self.samplers.get_ref(*sampler).unwrap();
 
                     let image_info = vk::DescriptorImageInfo::builder()
-                        .image_view(image.view)
+                        .image_view(view.view)
                         .image_layout(vk::ImageLayout::GENERAL)
                         .sampler(sampler.sampler)
                         .build();
@@ -2429,6 +2419,7 @@ impl Context {
                         .build();
 
                     write_descriptor_sets.push(write_descriptor_set);
+                    owned_views.push(*view);
                 }
                 ShaderResource::Dynamic(alloc) => {
                     let buffer = self.buffers.get_ref(alloc.pool).unwrap();
@@ -2491,7 +2482,6 @@ impl Context {
                     write_descriptor_sets.push(write_descriptor_set);
                 }
                 ShaderResource::ConstBuffer(_) => todo!(),
-                ShaderResource::SampledImage2(_) => todo!(),
             }
         }
 
@@ -2504,6 +2494,7 @@ impl Context {
         let bind_group = BindGroup {
             set: descriptor_set,
             set_id: info.set,
+            views: owned_views,
         };
 
         Ok(self.bind_groups.insert(bind_group).unwrap())
@@ -2530,6 +2521,7 @@ impl Context {
         let bind_table = BindTable {
             set: descriptor_set,
             set_id: info.set,
+            views: Vec::new(),
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();
@@ -2722,11 +2714,10 @@ impl Context {
         let mut height = u32::MAX;
 
         for (img_view, fmt) in info.attachments.iter().zip(attachment_formats.iter()) {
-            let (image_format, image_dim, vk_view) = {
-                let view = self.image_views.get_ref(*img_view).unwrap();
-                let image = self.images.get_ref(view.img).unwrap();
-                (image.format, image.dim, view.view)
-            };
+            let image = self.images.get_ref(img_view.img).unwrap();
+            let image_format = image.format;
+            let image_dim = image.dim;
+            let vk_view = img_view.view;
             if image_format != *fmt {
                 return Err(GPUError::LibraryError());
             }
@@ -2736,7 +2727,7 @@ impl Context {
             } else {
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
             };
-            self.oneshot_transition_image(*img_view, layout);
+            self.oneshot_transition_image(img_view, layout);
             width = width.min(image_dim[0]);
             height = height.min(image_dim[1]);
             views.push(vk_view);
