@@ -1,5 +1,5 @@
-use crate::gpu::error::GPUError;
-use crate::gpu::structs::WindowInfo;
+use super::error::GPUError;
+use super::structs::WindowInfo;
 use ash::{vk, Entry, Instance};
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
