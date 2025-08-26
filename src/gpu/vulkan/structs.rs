@@ -847,6 +847,12 @@ pub struct RenderPassInfo<'a> {
     pub subpasses: &'a [SubpassDescription<'a>],
 }
 
+pub struct RenderTargetInfo<'a> {
+    pub debug_name: &'a str,
+    pub render_pass: Handle<RenderPass>,
+    pub attachments: &'a [Handle<ImageView>],
+}
+
 #[derive(Hash, Debug, Clone)]
 pub struct VertexDescriptionInfo<'a> {
     pub entries: &'a [VertexEntryInfo], // ConstSlice in Rust can be a reference slice

@@ -109,6 +109,7 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
         subpasses:&[SubpassDescription{color_attachments:&[AttachmentDescription{..Default::default()}],depth_stencil_attachment:None,subpass_dependencies:&[]}],
         debug_name:"renderpass"
     }).unwrap();
+    let render_target = ctx.make_render_target(&RenderTargetInfo{debug_name:"rt",render_pass,attachments:&[fb_view]}).unwrap();
     let graphics_pipeline = ctx.make_graphics_pipeline(&GraphicsPipelineInfo{layout:pipeline_layout,render_pass,debug_name:"Pipeline",..Default::default()}).unwrap();
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
     let bind_group = ctx.make_bind_group(&BindGroupInfo{debug_name:"OpenXR Triangle",layout:bg_layout,bindings:&[BindingInfo{resource:ShaderResource::Dynamic(&allocator),binding:0}],..Default::default()}).unwrap();
@@ -121,7 +122,8 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
         list.begin_drawing(&DrawBegin{
             viewport:Viewport{area:FRect2D{w:width as f32,h:height as f32,..Default::default()},scissor:Rect2D{w:width,h:height,..Default::default()},..Default::default()},
             pipeline:graphics_pipeline,
-            attachments:&[Attachment{img:fb_view,clear:ClearValue::Color([0.0,0.0,0.0,1.0])}]
+            render_target,
+            clear_values:&[ClearValue::Color([0.0,0.0,0.0,1.0])]
         }).unwrap();
         let mut buf=allocator.bump().unwrap();
         let pos=&mut buf.slice::<[f32;2]>()[0];

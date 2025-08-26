@@ -165,6 +165,14 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
         })
         .unwrap();
 
+    let render_target = ctx
+        .make_render_target(&RenderTargetInfo {
+            debug_name: "rt",
+            render_pass,
+            attachments: &[fb_view],
+        })
+        .unwrap();
+
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
             layout: pipeline_layout,
@@ -200,7 +208,8 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                attachments: &[Attachment { img: fb_view, clear: ClearValue::Color([0.0, 0.0, 0.0, 1.0]) }],
+                render_target,
+                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
             }).unwrap();
             let mut buf = allocator.bump().unwrap();
             let pos = &mut buf.slice::<[f32; 2]>()[0];

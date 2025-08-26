@@ -229,6 +229,14 @@ void main() {
         })
         .unwrap();
 
+    let render_target = ctx
+        .make_render_target(&RenderTargetInfo {
+            debug_name: "rt",
+            render_pass,
+            attachments: &[fb_view],
+        })
+        .unwrap();
+
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
@@ -308,10 +316,8 @@ void main() {
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                attachments: &[Attachment {
-                    img: fb_view,
-                    clear: ClearValue::Color([0.0, 0.0, 0.0, 1.0]),
-                }],
+                render_target,
+                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
             })
             .unwrap();
 

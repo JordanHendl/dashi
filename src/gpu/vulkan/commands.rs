@@ -1,34 +1,30 @@
 //! Refactored command helpers for Dashi CommandList
 
 use ash::vk;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
-use super::{convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderPass};
+use super::{convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderTarget};
 use crate::driver::command::CommandSink;
 use crate::utils::Handle;
 use crate::{
-    Attachment, BarrierPoint, BindGroup, BindTable, Buffer, CommandList, ComputePipeline,
+    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline,
     Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
     IndexedIndirectCommand, IndirectCommand, Rect2D, Viewport,
 };
-use crate::gpu::SubpassContainer;
-// Converts an Attachment's clear value into a Vulkan clear value
-impl Attachment {
-    fn to_vk_clear_value(&self) -> vk::ClearValue {
-        match self.clear {
-            crate::ClearValue::Color(cols) => vk::ClearValue {
-                color: vk::ClearColorValue { float32: cols },
-            },
-            crate::ClearValue::IntColor(cols) => vk::ClearValue {
-                color: vk::ClearColorValue { int32: cols },
-            },
-            crate::ClearValue::UintColor(cols) => vk::ClearValue {
-                color: vk::ClearColorValue { uint32: cols },
-            },
-            crate::ClearValue::DepthStencil { depth, stencil } => vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue { depth, stencil },
-            },
-        }
+
+fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
+    match cv {
+        ClearValue::Color(cols) => vk::ClearValue {
+            color: vk::ClearColorValue { float32: *cols },
+        },
+        ClearValue::IntColor(cols) => vk::ClearValue {
+            color: vk::ClearColorValue { int32: *cols },
+        },
+        ClearValue::UintColor(cols) => vk::ClearValue {
+            color: vk::ClearColorValue { uint32: *cols },
+        },
+        ClearValue::DepthStencil { depth, stencil } => vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue { depth: *depth, stencil: *stencil },
+        },
     }
 }
 #[derive(Clone)]
@@ -112,7 +108,8 @@ impl Default for Dispatch {
 pub struct DrawBegin<'a> {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub attachments: &'a [Attachment],
+    pub render_target: Handle<RenderTarget>,
+    pub clear_values: &'a [ClearValue],
 }
 
 #[derive(Clone, Default)]
@@ -159,9 +156,9 @@ pub struct BindIndexedBG {
 
 #[derive(Clone, Default)]
 pub struct RenderPassBegin<'a> {
-    pub render_pass: Handle<RenderPass>,
+    pub render_target: Handle<RenderTarget>,
     pub viewport: Viewport,
-    pub attachments: &'a [Attachment],
+    pub clear_values: &'a [ClearValue],
 }
 
 #[derive(Clone)]
@@ -630,7 +627,12 @@ impl CommandList {
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
     pub fn begin_render_pass(&mut self, info: &RenderPassBegin) -> Result<(), GPUError> {
-        if self.curr_rp.map_or(false, |rp| rp == info.render_pass) {
+        let rt = self
+            .ctx_ref()
+            .render_targets
+            .get_ref(info.render_target)
+            .unwrap();
+        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
             return Ok(());
         }
         // end previous pass
@@ -639,22 +641,23 @@ impl CommandList {
                 self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
             }
         }
-        self.curr_rp = Some(info.render_pass);
+        self.curr_rp = Some(rt.render_pass);
 
         unsafe {
             let rp_obj = self
                 .ctx_ref()
                 .render_passes
-                .get_mut_ref(info.render_pass)
+                .get_ref(rt.render_pass)
                 .unwrap();
-            let fb_info = self.create_or_cache_framebuffer(rp_obj, info)?.clone();
+            let clears: Vec<vk::ClearValue> =
+                info.clear_values.iter().map(clear_value_to_vk).collect();
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp_obj.raw)
-                    .framebuffer(fb_info.fb)
+                    .framebuffer(rt.fb)
                     .render_area(convert_rect2d_to_vulkan(info.viewport.scissor))
-                    .clear_values(&fb_info.clear_values)
+                    .clear_values(&clears)
                     .build(),
                 vk::SubpassContents::INLINE,
             );
@@ -1013,10 +1016,14 @@ impl CommandList {
     pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
         let pipeline = info.pipeline;
         let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+        let rt = self.ctx_ref().render_targets.get_ref(info.render_target).unwrap();
+        if rt.render_pass != gfx.render_pass {
+            return Err(GPUError::LibraryError());
+        }
         self.begin_render_pass(&RenderPassBegin {
-            render_pass: gfx.render_pass,
+            render_target: info.render_target,
             viewport: info.viewport,
-            attachments: info.attachments,
+            clear_values: info.clear_values,
         })?;
         self.bind_pipeline(pipeline)
     }
@@ -1169,38 +1176,10 @@ impl CommandList {
         unsafe { &mut *self.ctx }
     }
 
-    /// Creates or retrieves a cached framebuffer and clear values
-    fn create_or_cache_framebuffer(
-        &mut self,
-        rp: &mut RenderPass,
-        info: &RenderPassBegin,
-    ) -> Result<SubpassContainer, GPUError> {
-        let mut hasher = DefaultHasher::new();
-        for a in info.attachments {
-            a.hash(&mut hasher);
-        }
-        let key = hasher.finish();
-        if !rp.subpasses.contains_key(&key) {
-            let fb = self.ctx_ref().make_framebuffer(info)?;
-            let clear_vals = info
-                .attachments
-                .iter()
-                .map(|a| a.to_vk_clear_value())
-                .collect();
-            rp.subpasses.insert(
-                key,
-                SubpassContainer {
-                    fb,
-                    clear_values: clear_vals,
-                },
-            );
-        }
-        Ok(rp.subpasses.get(&key).unwrap().clone())
-    }
 }
 
  impl CommandSink for CommandList {
-     fn begin_render_pass(&mut self, pass: &crate::driver::command::BeginRenderPass) {
+     fn begin_render_pass(&mut self, _pass: &crate::driver::command::BeginRenderPass) {
 //        let mut attachments: Vec<Attachment> = Vec::new();
 //        for i in 0..pass.color_count as usize {
 //            let color = pass.colors[i];
@@ -1241,7 +1220,7 @@ impl CommandList {
 //        self.begin_render_pass(&render_pass_begin).unwrap();
      }
  
-     fn end_render_pass(&mut self, pass: &crate::driver::command::EndRenderPass) {
+     fn end_render_pass(&mut self, _pass: &crate::driver::command::EndRenderPass) {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
@@ -1300,27 +1279,27 @@ impl CommandList {
         self.copy_buffer(info);
      }
  
-     fn copy_texture(&mut self, cmd: &crate::driver::command::CopyImage) {
+     fn copy_texture(&mut self, _cmd: &crate::driver::command::CopyImage) {
      }
- 
-     fn texture_barrier(&mut self, cmd: &crate::driver::command::ImageBarrier) {
+
+     fn texture_barrier(&mut self, _cmd: &crate::driver::command::ImageBarrier) {
 //        let barrier = ImageBarrier { view: Handle::new(cmd.texture.index(), cmd.texture.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };
 //        self.image_barrier(barrier);
      }
  
-     fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
+     fn buffer_barrier(&mut self, _cmd: &crate::driver::command::BufferBarrier) {
         // Buffer barriers are not directly supported in Vulkan, so we need to use a memory barrier
         unsafe {
             self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]);
         }
      }
  
-     fn debug_marker_begin(&mut self, cmd: &crate::driver::command::DebugMarkerBegin) {
+     fn debug_marker_begin(&mut self, _cmd: &crate::driver::command::DebugMarkerBegin) {
         // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
         unsafe { self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]) };
      }
 
-    fn debug_marker_end(&mut self, cmd: &crate::driver::command::DebugMarkerEnd) {
+    fn debug_marker_end(&mut self, _cmd: &crate::driver::command::DebugMarkerEnd) {
         todo!()
     }
  }
