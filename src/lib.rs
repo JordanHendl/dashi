@@ -2,7 +2,7 @@ pub mod utils;
 pub mod driver;
 
 pub use driver::types::{
-    BindTableHandle, BufferHandle, Format, IndexType, PipelineHandle, TextureHandle, UsageBits,
+    BindTableHandle, BufferHandle, IndexType, PipelineHandle, TextureHandle, UsageBits,
 };
 
 #[cfg(feature = "vulkan")]

@@ -6,6 +6,7 @@ pub enum Op {
     BeginRenderPass = 0,
     Draw = 1,
     TextureBarrier = 2,
+    BufferBarrier = 3,
 }
 
 #[repr(C)]
@@ -25,6 +26,12 @@ pub struct Draw {
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct TextureBarrier {
     pub texture_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct BufferBarrier {
+    pub buffer_id: u32,
 }
 
 #[repr(C)]
@@ -94,6 +101,7 @@ impl Op {
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
             x if x == Op::Draw as u16 => Some(Op::Draw),
             x if x == Op::TextureBarrier as u16 => Some(Op::TextureBarrier),
+            x if x == Op::BufferBarrier as u16 => Some(Op::BufferBarrier),
             _ => None,
         }
     }
@@ -108,11 +116,13 @@ mod tests {
         let mut stream = CommandStream::new();
         let begin = BeginRenderPass { color_attachments: 1 };
         let draw = Draw { vertex_count: 3, instance_count: 1 };
-        let barrier = TextureBarrier { texture_id: 7 };
+        let tex_barrier = TextureBarrier { texture_id: 7 };
+        let buf_barrier = BufferBarrier { buffer_id: 9 };
 
         stream.push(Op::BeginRenderPass, &begin);
         stream.push(Op::Draw, &draw);
-        stream.push(Op::TextureBarrier, &barrier);
+        stream.push(Op::TextureBarrier, &tex_barrier);
+        stream.push(Op::BufferBarrier, &buf_barrier);
 
         let mut iter = stream.iter();
 
@@ -126,7 +136,11 @@ mod tests {
 
         let cmd3 = iter.next().unwrap();
         assert_eq!(cmd3.op, Op::TextureBarrier);
-        assert_eq!(*cmd3.payload::<TextureBarrier>(), barrier);
+        assert_eq!(*cmd3.payload::<TextureBarrier>(), tex_barrier);
+
+        let cmd4 = iter.next().unwrap();
+        assert_eq!(cmd4.op, Op::BufferBarrier);
+        assert_eq!(*cmd4.payload::<BufferBarrier>(), buf_barrier);
 
         assert!(iter.next().is_none());
     }

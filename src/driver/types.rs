@@ -35,7 +35,7 @@ pub enum IndexType {
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct UsageBits: u32 {
         const SAMPLED     = 0x1;
         const RT_WRITE    = 0x2;
