@@ -2,21 +2,34 @@ use std::alloc::{alloc_zeroed, Layout};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
+
+use bytemuck::{Pod, Zeroable};
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct Handle<T> {
     pub slot: u16,
     pub generation: u16,
-    phantom: PhantomData<T>,
+    phantom: PhantomData<fn() -> T>,
 }
 
 impl<T> Handle<T> {
     pub fn valid(&self) -> bool {
         return self.slot != std::u16::MAX && self.generation != std::u16::MAX;
     }
+
+    pub fn new(slot: u16, generation: u16) -> Self {
+        Self { slot, generation, phantom: PhantomData }
+    }
 }
 
-impl<T> Eq for Handle<T> {}
+impl<T> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Handle<T> {}
 
 impl<T> PartialEq for Handle<T> {
     fn eq(&self, other: &Self) -> bool {
@@ -24,34 +37,23 @@ impl<T> PartialEq for Handle<T> {
     }
 }
 
-impl<T> Clone for Handle<T> {
-    fn clone(&self) -> Self {
-        Self {
-            slot: self.slot.clone(),
-            generation: self.generation.clone(),
-            phantom: self.phantom.clone(),
-        }
-    }
-}
+impl<T> Eq for Handle<T> {}
 
 impl<T> Hash for Handle<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.slot.hash(state);
         self.generation.hash(state);
-        self.phantom.hash(state);
     }
 }
 
-impl<T> Copy for Handle<T> {}
 impl<T> Default for Handle<T> {
     fn default() -> Self {
-        Self {
-            slot: std::u16::MAX,
-            generation: std::u16::MAX,
-            phantom: Default::default(),
-        }
+        Self { slot: std::u16::MAX, generation: std::u16::MAX, phantom: PhantomData }
     }
 }
+
+unsafe impl<T: 'static> Zeroable for Handle<T> {}
+unsafe impl<T: 'static> Pod for Handle<T> {}
 
 struct ItemList<T> {
     items: *mut T,
