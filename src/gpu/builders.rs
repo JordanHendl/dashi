@@ -524,6 +524,7 @@ mod tests {
     use super::*;
     use crate::ContextInfo;
     use crate::*;
+    use crate::gpu::structs::Format as GpuFormat;
     use serial_test::serial;
     use std::panic;
 
@@ -694,7 +695,7 @@ mod tests {
 
         // 1) single subpass, only color
         let color_desc = AttachmentDescription {
-            format: Format::RGBA8,
+            format: GpuFormat::RGBA8,
             samples: SampleCount::S1,
             load_op: LoadOp::Clear,
             store_op: StoreOp::Store,
@@ -717,7 +718,7 @@ mod tests {
 
         // 2) with depth+stencil attachment
         let ds_desc = AttachmentDescription {
-            format: Format::D24S8,
+            format: GpuFormat::D24S8,
             samples: SampleCount::S1,
             load_op: LoadOp::Clear,
             store_op: StoreOp::DontCare,
