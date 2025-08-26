@@ -20,7 +20,7 @@ pub struct Sampler {
 }
 
 #[derive(Debug)]
-pub struct ImageView {
+pub struct VkImageView {
     pub(crate) img: Handle<Image>,
     pub(crate) range: vk::ImageSubresourceRange,
     pub(crate) view: vk::ImageView,

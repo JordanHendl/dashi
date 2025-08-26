@@ -23,13 +23,7 @@ fn framebuffer_compare() {
         })
         .unwrap();
 
-    let view = ctx
-        .make_image_view(&ImageViewInfo {
-            debug_name: "view",
-            img: image,
-            ..Default::default()
-        })
-        .unwrap();
+    let view = ImageView { img: image, ..Default::default() };
 
     let buffer = ctx
         .make_buffer(&BufferInfo {
@@ -54,7 +48,6 @@ fn framebuffer_compare() {
 
     ctx.destroy_cmd_list(list);
     ctx.destroy_buffer(buffer);
-    ctx.destroy_image_view(view);
     ctx.destroy_image(image);
     ctx.destroy();
 }

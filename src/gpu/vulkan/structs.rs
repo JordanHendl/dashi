@@ -1,6 +1,6 @@
 use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
-    GraphicsPipelineLayout, Image, ImageView, RenderPass, Sampler, SelectedDevice,
+    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
 use crate::{utils::Handle, BindGroup, BindTable, Semaphore};
 use std::hash::{Hash, Hasher};
@@ -254,7 +254,7 @@ impl<'a> Default for ImageInfo<'a> {
     }
 }
 
-#[derive(Hash, Clone, Debug, Default, Copy)]
+#[derive(Hash, Clone, Debug, Default, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum AspectMask {
     #[default]
@@ -264,18 +264,17 @@ pub enum AspectMask {
     DepthStencil,
 }
 
-pub struct ImageViewInfo<'a> {
-    pub debug_name: &'a str,
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageView {
     pub img: Handle<Image>,
     pub layer: u32,
     pub mip_level: u32,
     pub aspect: AspectMask,
 }
 
-impl<'a> Default for ImageViewInfo<'a> {
+impl Default for ImageView {
     fn default() -> Self {
         Self {
-            debug_name: "",
             img: Default::default(),
             layer: 0,
             mip_level: 0,
@@ -461,41 +460,6 @@ impl BufferView {
     }
 }
 
-pub struct ImageView2 {
-    pub handle: Handle<Image>,
-    pub sampler: Handle<Sampler>,
-    pub layer: u32,
-    pub mip_level: u32,
-    pub aspect: AspectMask,
-}
-
-impl ImageView2 {
-    pub fn default(handle: Handle<Image>, sampler: Handle<Sampler>) -> Self {
-        Self {
-            handle,
-            sampler,
-            layer: 0,
-            mip_level: 0,
-            aspect: Default::default(),
-        }
-    }
-
-    pub fn new(
-        handle: Handle<Image>,
-        sampler: Handle<Sampler>,
-        layer: u32,
-        mip_level: u32,
-        aspect: AspectMask,
-    ) -> Self {
-        Self {
-            handle,
-            sampler,
-            layer,
-            mip_level,
-            aspect,
-        }
-    }
-}
 
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
@@ -503,8 +467,7 @@ pub enum ShaderResource<'a> {
     StorageBuffer(Handle<Buffer>),
     Dynamic(&'a DynamicAllocator),
     DynamicStorage(&'a DynamicAllocator),
-    SampledImage(Handle<ImageView>, Handle<Sampler>),
-    SampledImage2(ImageView2),
+    SampledImage(ImageView, Handle<Sampler>),
 }
 
 pub struct BindingInfo<'a> {
@@ -815,7 +778,7 @@ pub enum AttachmentType {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Attachment {
-    pub img: Handle<ImageView>,
+    pub img: ImageView,
     pub clear: ClearValue,
 }
 
@@ -850,7 +813,7 @@ pub struct RenderPassInfo<'a> {
 pub struct RenderTargetInfo<'a> {
     pub debug_name: &'a str,
     pub render_pass: Handle<RenderPass>,
-    pub attachments: &'a [Handle<ImageView>],
+    pub attachments: &'a [ImageView],
 }
 
 #[derive(Hash, Debug, Clone)]

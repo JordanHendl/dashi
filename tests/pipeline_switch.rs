@@ -18,9 +18,7 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-    let view = ctx
-        .make_image_view(&ImageViewInfo { img, ..Default::default() })
-        .unwrap();
+    let view = ImageView { img, ..Default::default() };
 
     let rp = ctx
         .make_render_pass(&RenderPassInfo {
