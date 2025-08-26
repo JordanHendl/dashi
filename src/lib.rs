@@ -1,6 +1,10 @@
 pub mod utils;
 pub mod driver;
 
+pub use driver::types::{
+    BindTableHandle, BufferHandle, Format, IndexType, PipelineHandle, TextureHandle, UsageBits,
+};
+
 #[cfg(feature = "vulkan")]
 pub mod gpu;
 #[cfg(feature = "dx12")]
