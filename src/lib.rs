@@ -1,4 +1,5 @@
 pub mod utils;
+pub mod driver;
 
 #[cfg(feature = "vulkan")]
 pub mod gpu;
