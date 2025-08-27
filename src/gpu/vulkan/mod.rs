@@ -1,6 +1,8 @@
 mod error;
-use crate::utils::{
-    Handle, Pool,
+use crate::{
+    driver::command::CommandEncoder,
+    ir::VkReplayer,
+    utils::{Handle, Pool},
 };
 use ash::*;
 pub use error::*;
@@ -1091,6 +1093,23 @@ impl Context {
         };
 
         return Ok(cmd.fence.clone());
+    }
+
+    /// Replay a [`CommandEncoder`] on the given command list and submit it.
+    ///
+    /// The command list is reset before recording the encoded stream.
+    pub fn submit_encoder(
+        &mut self,
+        cmd: &mut CommandList,
+        encoder: &CommandEncoder,
+        info: &SubmitInfo,
+    ) -> Result<Handle<Fence>, GPUError> {
+        cmd.reset()?;
+        {
+            let mut replayer = VkReplayer::new(cmd);
+            replayer.replay(encoder);
+        }
+        self.submit(cmd, info)
     }
 
     pub fn make_semaphores(&mut self, count: usize) -> Result<Vec<Handle<Semaphore>>, GPUError> {
