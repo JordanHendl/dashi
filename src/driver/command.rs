@@ -133,7 +133,7 @@ pub struct CopyImage {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct ImageBarrier {
-    pub texture: Handle<Image>,
+    pub image: Handle<Image>,
     pub range: SubresourceRange,
 }
 
@@ -256,7 +256,7 @@ impl CommandEncoder {
         self.push(Op::CopyBuffer, &payload);
     }
 
-    /// Copy data between textures, emitting required barriers.
+    /// Copy data between images, emitting required barriers.
     pub fn copy_texture(
         &mut self,
         src: Handle<Image>,
@@ -440,7 +440,7 @@ mod tests {
         let draw = Draw { vertex_count: 3, instance_count: 1 };
         let dispatch = Dispatch { x: 1, y: 2, z: 3 };
         let copy = CopyBuffer { src: Handle::<Buffer>::new(4, 0), dst: Handle::<Buffer>::new(5, 0) };
-        let tex_barrier = ImageBarrier { texture: Handle::<Image>::new(7, 0), range: SubresourceRange::new(0,1,0,1) };
+        let img_barrier = ImageBarrier { image: Handle::<Image>::new(7, 0), range: SubresourceRange::new(0,1,0,1) };
         let buf_barrier = BufferBarrier { buffer: Handle::<Buffer>::new(9, 0) };
         let marker_begin = DebugMarkerBegin {};
         let marker_end = DebugMarkerEnd {};
@@ -451,7 +451,7 @@ mod tests {
         enc.push(Op::Draw, &draw);
         enc.push(Op::Dispatch, &dispatch);
         enc.push(Op::CopyBuffer, &copy);
-        enc.push(Op::ImageBarrier, &tex_barrier);
+        enc.push(Op::ImageBarrier, &img_barrier);
         enc.push(Op::BufferBarrier, &buf_barrier);
         enc.push(Op::DebugMarkerBegin, &marker_begin);
         enc.push(Op::DebugMarkerEnd, &marker_end);
@@ -484,7 +484,7 @@ mod tests {
 
         let cmd7 = iter.next().unwrap();
         assert_eq!(cmd7.op, Op::ImageBarrier);
-        assert_eq!(*cmd7.payload::<ImageBarrier>(), tex_barrier);
+        assert_eq!(*cmd7.payload::<ImageBarrier>(), img_barrier);
 
         let cmd8 = iter.next().unwrap();
         assert_eq!(cmd8.op, Op::BufferBarrier);

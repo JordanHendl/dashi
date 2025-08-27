@@ -37,15 +37,15 @@ impl StateTracker {
 
     pub fn request_texture_state(
         &mut self,
-        texture: Handle<Image>,
+        image: Handle<Image>,
         range: SubresourceRange,
         usage: UsageBits,
     ) -> Option<ImageBarrier> {
-        let key = (texture, range);
+        let key = (image, range);
         let current = self.textures.get(&key).copied().unwrap_or_default();
         if current != usage {
             self.textures.insert(key, usage);
-            Some(ImageBarrier { texture, range })
+            Some(ImageBarrier { image, range })
         } else {
             None
         }
