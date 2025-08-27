@@ -1,5 +1,6 @@
 pub mod utils;
 pub mod driver;
+pub mod ir;
 
 pub use driver::types::{Handle, IndexType, UsageBits};
 

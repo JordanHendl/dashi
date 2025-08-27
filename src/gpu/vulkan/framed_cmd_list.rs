@@ -1,4 +1,12 @@
-use crate::{utils::Handle, CommandList, CommandListInfo, Context, Fence, SubmitInfo};
+use crate::{
+    driver::command::CommandEncoder,
+    utils::Handle,
+    CommandList,
+    CommandListInfo,
+    Context,
+    Fence,
+    SubmitInfo,
+};
 
 pub struct FramedCommandList {
     cmds: Vec<CommandList>,
@@ -72,6 +80,16 @@ impl FramedCommandList {
         self.fences[self.curr as usize] = Some(unsafe {
             (*self.ctx)
                 .submit(&mut self.cmds[self.curr as usize], info)
+                .unwrap()
+        });
+
+        self.advance();
+    }
+
+    pub fn submit_encoder(&mut self, encoder: &CommandEncoder, info: &SubmitInfo) {
+        self.fences[self.curr as usize] = Some(unsafe {
+            (*self.ctx)
+                .submit_encoder(&mut self.cmds[self.curr as usize], encoder, info)
                 .unwrap()
         });
 
