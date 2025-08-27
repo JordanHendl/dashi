@@ -5,7 +5,7 @@ pub use crate::utils::handle::Handle;
 pub struct Pipeline;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Texture;
+pub struct Image;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct BindTable;

@@ -1309,7 +1309,7 @@ impl CommandList {
      }
 
      fn texture_barrier(&mut self, _cmd: &crate::driver::command::ImageBarrier) {
-//        let barrier = ImageBarrier { view: Handle::new(cmd.texture.index(), cmd.texture.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };
+//        let barrier = ImageBarrier { view: Handle::new(cmd.image.index(), cmd.image.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };
 //        self.image_barrier(barrier);
      }
  
