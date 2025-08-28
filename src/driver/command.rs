@@ -309,6 +309,63 @@ impl CommandEncoder {
     }
 }
 
+/// Allow using [`CommandEncoder`] anywhere a [`CommandSink`] is expected. This enables
+/// the new `gfx::cmd::CommandBuffer` front end to target both immediate command lists
+/// and the intermediate representation encoded by `CommandEncoder`.
+impl CommandSink for CommandEncoder {
+    fn begin_render_pass(&mut self, pass: &BeginRenderPass) {
+        let colors = &pass.colors[..pass.color_count as usize];
+        let depth = if pass.has_depth != 0 { Some(pass.depth) } else { None };
+        self.begin_render_pass(RenderPassDesc { colors, depth });
+    }
+
+    fn end_render_pass(&mut self, _pass: &EndRenderPass) {
+        self.end_render_pass();
+    }
+
+    fn bind_pipeline(&mut self, cmd: &BindPipeline) {
+        self.bind_pipeline(cmd.pipeline);
+    }
+
+    fn bind_table(&mut self, cmd: &BindTableCmd) {
+        self.bind_table(cmd.table);
+    }
+
+    fn draw(&mut self, cmd: &Draw) {
+        self.draw(cmd.vertex_count, cmd.instance_count);
+    }
+
+    fn dispatch(&mut self, cmd: &Dispatch) {
+        self.dispatch(cmd.x, cmd.y, cmd.z);
+    }
+
+    fn copy_buffer(&mut self, cmd: &CopyBuffer) {
+        self.copy_buffer(cmd.src, cmd.dst);
+    }
+
+    fn copy_texture(&mut self, cmd: &CopyImage) {
+        // Without range information default to a single subresource.
+        let range = SubresourceRange::new(0, 1, 0, 1);
+        self.copy_texture(cmd.src, cmd.dst, range);
+    }
+
+    fn texture_barrier(&mut self, cmd: &ImageBarrier) {
+        self.push(Op::ImageBarrier, cmd);
+    }
+
+    fn buffer_barrier(&mut self, cmd: &BufferBarrier) {
+        self.push(Op::BufferBarrier, cmd);
+    }
+
+    fn debug_marker_begin(&mut self, _cmd: &DebugMarkerBegin) {
+        self.begin_debug_marker();
+    }
+
+    fn debug_marker_end(&mut self, _cmd: &DebugMarkerEnd) {
+        self.end_debug_marker();
+    }
+}
+
 impl Default for CommandEncoder {
     fn default() -> Self {
         Self::new()
