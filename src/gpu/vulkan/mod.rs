@@ -3,6 +3,7 @@ use crate::{
     driver::command::CommandEncoder,
     ir::VkReplayer,
     utils::{Handle, Pool},
+    sync::ResourceLookup,
 };
 use ash::*;
 pub use error::*;
@@ -3430,5 +3431,15 @@ void main() {
         let ctx = Context::headless(&Default::default()).unwrap();
         // Bind table support is optional; ensure context can be created and cleaned up.
         ctx.destroy();
+    }
+}
+
+impl ResourceLookup for Context {
+    fn image_raw(&self, image: Handle<Image>) -> vk::Image {
+        self.images.get_ref(image).expect("invalid image").img
+    }
+
+    fn buffer_raw(&self, buffer: Handle<Buffer>) -> vk::Buffer {
+        self.buffers.get_ref(buffer).expect("invalid buffer").buf
     }
 }
