@@ -6,7 +6,7 @@ pub mod gfx;
 pub mod framegraph;
 
 pub use driver::types::{Handle, IndexType, UsageBits};
-pub use gfx::cmd::{CommandBuffer, CommandBuilder, CommandBuilderExt, RenderScope, DebugLabelScope};
+pub use gfx::cmd::{CommandBuffer, CommandBuilder, CommandBuilderExt, RenderScope, DebugLabelScope, EncodeTarget};
 
 pub mod gpu;
 #[cfg(feature = "dx12")]
