@@ -6,6 +6,7 @@ use dashi::driver::command::{
 use dashi::driver::state::SubresourceRange;
 use dashi::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
 use dashi::{Buffer, Image};
+use dashi::ir::NullReplayer;
 
 #[derive(Debug, PartialEq)]
 enum Recorded {
@@ -117,7 +118,8 @@ fn ir_roundtrip_core_ops() {
         .collect();
 
     let mut recorder = Recorder::default();
-    enc.submit(&mut recorder);
+    let mut replayer = NullReplayer::new(&mut recorder);
+    replayer.replay(&enc);
     assert_eq!(expected, recorder.cmds);
 }
 
