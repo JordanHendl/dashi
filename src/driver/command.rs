@@ -308,6 +308,18 @@ impl CommandEncoder {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
 
+    /// Insert a memory barrier for a texture resource.
+    pub fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+        let payload = ImageBarrier { image, range };
+        self.push(Op::ImageBarrier, &payload);
+    }
+
+    /// Insert a memory barrier for a buffer resource.
+    pub fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+        let payload = BufferBarrier { buffer };
+        self.push(Op::BufferBarrier, &payload);
+    }
+
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
     pub fn submit<S: CommandSink>(&self, sink: &mut S) {
         for cmd in self.iter() {

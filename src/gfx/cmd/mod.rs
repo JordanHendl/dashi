@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 use std::cell::Cell;
 
+use crate::{Buffer, Image};
 use crate::driver::command::{ColorAttachment, CommandEncoder, DepthAttachment, RenderPassDesc};
+use crate::driver::state::SubresourceRange;
 use crate::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
 
 /// Generic command buffer with type-state tracking.
@@ -80,6 +82,8 @@ pub trait CommandBuilder {
     fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>);
     fn bind_table(&mut self, table: Handle<BindTableRes>);
     fn draw(&mut self, vertices: u32, instances: u32);
+    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange);
+    fn buffer_barrier(&mut self, buffer: Handle<Buffer>);
 }
 
 /// Extension methods providing RAII helpers over [`CommandBuilder`] objects.
@@ -102,6 +106,88 @@ pub trait CommandBuilderExt: CommandBuilder {
 }
 
 impl<T: CommandBuilder + ?Sized> CommandBuilderExt for T {}
+
+/// Target for encoding commands. This can either record into an IR
+/// [`CommandEncoder`] or directly into an immediate [`CommandBuffer`].
+pub enum EncodeTarget<'a> {
+    /// Record to the intermediate representation encoder.
+    IR(&'a mut CommandEncoder),
+    /// Record directly to a command buffer in recording state.
+    CB(&'a mut CommandBuffer<Recording>),
+}
+
+impl<'a> From<&'a mut CommandEncoder> for EncodeTarget<'a> {
+    fn from(enc: &'a mut CommandEncoder) -> Self { Self::IR(enc) }
+}
+
+impl<'a> From<&'a mut CommandBuffer<Recording>> for EncodeTarget<'a> {
+    fn from(cb: &'a mut CommandBuffer<Recording>) -> Self { Self::CB(cb) }
+}
+
+impl<'a> CommandBuilder for EncodeTarget<'a> {
+    fn begin_render_pass<'b>(&mut self, desc: RenderPassDesc<'b>) {
+        match self {
+            EncodeTarget::IR(enc) => enc.begin_render_pass(desc),
+            EncodeTarget::CB(cb) => cb.begin_render_pass(desc),
+        }
+    }
+
+    fn end_render_pass(&mut self) {
+        match self {
+            EncodeTarget::IR(enc) => enc.end_render_pass(),
+            EncodeTarget::CB(cb) => cb.end_render_pass(),
+        }
+    }
+
+    fn begin_debug_label(&mut self, label: &str) {
+        match self {
+            EncodeTarget::IR(enc) => enc.begin_debug_label(label),
+            EncodeTarget::CB(cb) => cb.begin_debug_label(label),
+        }
+    }
+
+    fn end_debug_label(&mut self) {
+        match self {
+            EncodeTarget::IR(enc) => enc.end_debug_label(),
+            EncodeTarget::CB(cb) => cb.end_debug_label(),
+        }
+    }
+
+    fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>) {
+        match self {
+            EncodeTarget::IR(enc) => enc.bind_pipeline(pipeline),
+            EncodeTarget::CB(cb) => cb.bind_pipeline(pipeline),
+        }
+    }
+
+    fn bind_table(&mut self, table: Handle<BindTableRes>) {
+        match self {
+            EncodeTarget::IR(enc) => enc.bind_table(table),
+            EncodeTarget::CB(cb) => cb.bind_table(table),
+        }
+    }
+
+    fn draw(&mut self, vertices: u32, instances: u32) {
+        match self {
+            EncodeTarget::IR(enc) => enc.draw(vertices, instances),
+            EncodeTarget::CB(cb) => cb.draw(vertices, instances),
+        }
+    }
+
+    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+        match self {
+            EncodeTarget::IR(enc) => enc.texture_barrier(image, range),
+            EncodeTarget::CB(cb) => cb.texture_barrier(image, range),
+        }
+    }
+
+    fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+        match self {
+            EncodeTarget::IR(enc) => enc.buffer_barrier(buffer),
+            EncodeTarget::CB(cb) => cb.buffer_barrier(buffer),
+        }
+    }
+}
 
 impl CommandBuilder for CommandBuffer<Recording> {
     fn begin_render_pass<'a>(&mut self, _desc: RenderPassDesc<'a>) {
@@ -135,6 +221,10 @@ impl CommandBuilder for CommandBuffer<Recording> {
         assert_pipeline_bound(self.bound_pipeline);
         debug_assert!(self.render_pass_active, "draw outside render pass");
     }
+
+    fn texture_barrier(&mut self, _image: Handle<Image>, _range: SubresourceRange) {}
+
+    fn buffer_barrier(&mut self, _buffer: Handle<Buffer>) {}
 }
 
 impl CommandBuilder for CommandEncoder {
@@ -169,6 +259,14 @@ impl CommandBuilder for CommandEncoder {
         let pipeline = ENCODER_PIPELINE.with(|p| p.get());
         assert_pipeline_bound(pipeline);
         CommandEncoder::draw(self, vertices, instances);
+    }
+
+    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+        CommandEncoder::texture_barrier(self, image, range);
+    }
+
+    fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+        CommandEncoder::buffer_barrier(self, buffer);
     }
 }
 
