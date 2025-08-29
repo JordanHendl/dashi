@@ -3,6 +3,7 @@ pub mod driver;
 pub mod ir;
 pub mod sync;
 pub mod gfx;
+pub mod framegraph;
 
 pub use driver::types::{Handle, IndexType, UsageBits};
 pub use gfx::cmd::{CommandBuffer, CommandBuilder, CommandBuilderExt, RenderScope, DebugLabelScope};
