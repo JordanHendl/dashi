@@ -35,6 +35,11 @@ impl StateTracker {
         Self { textures: HashMap::new(), buffers: HashMap::new() }
     }
 
+    pub fn reset(&mut self) {
+        self.textures.clear();
+        self.buffers.clear();
+    }
+
     pub fn request_texture_state(
         &mut self,
         image: Handle<Image>,

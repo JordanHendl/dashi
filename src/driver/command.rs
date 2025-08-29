@@ -1,3 +1,4 @@
+use core::convert::TryInto;
 use bytemuck::{bytes_of, from_bytes, Pod, Zeroable};
 
 use crate::{Image, Buffer};
@@ -162,13 +163,15 @@ struct CmdHeader {
     size: u16,
 }
 
-/// A single structure that both records commands and stores them in a raw stream.
+/// A single structure that both records commands and stores them in per-frame arenas.
 ///
-/// The encoder keeps track of resource state and writes a compact byte stream that
-/// can be iterated over later.  The implementation is intentionally low level and
-/// strives to avoid unnecessary overhead in order to be "blazingly fast".
+/// Payloads up to 32 bytes are stored inline with the command header while larger
+/// payloads are written into a side buffer and referenced by index.  This keeps the
+/// hot path free of heap allocations and allows the encoder to be reused across
+/// frames without reallocating.
 pub struct CommandEncoder {
     data: Vec<u8>,
+    side: Vec<u8>,
     state: StateTracker,
 }
 
@@ -176,16 +179,38 @@ impl CommandEncoder {
     /// Create a new empty encoder. Some initial capacity is reserved to avoid
     /// frequent reallocations when recording many commands.
     pub fn new() -> Self {
-        Self { data: Vec::with_capacity(1024), state: StateTracker::new() }
+        Self {
+            data: Vec::with_capacity(1024),
+            side: Vec::with_capacity(256),
+            state: StateTracker::new(),
+        }
+    }
+
+    /// Clear all recorded commands while retaining allocated arenas.
+    pub fn reset(&mut self) {
+        self.data.clear();
+        self.side.clear();
+        self.state.reset();
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
     /// `inline(always)` so that callers can be optimized tightly.
     #[inline(always)]
     fn push<T: Pod>(&mut self, op: Op, payload: &T) {
-        let header = CmdHeader { op: op as u16, size: core::mem::size_of::<T>() as u16 };
-        self.data.extend_from_slice(bytes_of(&header));
-        self.data.extend_from_slice(bytes_of(payload));
+        const INLINE: usize = 32;
+        const SIDE_FLAG: u16 = 0x8000;
+        let size = core::mem::size_of::<T>();
+        if size <= INLINE {
+            let header = CmdHeader { op: op as u16, size: size as u16 };
+            self.data.extend_from_slice(bytes_of(&header));
+            self.data.extend_from_slice(bytes_of(payload));
+        } else {
+            let header = CmdHeader { op: op as u16, size: SIDE_FLAG | (size as u16) };
+            let offset = self.side.len() as u32;
+            self.side.extend_from_slice(bytes_of(payload));
+            self.data.extend_from_slice(bytes_of(&header));
+            self.data.extend_from_slice(bytes_of(&offset));
+        }
     }
 
     /// Begin a render pass with the provided attachments.
@@ -305,7 +330,7 @@ impl CommandEncoder {
 
     /// Iterate over recorded commands.
     pub fn iter(&self) -> CommandIter {
-        CommandIter { data: &self.data }
+        CommandIter { data: &self.data, side: &self.side }
     }
 }
 
@@ -332,6 +357,7 @@ impl<'a> Command<'a> {
 
 pub struct CommandIter<'a> {
     data: &'a [u8],
+    side: &'a [u8],
 }
 
 impl<'a> Iterator for CommandIter<'a> {
@@ -339,17 +365,33 @@ impl<'a> Iterator for CommandIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         use core::mem::size_of;
+        const SIDE_FLAG: u16 = 0x8000;
         if self.data.len() < size_of::<CmdHeader>() {
             return None;
         }
         let (head_bytes, rest) = self.data.split_at(size_of::<CmdHeader>());
         let header: CmdHeader = *from_bytes(head_bytes);
-        if rest.len() < header.size as usize {
-            return None;
+        if header.size & SIDE_FLAG != 0 {
+            let true_size = (header.size & !SIDE_FLAG) as usize;
+            if rest.len() < size_of::<u32>() {
+                return None;
+            }
+            let (idx_bytes, remaining) = rest.split_at(size_of::<u32>());
+            let offset = u32::from_ne_bytes(idx_bytes.try_into().unwrap()) as usize;
+            if self.side.len() < offset + true_size {
+                return None;
+            }
+            self.data = remaining;
+            let payload = &self.side[offset..offset + true_size];
+            Some(Command { op: Op::from_u16(header.op).unwrap(), bytes: payload })
+        } else {
+            if rest.len() < header.size as usize {
+                return None;
+            }
+            let (payload, remaining) = rest.split_at(header.size as usize);
+            self.data = remaining;
+            Some(Command { op: Op::from_u16(header.op).unwrap(), bytes: payload })
         }
-        let (payload, remaining) = rest.split_at(header.size as usize);
-        self.data = remaining;
-        Some(Command { op: Op::from_u16(header.op).unwrap(), bytes: payload })
     }
 }
 
