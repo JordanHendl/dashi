@@ -2,8 +2,10 @@ pub mod utils;
 pub mod driver;
 pub mod ir;
 pub mod sync;
+pub mod gfx;
 
 pub use driver::types::{Handle, IndexType, UsageBits};
+pub use gfx::cmd::{CommandBuffer, CommandBuilder, CommandBuilderExt, RenderScope, DebugLabelScope};
 
 pub mod gpu;
 #[cfg(feature = "dx12")]
