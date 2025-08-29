@@ -1,3 +1,4 @@
 /target
 /.cache
 /orbclient_stub/target
+tests/output

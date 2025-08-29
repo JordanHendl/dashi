@@ -63,6 +63,12 @@ impl From<vk::ImageLayout> for ImageLayout {
     }
 }
 
+impl ImageLayout {
+    pub const UNDEFINED: Self = Self(vk::ImageLayout::UNDEFINED.as_raw());
+    pub const GENERAL: Self = Self(vk::ImageLayout::GENERAL.as_raw());
+    pub const COLOR_ATTACHMENT_OPTIMAL: Self = Self(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL.as_raw());
+}
+
 impl From<Access> for vk::AccessFlags2 {
     fn from(acc: Access) -> Self {
         vk::AccessFlags2::from_raw(acc.bits())
