@@ -166,7 +166,10 @@ void main(){ out_color = buf.color; }
         list.dispatch_compute(Dispatch {
             compute: comp_pipe,
             workgroup_size: [1,1,1],
-            bind_groups: [Some(bind_group), None, None, None],
+            bindings: Bindings {
+                bind_groups: [Some(bind_group), None, None, None],
+                ..Default::default()
+            },
             ..Default::default()
         });
         let fence = ctx.submit(&mut list, &Default::default()).unwrap();
@@ -207,7 +210,15 @@ void main(){ out_color = buf.color; }
             render_target: rt,
             clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
         }).unwrap();
-        list.append(Command::Draw(Draw { vertices: vb, count: 3, bind_groups: [Some(bind_group), None, None, None], ..Default::default() }));
+        list.append(Command::Draw(Draw {
+            vertices: vb,
+            count: 3,
+            bindings: Bindings {
+                bind_groups: [Some(bind_group), None, None, None],
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
         list.end_drawing().unwrap();
         let fence = ctx.submit(&mut list, &Default::default()).unwrap();
         ctx.wait(fence).unwrap();

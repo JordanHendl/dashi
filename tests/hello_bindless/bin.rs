@@ -87,8 +87,11 @@ fn main() {
     list.dispatch_compute(Dispatch {
         compute: pipeline,
         workgroup_size: [1, 1, 1],
-        bind_tables: [Some(table), None, None, None],
-        dynamic_buffers: [Some(buf), None, None, None],
+        bindings: Bindings {
+            bind_tables: [Some(table), None, None, None],
+            dynamic_buffers: [Some(buf), None, None, None],
+            ..Default::default()
+        },
         ..Default::default()
     });
     let fence = ctx.submit(&mut list, &Default::default()).unwrap();

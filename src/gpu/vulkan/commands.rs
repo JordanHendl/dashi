@@ -89,12 +89,42 @@ impl Default for ImageBlit {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct Bindings {
+    pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+}
+
+impl Bindings {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (Option<Handle<BindTable>>, Option<Handle<BindGroup>>)> + '_ {
+        self.bind_tables
+            .iter()
+            .copied()
+            .zip(self.bind_groups.iter().copied())
+            .enumerate()
+            .filter_map(|(_i, (bt, bg))| {
+                if bt.is_some() || bg.is_some() {
+                    Some((bt, bg))
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn dynamic_offsets(&self) -> impl Iterator<Item = u32> + '_ {
+        self.dynamic_buffers
+            .iter()
+            .filter_map(|&d| d.map(|b| b.alloc.offset))
+    }
+}
+
 #[derive(Clone)]
 pub struct Dispatch {
     pub compute: Handle<ComputePipeline>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub workgroup_size: [u32; 3],
 }
 
@@ -102,9 +132,7 @@ impl Default for Dispatch {
     fn default() -> Self {
         Self {
             compute: Default::default(),
-            dynamic_buffers: Default::default(),
-            bind_groups: Default::default(),
-            bind_tables: Default::default(),
+            bindings: Default::default(),
             workgroup_size: Default::default(),
         }
     }
@@ -121,9 +149,7 @@ pub struct DrawBegin<'a> {
 #[derive(Clone, Default)]
 pub struct Draw {
     pub vertices: Handle<Buffer>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub instance_count: u32,
     pub count: u32,
 }
@@ -132,9 +158,7 @@ pub struct Draw {
 pub struct DrawIndexedDynamic {
     pub vertices: DynamicBuffer,
     pub indices: DynamicBuffer,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub index_count: u32,
     pub instance_count: u32,
     pub first_instance: u32,
@@ -148,9 +172,7 @@ impl Default for DrawIndexedDynamic {
             index_count: Default::default(),
             instance_count: 1,
             first_instance: 0,
-            bind_groups: [None, None, None, None],
-            bind_tables: [None, None, None, None],
-            dynamic_buffers: [None, None, None, None],
+            bindings: Default::default(),
         }
     }
 }
@@ -171,9 +193,7 @@ pub struct RenderPassBegin<'a> {
 pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub index_count: u32,
     pub instance_count: u32,
     pub first_instance: u32,
@@ -187,9 +207,7 @@ impl Default for DrawIndexed {
             index_count: Default::default(),
             instance_count: 1,
             first_instance: 0,
-            bind_groups: [None, None, None, None],
-            bind_tables: [None, None, None, None],
-            dynamic_buffers: [None, None, None, None],
+            bindings: Default::default(),
         }
     }
 }
@@ -197,9 +215,7 @@ impl Default for DrawIndexed {
 #[derive(Clone)]
 pub struct DrawIndexedIndirect {
     pub draw_params: Handle<Buffer>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub offset: u32,
     pub draw_count: u32,
     pub stride: u32,
@@ -209,9 +225,7 @@ impl Default for DrawIndexedIndirect {
     fn default() -> Self {
         Self {
             draw_params: Default::default(),
-            bind_groups: [None, None, None, None],
-            bind_tables: [None, None, None, None],
-            dynamic_buffers: [None, None, None, None],
+            bindings: Default::default(),
             offset: 0,
             draw_count: 0,
             stride: std::mem::size_of::<IndexedIndirectCommand>() as u32,
@@ -222,9 +236,7 @@ impl Default for DrawIndexedIndirect {
 #[derive(Clone)]
 pub struct DrawIndirect {
     pub draw_params: Handle<Buffer>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
     pub offset: u32,
     pub draw_count: u32,
     pub stride: u32,
@@ -234,9 +246,7 @@ impl Default for DrawIndirect {
     fn default() -> Self {
         Self {
             draw_params: Default::default(),
-            bind_groups: [None, None, None, None],
-            bind_tables: [None, None, None, None],
-            dynamic_buffers: [None, None, None, None],
+            bindings: Default::default(),
             offset: 0,
             draw_count: 0,
             stride: std::mem::size_of::<IndirectCommand>() as u32,
@@ -248,9 +258,7 @@ impl Default for DrawIndirect {
 pub struct BindPipeline {
     pub gfx: Option<Handle<GraphicsPipeline>>,
     pub compute: Option<Handle<ComputePipeline>>,
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub bindings: Bindings,
 }
 
 #[derive(Clone, Copy)]
@@ -663,17 +671,13 @@ impl CommandList {
                 pipeline.raw,
             );
 
-            // Bind descriptor sets, preferring bind tables when available
-            for i in 0..cmd.bind_tables.len() {
-                let offsets: Vec<u32> = cmd.dynamic_buffers[i]
-                    .into_iter()
-                    .map(|b| b.alloc.offset)
-                    .collect();
+            let offsets: Vec<u32> = cmd.bindings.dynamic_offsets().collect();
+            for (bt, bg) in cmd.bindings.iter() {
                 self.bind_descriptor_set(
                     vk::PipelineBindPoint::COMPUTE,
                     layout,
-                    cmd.bind_tables[i],
-                    cmd.bind_groups[i],
+                    bt,
+                    bg,
                     &offsets,
                 );
             }
@@ -749,11 +753,7 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw(&mut self, cmd: Draw) -> Result<()> {
         unsafe {
-            self.bind_draw_descriptor_sets(
-                &cmd.dynamic_buffers,
-                &cmd.bind_groups,
-                &cmd.bind_tables,
-            )?;
+            self.bind_draw_descriptor_sets(&cmd.bindings)?;
             let buf = self
                 .ctx_ref()
                 .buffers
@@ -783,11 +783,7 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed(&mut self, cmd: DrawIndexed) -> Result<()> {
         unsafe {
-            self.bind_draw_descriptor_sets(
-                &cmd.dynamic_buffers,
-                &cmd.bind_groups,
-                &cmd.bind_tables,
-            )?;
+            self.bind_draw_descriptor_sets(&cmd.bindings)?;
             let v_buf = self
                 .ctx_ref()
                 .buffers
@@ -833,11 +829,7 @@ impl CommandList {
     /// - Transitions must be handled via appropriate barriers.
     pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) -> Result<()> {
         unsafe {
-            self.bind_draw_descriptor_sets(
-                &cmd.dynamic_buffers,
-                &cmd.bind_groups,
-                &cmd.bind_tables,
-            )?;
+            self.bind_draw_descriptor_sets(&cmd.bindings)?;
             let v_buf = self
                 .ctx_ref()
                 .buffers
@@ -943,12 +935,7 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn bind_draw_descriptor_sets(
-        &mut self,
-        dyn_bufs: &[Option<DynamicBuffer>; 4],
-        bgs: &[Option<Handle<BindGroup>>; 4],
-        bts: &[Option<Handle<BindTable>>; 4],
-    ) -> Result<()> {
+    pub fn bind_draw_descriptor_sets(&mut self, bindings: &Bindings) -> Result<()> {
         let p = self
             .ctx_ref()
             .gfx_pipelines
@@ -960,16 +947,13 @@ impl CommandList {
             .get_ref(p.layout)
             .ok_or(GPUError::SlotError())?
             .layout;
-        let offsets: Vec<u32> = dyn_bufs
-            .iter()
-            .filter_map(|&d| d.map(|b| b.alloc.offset))
-            .collect();
-        for i in 0..bts.len() {
+        let offsets: Vec<u32> = bindings.dynamic_offsets().collect();
+        for (bt, bg) in bindings.iter() {
             self.bind_descriptor_set(
                 vk::PipelineBindPoint::GRAPHICS,
                 p_layout,
-                bts[i],
-                bgs[i],
+                bt,
+                bg,
                 &offsets,
             );
         }
@@ -1023,16 +1007,13 @@ impl CommandList {
                     vk::PipelineBindPoint::GRAPHICS,
                     gfx.raw,
                 );
-                for i in 0..info.bind_tables.len() {
-                    let offsets: Vec<u32> = info.dynamic_buffers[i]
-                        .into_iter()
-                        .map(|b| b.alloc.offset)
-                        .collect();
+                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
+                for (bt, bg) in info.bindings.iter() {
                     self.bind_descriptor_set(
                         vk::PipelineBindPoint::GRAPHICS,
                         layout,
-                        info.bind_tables[i],
-                        info.bind_groups[i],
+                        bt,
+                        bg,
                         &offsets,
                     );
                 }
@@ -1054,16 +1035,13 @@ impl CommandList {
                     vk::PipelineBindPoint::COMPUTE,
                     comp.raw,
                 );
-                for i in 0..info.bind_tables.len() {
-                    let offsets: Vec<u32> = info.dynamic_buffers[i]
-                        .into_iter()
-                        .map(|b| b.alloc.offset)
-                        .collect();
+                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
+                for (bt, bg) in info.bindings.iter() {
                     self.bind_descriptor_set(
                         vk::PipelineBindPoint::COMPUTE,
                         layout,
-                        info.bind_tables[i],
-                        info.bind_groups[i],
+                        bt,
+                        bg,
                         &offsets,
                     );
                 }

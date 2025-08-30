@@ -243,8 +243,11 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
                 vertices,
                 indices,
                 index_count: INDICES.len() as u32,
-                bind_groups: [Some(bind_group), None, None, None],
-                dynamic_buffers: [Some(buf), None, None, None],
+                bindings: Bindings {
+                    bind_groups: [Some(bind_group), None, None, None],
+                    dynamic_buffers: [Some(buf), None, None, None],
+                    ..Default::default()
+                },
                 ..Default::default()
             }));
             list.end_drawing().unwrap();

@@ -3403,8 +3403,11 @@ void main() {
         list.dispatch_compute(Dispatch {
             compute: pipeline,
             workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
-            bind_groups: [Some(bind_group), None, None, None],
-            dynamic_buffers: [Some(buf), None, None, None],
+            bindings: Bindings {
+                bind_groups: [Some(bind_group), None, None, None],
+                dynamic_buffers: [Some(buf), None, None, None],
+                ..Default::default()
+            },
             ..Default::default()
         });
 
