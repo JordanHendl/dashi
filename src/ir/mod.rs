@@ -1,5 +1,3 @@
-pub mod replay_vk;
-pub mod replay_null;
+pub mod replayer;
 
-pub use replay_vk::VkReplayer;
-pub use replay_null::NullReplayer;
+pub use replayer::{CommandReplayer, Replayer};

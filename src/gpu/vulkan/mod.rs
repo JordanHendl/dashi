@@ -1,7 +1,7 @@
 mod error;
 use crate::{
     driver::command::CommandEncoder,
-    ir::VkReplayer,
+    ir::{CommandReplayer, Replayer},
     utils::{Handle, Pool},
     sync::ResourceLookup,
 };
@@ -1107,8 +1107,7 @@ impl Context {
     ) -> Result<Handle<Fence>, GPUError> {
         cmd.reset()?;
         {
-            let mut replayer = VkReplayer::new(cmd);
-            replayer.replay(encoder);
+            CommandReplayer::new(cmd).replay(encoder);
         }
         self.submit(cmd, info)
     }
