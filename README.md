@@ -48,6 +48,23 @@ To try the OpenXR simple scene example (requires a VR headset), run:
 cargo run --no-default-features --features dashi-openxr --example openxr_simple_scene
 ```
 
+### Command Submission
+
+Dashi can record commands directly or via the heap-free `CommandEncoder`. The
+`Recorder` trait unifies both paths. Submit work with either a reference to an
+encoder or a closure that records onto the provided command list:
+
+```rust
+let mut list = ctx.begin_command_list(&CommandListInfo::default())?;
+let encoder = CommandEncoder::new();
+ctx.submit_with(&mut list, &encoder, &SubmitInfo::default())?;
+
+ctx.submit_with(&mut list, |cmd| {
+    // direct recording
+    cmd.draw(3, 1);
+}, &SubmitInfo::default())?;
+```
+
 Creating an image with `mip_levels` greater than 1 will automatically generate
 the full mip chain after the initial data upload.
 

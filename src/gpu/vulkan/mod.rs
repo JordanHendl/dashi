@@ -1,7 +1,6 @@
 mod error;
 use crate::{
-    driver::command::CommandEncoder,
-    ir::{CommandReplayer, Replayer},
+    driver::command::Recorder,
     utils::{Handle, Pool},
     sync::ResourceLookup,
 };
@@ -1003,19 +1002,16 @@ impl Context {
         return Ok(cmd.fence.clone());
     }
 
-    /// Replay a [`CommandEncoder`] on the given command list and submit it.
-    ///
-    /// The command list is reset before recording the encoded stream.
-    pub fn submit_encoder(
+    /// Reset the given command list, record commands using the provided recorder,
+    /// and submit it.
+    pub fn submit_with<R: Recorder<CommandList>>(
         &mut self,
         cmd: &mut CommandList,
-        encoder: &CommandEncoder,
+        recorder: R,
         info: &SubmitInfo,
     ) -> Result<Handle<Fence>, GPUError> {
         cmd.reset()?;
-        {
-            CommandReplayer::new(cmd).replay(encoder);
-        }
+        recorder.record(cmd);
         self.submit(cmd, info)
     }
 

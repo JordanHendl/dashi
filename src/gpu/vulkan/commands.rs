@@ -1292,46 +1292,7 @@ impl CommandList {
 }
 
  impl CommandSink for CommandList {
-     fn begin_render_pass(&mut self, _pass: &crate::driver::command::BeginRenderPass) {
-//        let mut attachments: Vec<Attachment> = Vec::new();
-//        for i in 0..pass.color_count as usize {
-//            let color = pass.colors[i];
-//            attachments.push(Attachment {
-//                img: color.handle,
-//                clear: crate::ClearValue::Color(color.clear),
-//            });
-//        }
-//        if pass.has_depth == 1 {
-//            attachments.push(Attachment {
-//                img: Handle::new(pass.depth.handle.index(), pass.depth.handle.version()),
-//                clear: crate::ClearValue::DepthStencil {
-//                    depth: pass.depth.clear,
-//                    stencil: 0,
-//                },
-//            });
-//        }
-//        let render_pass_begin = RenderPassBegin {
-//            render_pass: Handle::new(0, 0),
-//            viewport: crate::Viewport {
-//                area: crate::FRect2D {
-//                    x: 0.0,
-//                    y: 0.0,
-//                    w: 1024.0,
-//                    h: 768.0,
-//                },
-//                scissor: crate::Rect2D {
-//                    x: 0,
-//                    y: 0,
-//                    w: 1024,
-//                    h: 768,
-//                },
-//                min_depth: 0.0,
-//                max_depth: 1.0,
-//            },
-//            attachments: &attachments,
-//        };
-//        self.begin_render_pass(&render_pass_begin).unwrap();
-     }
+    fn begin_render_pass(&mut self, _pass: &crate::driver::command::BeginRenderPass) {}
  
      fn end_render_pass(&mut self, _pass: &crate::driver::command::EndRenderPass) {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };

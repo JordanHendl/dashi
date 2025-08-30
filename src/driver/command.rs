@@ -442,6 +442,31 @@ pub trait CommandSink {
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);
 }
 
+/// Trait for types that can record commands onto a [`CommandSink`].
+///
+/// This allows unified submission of either an encoded command stream
+/// ([`CommandEncoder`]) or direct recording via a closure.
+pub trait Recorder<S: CommandSink> {
+    /// Record commands onto the provided sink.
+    fn record(self, sink: &mut S);
+}
+
+impl<'a, S: CommandSink> Recorder<S> for &'a CommandEncoder {
+    fn record(self, sink: &mut S) {
+        use crate::ir::{CommandReplayer, Replayer};
+        CommandReplayer::new(sink).replay(self);
+    }
+}
+
+impl<S: CommandSink, F> Recorder<S> for F
+where
+    F: FnOnce(&mut S),
+{
+    fn record(self, sink: &mut S) {
+        self(sink);
+    }
+}
+
 //===----------------------------------------------------------------------===//
 // Tests
 //===----------------------------------------------------------------------===//
