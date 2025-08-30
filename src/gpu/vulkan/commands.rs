@@ -14,7 +14,7 @@ use crate::utils::Handle;
 use crate::{
     BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline,
     Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
-    IndexedIndirectCommand, IndirectCommand, Rect2D, Viewport,
+    IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Viewport,
 };
 
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
@@ -284,25 +284,26 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn append(&mut self, cmd: Command) {
+    pub fn append(&mut self, cmd: Command) -> Result<()> {
         if self.ctx.is_null() {
-            return;
+            return Ok(());
         }
         match cmd {
-            Command::BufferCopy(c) => self.copy_buffer(c),
-            Command::BufferImageCopy(c) => self.copy_buffer_to_image(c),
-            Command::ImageBufferCopy(c) => self.copy_image_to_buffer(c),
-            Command::Blit(c) => self.blit_image(c),
-            Command::ImageBarrier(b) => self.image_barrier(b),
-            Command::Dispatch(d) => self.dispatch_compute(d),
-            Command::Draw(d) => self.draw(d),
-            Command::DrawIndexed(d) => self.draw_indexed(d),
-            Command::DrawIndexedDynamic(d) => self.draw_indexed_dynamic(d),
-            Command::DrawIndexedIndirect(d) => self.draw_indexed_indirect(d),
-            Command::DrawIndirect(d) => self.draw_indirect(d),
-            Command::BindPipeline(p) => self.cmd_bind_pipeline(p),
+            Command::BufferCopy(c) => self.copy_buffer(c)?,
+            Command::BufferImageCopy(c) => self.copy_buffer_to_image(c)?,
+            Command::ImageBufferCopy(c) => self.copy_image_to_buffer(c)?,
+            Command::Blit(c) => self.blit_image(c)?,
+            Command::ImageBarrier(b) => self.image_barrier(b)?,
+            Command::Dispatch(d) => self.dispatch_compute(d)?,
+            Command::Draw(d) => self.draw(d)?,
+            Command::DrawIndexed(d) => self.draw_indexed(d)?,
+            Command::DrawIndexedDynamic(d) => self.draw_indexed_dynamic(d)?,
+            Command::DrawIndexedIndirect(d) => self.draw_indexed_indirect(d)?,
+            Command::DrawIndirect(d) => self.draw_indirect(d)?,
+            Command::BindPipeline(p) => self.cmd_bind_pipeline(p)?,
         }
         self.dirty = true;
+        Ok(())
     }
 
     /// Copy data between two buffers.
@@ -312,10 +313,18 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_buffer(&mut self, info: BufferCopy) {
+    pub fn copy_buffer(&mut self, info: BufferCopy) -> Result<()> {
         unsafe {
-            let src = self.ctx_ref().buffers.get_ref(info.src).unwrap();
-            let dst = self.ctx_ref().buffers.get_ref(info.dst).unwrap();
+            let src = self
+                .ctx_ref()
+                .buffers
+                .get_ref(info.src)
+                .ok_or(GPUError::SlotError())?;
+            let dst = self
+                .ctx_ref()
+                .buffers
+                .get_ref(info.dst)
+                .ok_or(GPUError::SlotError())?;
             self.ctx_ref().device.cmd_copy_buffer(
                 self.cmd_buf,
                 src.buf,
@@ -335,6 +344,7 @@ impl CommandList {
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
     /// Copy data from a buffer to an image.
@@ -344,26 +354,35 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_buffer_to_image(&mut self, rec: BufferImageCopy) {
+    pub fn copy_buffer_to_image(&mut self, rec: BufferImageCopy) -> Result<()> {
         unsafe {
-            let handle = self
+            let handle = self.ctx_ref().get_or_create_image_view(&rec.dst)?;
+            let view_data = self
                 .ctx_ref()
-                .get_or_create_image_view(&rec.dst)
-                .unwrap();
-            let view_data = self.ctx_ref().image_views.get_ref(handle).unwrap();
-            let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+                .image_views
+                .get_ref(handle)
+                .ok_or(GPUError::SlotError())?;
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(view_data.img)
+                .ok_or(GPUError::SlotError())?;
             let mip = view_data.range.base_mip_level as usize;
             let old_layout = img_data.layouts[mip];
             self.transition_image(
                 handle,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_WRITE,
-            );
+            )?;
 
             let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
             self.ctx_ref().device.cmd_copy_buffer_to_image(
                 self.cmd_buf,
-                self.ctx_ref().buffers.get_ref(rec.src).unwrap().buf,
+                self.ctx_ref()
+                    .buffers
+                    .get_ref(rec.src)
+                    .ok_or(GPUError::SlotError())?
+                    .buf,
                 img_data.img,
                 img_data.layouts[mip],
                 &[vk::BufferImageCopy {
@@ -384,12 +403,13 @@ impl CommandList {
                 old_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_READ,
-            );
+            )?;
             self.update_last_access(
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
     /// Copy image data into a buffer.
@@ -399,28 +419,37 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_image_to_buffer(&mut self, rec: ImageBufferCopy) {
+    pub fn copy_image_to_buffer(&mut self, rec: ImageBufferCopy) -> Result<()> {
         unsafe {
-            let handle = self
+            let handle = self.ctx_ref().get_or_create_image_view(&rec.src)?;
+            let view_data = self
                 .ctx_ref()
-                .get_or_create_image_view(&rec.src)
-                .unwrap();
-            let view_data = self.ctx_ref().image_views.get_ref(handle).unwrap();
-            let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+                .image_views
+                .get_ref(handle)
+                .ok_or(GPUError::SlotError())?;
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(view_data.img)
+                .ok_or(GPUError::SlotError())?;
             let mip = view_data.range.base_mip_level as usize;
             let old_layout = img_data.layouts[mip];
             self.transition_image(
                 handle,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_READ,
-            );
+            )?;
 
             let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
             self.ctx_ref().device.cmd_copy_image_to_buffer(
                 self.cmd_buf,
                 img_data.img,
                 img_data.layouts[mip],
-                self.ctx_ref().buffers.get_ref(rec.dst).unwrap().buf,
+                self.ctx_ref()
+                    .buffers
+                    .get_ref(rec.dst)
+                    .ok_or(GPUError::SlotError())?
+                    .buf,
                 &[vk::BufferImageCopy {
                     buffer_offset: rec.dst_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
@@ -439,12 +468,13 @@ impl CommandList {
                 old_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::MEMORY_READ,
-            );
+            )?;
             self.update_last_access(
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
     /// Blit one image region into another.
@@ -454,20 +484,30 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn blit_image(&mut self, cmd: ImageBlit) {
+    pub fn blit_image(&mut self, cmd: ImageBlit) -> Result<()> {
         unsafe {
-            let src_handle = self
+            let src_handle = self.ctx_ref().get_or_create_image_view(&cmd.src)?;
+            let dst_handle = self.ctx_ref().get_or_create_image_view(&cmd.dst)?;
+            let src_view = self
                 .ctx_ref()
-                .get_or_create_image_view(&cmd.src)
-                .unwrap();
-            let dst_handle = self
+                .image_views
+                .get_ref(src_handle)
+                .ok_or(GPUError::SlotError())?;
+            let dst_view = self
                 .ctx_ref()
-                .get_or_create_image_view(&cmd.dst)
-                .unwrap();
-            let src_view = self.ctx_ref().image_views.get_ref(src_handle).unwrap();
-            let dst_view = self.ctx_ref().image_views.get_ref(dst_handle).unwrap();
-            let src_data = self.ctx_ref().images.get_ref(src_view.img).unwrap();
-            let dst_data = self.ctx_ref().images.get_ref(dst_view.img).unwrap();
+                .image_views
+                .get_ref(dst_handle)
+                .ok_or(GPUError::SlotError())?;
+            let src_data = self
+                .ctx_ref()
+                .images
+                .get_ref(src_view.img)
+                .ok_or(GPUError::SlotError())?;
+            let dst_data = self
+                .ctx_ref()
+                .images
+                .get_ref(dst_view.img)
+                .ok_or(GPUError::SlotError())?;
             let src_dim = crate::gpu::mip_dimensions(src_data.dim, src_view.range.base_mip_level);
             let dst_dim = crate::gpu::mip_dimensions(dst_data.dim, dst_view.range.base_mip_level);
             let regions = [vk::ImageBlit {
@@ -518,13 +558,13 @@ impl CommandList {
                 vk::ImageLayout::GENERAL,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
-            );
+            )?;
             self.transition_image_layout(
                 dst_handle,
                 vk::ImageLayout::GENERAL,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
-            );
+            )?;
             self.ctx_ref().device.cmd_blit_image(
                 self.cmd_buf,
                 src_data.img,
@@ -540,18 +580,19 @@ impl CommandList {
                 src_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
-            );
+            )?;
             self.transition_image_layout(
                 dst_handle,
                 dst_layout,
                 vk::PipelineStageFlags::TRANSFER,
                 self.last_op_access,
-            );
+            )?;
             self.update_last_access(
                 vk::PipelineStageFlags::TRANSFER,
                 vk::AccessFlags::TRANSFER_WRITE,
             );
         }
+        Ok(())
     }
 
     /// Insert a barrier for an image without changing its layout.
@@ -561,14 +602,19 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn image_barrier(&mut self, barrier: ImageBarrier) {
+    pub fn image_barrier(&mut self, barrier: ImageBarrier) -> Result<()> {
         unsafe {
-            let handle = self
+            let handle = self.ctx_ref().get_or_create_image_view(&barrier.view)?;
+            let view_data = self
                 .ctx_ref()
-                .get_or_create_image_view(&barrier.view)
-                .unwrap();
-            let view_data = self.ctx_ref().image_views.get_ref(handle).unwrap();
-            let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+                .image_views
+                .get_ref(handle)
+                .ok_or(GPUError::SlotError())?;
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(view_data.img)
+                .ok_or(GPUError::SlotError())?;
             let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
@@ -587,6 +633,7 @@ impl CommandList {
                     .build()],
             );
         }
+        Ok(())
     }
 
     /// Dispatch a compute pipeline with the given workgroup size.
@@ -596,19 +643,19 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn dispatch_compute(&mut self, cmd: Dispatch) {
+    pub fn dispatch_compute(&mut self, cmd: Dispatch) -> Result<()> {
         unsafe {
             // Bind pipeline
             let pipeline = self
                 .ctx_ref()
                 .compute_pipelines
                 .get_ref(cmd.compute)
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let layout = self
                 .ctx_ref()
                 .compute_pipeline_layouts
                 .get_ref(pipeline.layout)
-                .unwrap()
+                .ok_or(GPUError::SlotError())?
                 .layout;
             self.ctx_ref().device.cmd_bind_pipeline(
                 self.cmd_buf,
@@ -643,6 +690,7 @@ impl CommandList {
                 vk::AccessFlags::SHADER_WRITE,
             );
         }
+        Ok(())
     }
 
     /// Begin a render pass if the requested one is not already active.
@@ -652,12 +700,12 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn begin_render_pass(&mut self, info: &RenderPassBegin) -> Result<(), GPUError> {
+    pub fn begin_render_pass(&mut self, info: &RenderPassBegin) -> Result<()> {
         let rt = self
             .ctx_ref()
             .render_targets
             .get_ref(info.render_target)
-            .unwrap();
+            .ok_or(GPUError::SlotError())?;
         if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
             return Ok(());
         }
@@ -674,7 +722,7 @@ impl CommandList {
                 .ctx_ref()
                 .render_passes
                 .get_ref(rt.render_pass)
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let clears: Vec<vk::ClearValue> =
                 info.clear_values.iter().map(clear_value_to_vk).collect();
             self.ctx_ref().device.cmd_begin_render_pass(
@@ -699,14 +747,18 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn draw(&mut self, cmd: Draw) {
+    pub fn draw(&mut self, cmd: Draw) -> Result<()> {
         unsafe {
             self.bind_draw_descriptor_sets(
                 &cmd.dynamic_buffers,
                 &cmd.bind_groups,
                 &cmd.bind_tables,
-            );
-            let buf = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
+            )?;
+            let buf = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
             static OFFSET: vk::DeviceSize = 0;
             self.ctx_ref()
                 .device
@@ -719,6 +771,7 @@ impl CommandList {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
     /// Issue an indexed draw call.
@@ -728,15 +781,23 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed(&mut self, cmd: DrawIndexed) {
+    pub fn draw_indexed(&mut self, cmd: DrawIndexed) -> Result<()> {
         unsafe {
             self.bind_draw_descriptor_sets(
                 &cmd.dynamic_buffers,
                 &cmd.bind_groups,
                 &cmd.bind_tables,
-            );
-            let v_buf = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
-            let i_buf = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
+            )?;
+            let v_buf = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
+            let i_buf = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.indices)
+                .ok_or(GPUError::SlotError())?;
             static OFFSET: vk::DeviceSize = 0;
             self.ctx_ref()
                 .device
@@ -760,6 +821,7 @@ impl CommandList {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
     /// Draw indexed geometry using dynamic buffers.
@@ -769,23 +831,23 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) {
+    pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) -> Result<()> {
         unsafe {
             self.bind_draw_descriptor_sets(
                 &cmd.dynamic_buffers,
                 &cmd.bind_groups,
                 &cmd.bind_tables,
-            );
+            )?;
             let v_buf = self
                 .ctx_ref()
                 .buffers
                 .get_ref(cmd.vertices.handle())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let i_buf = self
                 .ctx_ref()
                 .buffers
                 .get_ref(cmd.indices.handle())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let vb_offset = cmd.vertices.offset() as u64;
             let ib_offset = cmd.indices.offset() as u64;
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -813,6 +875,7 @@ impl CommandList {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
     /// Issue an indexed draw call using indirect parameters.
@@ -822,9 +885,13 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed_indirect(&mut self, cmd: DrawIndexedIndirect) {
+    pub fn draw_indexed_indirect(&mut self, cmd: DrawIndexedIndirect) -> Result<()> {
         unsafe {
-            let buf = self.ctx_ref().buffers.get_ref(cmd.draw_params).unwrap();
+            let buf = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.draw_params)
+                .ok_or(GPUError::SlotError())?;
             self.ctx_ref().device.cmd_draw_indexed_indirect(
                 self.cmd_buf,
                 buf.buf,
@@ -837,6 +904,7 @@ impl CommandList {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
     /// Issue a draw call using indirect parameters.
@@ -846,9 +914,13 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indirect(&mut self, cmd: DrawIndirect) {
+    pub fn draw_indirect(&mut self, cmd: DrawIndirect) -> Result<()> {
         unsafe {
-            let buf = self.ctx_ref().buffers.get_ref(cmd.draw_params).unwrap();
+            let buf = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.draw_params)
+                .ok_or(GPUError::SlotError())?;
             self.ctx_ref().device.cmd_draw_indirect(
                 self.cmd_buf,
                 buf.buf,
@@ -861,6 +933,7 @@ impl CommandList {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
     /// Bind descriptor sets and dynamic offsets for a draw.
@@ -875,17 +948,17 @@ impl CommandList {
         dyn_bufs: &[Option<DynamicBuffer>; 4],
         bgs: &[Option<Handle<BindGroup>>; 4],
         bts: &[Option<Handle<BindTable>>; 4],
-    ) {
+    ) -> Result<()> {
         let p = self
             .ctx_ref()
             .gfx_pipelines
-            .get_ref(self.curr_pipeline.unwrap())
-            .unwrap();
+            .get_ref(self.curr_pipeline.ok_or(GPUError::LibraryError())?)
+            .ok_or(GPUError::SlotError())?;
         let p_layout = self
             .ctx_ref()
             .gfx_pipeline_layouts
             .get_ref(p.layout)
-            .unwrap()
+            .ok_or(GPUError::SlotError())?
             .layout;
         let offsets: Vec<u32> = dyn_bufs
             .iter()
@@ -900,6 +973,7 @@ impl CommandList {
                 &offsets,
             );
         }
+        Ok(())
     }
 
     /// Set the active viewport for subsequent draw calls.
@@ -930,15 +1004,19 @@ impl CommandList {
         }
     }
   
-    fn cmd_bind_pipeline(&mut self, info: BindPipeline) {
+    fn cmd_bind_pipeline(&mut self, info: BindPipeline) -> Result<()> {
         unsafe {
             if let Some(pipeline) = info.gfx {
-                let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
+                let gfx = self
+                    .ctx_ref()
+                    .gfx_pipelines
+                    .get_ref(pipeline)
+                    .ok_or(GPUError::SlotError())?;
                 let layout = self
                     .ctx_ref()
                     .gfx_pipeline_layouts
                     .get_ref(gfx.layout)
-                    .unwrap()
+                    .ok_or(GPUError::SlotError())?
                     .layout;
                 self.ctx_ref().device.cmd_bind_pipeline(
                     self.cmd_buf,
@@ -960,12 +1038,16 @@ impl CommandList {
                 }
             }
             if let Some(pipeline) = info.compute {
-                let comp = self.ctx_ref().compute_pipelines.get_ref(pipeline).unwrap();
+                let comp = self
+                    .ctx_ref()
+                    .compute_pipelines
+                    .get_ref(pipeline)
+                    .ok_or(GPUError::SlotError())?;
                 let layout = self
                     .ctx_ref()
                     .compute_pipeline_layouts
                     .get_ref(comp.layout)
-                    .unwrap()
+                    .ok_or(GPUError::SlotError())?
                     .layout;
                 self.ctx_ref().device.cmd_bind_pipeline(
                     self.cmd_buf,
@@ -987,6 +1069,7 @@ impl CommandList {
                 }
             }
         }
+        Ok(())
     }
 
     /// Bind a graphics pipeline for subsequent draw calls.
@@ -996,7 +1079,7 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<(), GPUError> {
+    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
         if self.curr_rp.is_none() {
             return Err(GPUError::LibraryError());
         }
@@ -1007,7 +1090,7 @@ impl CommandList {
         self.cmd_bind_pipeline(BindPipeline {
             gfx: Some(pipeline),
             ..Default::default()
-        });
+        })?;
         Ok(())
     }
 
@@ -1039,10 +1122,18 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<(), GPUError> {
+    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<()> {
         let pipeline = info.pipeline;
-        let gfx = self.ctx_ref().gfx_pipelines.get_ref(pipeline).unwrap();
-        let rt = self.ctx_ref().render_targets.get_ref(info.render_target).unwrap();
+        let gfx = self
+            .ctx_ref()
+            .gfx_pipelines
+            .get_ref(pipeline)
+            .ok_or(GPUError::SlotError())?;
+        let rt = self
+            .ctx_ref()
+            .render_targets
+            .get_ref(info.render_target)
+            .ok_or(GPUError::SlotError())?;
         if rt.render_pass != gfx.render_pass {
             return Err(GPUError::LibraryError());
         }
@@ -1061,7 +1152,7 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn end_drawing(&mut self) -> Result<(), GPUError> {
+    pub fn end_drawing(&mut self) -> Result<()> {
         match self.curr_rp {
             Some(_) => {
                 unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
@@ -1082,7 +1173,7 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn next_subpass(&mut self) -> Result<(), GPUError> {
+    pub fn next_subpass(&mut self) -> Result<()> {
         if self.curr_rp.is_none() {
             return Err(GPUError::LibraryError());
         }
@@ -1106,7 +1197,7 @@ impl CommandList {
     /// - Resources must have matching usage flags and layouts.
     /// - Required pipelines and bind groups must be bound beforehand.
     /// - Transitions must be handled via appropriate barriers.
-    pub fn reset(&mut self) -> Result<(), GPUError> {
+    pub fn reset(&mut self) -> Result<()> {
         unsafe {
             (*self.ctx)
                 .device
@@ -1131,10 +1222,18 @@ impl CommandList {
         layout: vk::ImageLayout,
         new_stage: vk::PipelineStageFlags,
         new_access: vk::AccessFlags,
-    ) {
+    ) -> Result<()> {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
-            let img_data = self.ctx_ref().images.get_mut_ref(view_data.img).unwrap();
+            let view_data = self
+                .ctx_ref()
+                .image_views
+                .get_ref(view)
+                .ok_or(GPUError::SlotError())?;
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_mut_ref(view_data.img)
+                .ok_or(GPUError::SlotError())?;
             let mip = view_data.range.base_mip_level as usize;
             let (src_stage, src_access, dst_stage, dst_access) = self
                 .ctx_ref()
@@ -1159,6 +1258,7 @@ impl CommandList {
             self.last_op_stage = new_stage;
             self.last_op_access = new_access;
         }
+        Ok(())
     }
 
     /// Transition image with stage/access based on last_op
@@ -1167,10 +1267,18 @@ impl CommandList {
         view: Handle<VkImageView>,
         new_stage: vk::PipelineStageFlags,
         new_access: vk::AccessFlags,
-    ) {
+    ) -> Result<()> {
         unsafe {
-            let view_data = self.ctx_ref().image_views.get_ref(view).unwrap();
-            let img_data = self.ctx_ref().images.get_ref(view_data.img).unwrap();
+            let view_data = self
+                .ctx_ref()
+                .image_views
+                .get_ref(view)
+                .ok_or(GPUError::SlotError())?;
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(view_data.img)
+                .ok_or(GPUError::SlotError())?;
             let mip = view_data.range.base_mip_level as usize;
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
@@ -1191,6 +1299,7 @@ impl CommandList {
             self.last_op_stage = new_stage;
             self.last_op_access = new_access;
         }
+        Ok(())
     }
 
     fn update_last_access(&mut self, stage: vk::PipelineStageFlags, access: vk::AccessFlags) {
@@ -1259,23 +1368,26 @@ impl CommandList {
             gfx: Some(Handle::new(cmd.pipeline.slot, cmd.pipeline.generation)),
             ..Default::default()
         };
-        self.cmd_bind_pipeline(bind_pipeline);
+        let _ = self.cmd_bind_pipeline(bind_pipeline);
      }
  
      fn bind_table(&mut self, cmd: &crate::driver::command::BindTableCmd) {
         let table = Handle::new(cmd.table.slot, cmd.table.generation);
-        let p = self
-            .ctx_ref()
-            .gfx_pipelines
-            .get_ref(self.curr_pipeline.unwrap())
-            .unwrap();
-        let p_layout = self
-            .ctx_ref()
-            .gfx_pipeline_layouts
-            .get_ref(p.layout)
-            .unwrap()
-            .layout;
-        self.bind_descriptor_set(vk::PipelineBindPoint::GRAPHICS, p_layout, Some(table), None, &[]);
+        if let Some(curr) = self.curr_pipeline {
+            if let Some(p) = self.ctx_ref().gfx_pipelines.get_ref(curr) {
+                if let Some(layout) =
+                    self.ctx_ref().gfx_pipeline_layouts.get_ref(p.layout)
+                {
+                    self.bind_descriptor_set(
+                        vk::PipelineBindPoint::GRAPHICS,
+                        layout.layout,
+                        Some(table),
+                        None,
+                        &[],
+                    );
+                }
+            }
+        }
      }
  
      fn draw(&mut self, cmd: &crate::driver::command::Draw) {
@@ -1300,9 +1412,9 @@ impl CommandList {
         }
      }
  
-     fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
+    fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
         let info = BufferCopy { src: cmd.src, dst: cmd.dst, src_offset: 0, dst_offset: 0, size: 0 };
-        self.copy_buffer(info);
+        let _ = self.copy_buffer(info);
      }
  
      fn copy_texture(&mut self, _cmd: &crate::driver::command::CopyImage) {

@@ -587,7 +587,7 @@ impl Context {
     /// rendering or compute-only workloads. For general usage requirements
     /// (device selection, fence lifetimes, and queue limitations) see
     /// [`Self::new`].
-    pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
+    pub fn headless(info: &ContextInfo) -> Result<Self> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (
             entry,
@@ -686,7 +686,7 @@ impl Context {
     ///   [`Self::wait`] or [`Self::release_list_on_next_submit`] is called.
     /// - Vulkan queues require command lists to be finished before submission;
     ///   [`Self::submit`] will end a still-recording list automatically.
-    pub fn new(info: &ContextInfo) -> Result<Self, GPUError> {
+    pub fn new(info: &ContextInfo) -> Result<Self> {
         let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
         let (
             entry,
@@ -815,7 +815,7 @@ impl Context {
     /// The fence must have been obtained from [`Self::submit`]. This call
     /// ensures the associated GPU work is complete before the fence is
     /// reused or the command list is destroyed.
-    pub fn wait(&mut self, fence: Handle<Fence>) -> Result<(), GPUError> {
+    pub fn wait(&mut self, fence: Handle<Fence>) -> Result<()> {
         let fence = self.fences.get_ref(fence).unwrap();
         let _res = unsafe {
             self.device
@@ -851,7 +851,7 @@ impl Context {
     /// The returned [`CommandList`] starts in the recording state and may be
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
-    pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList, GPUError> {
+    pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList> {
         let cmd = unsafe {
             self.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
@@ -1263,7 +1263,7 @@ impl Context {
         }
     }
 
-    pub fn map_buffer_mut<T>(&mut self, buf: Handle<Buffer>) -> Result<&mut [T], GPUError> {
+    pub fn map_buffer_mut<T>(&mut self, buf: Handle<Buffer>) -> Result<&mut [T]> {
         let buf = match self.buffers.get_ref(buf) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
@@ -1278,7 +1278,7 @@ impl Context {
         });
     }
 
-    pub fn map_buffer<T>(&mut self, buf: Handle<Buffer>) -> Result<&[T], GPUError> {
+    pub fn map_buffer<T>(&mut self, buf: Handle<Buffer>) -> Result<&[T]> {
         let buf = match self.buffers.get_ref(buf) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
@@ -1293,7 +1293,7 @@ impl Context {
         });
     }
 
-    pub fn unmap_buffer(&self, buf: Handle<Buffer>) -> Result<(), GPUError> {
+    pub fn unmap_buffer(&self, buf: Handle<Buffer>) -> Result<()> {
         let buf = match self.buffers.get_ref(buf) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
@@ -1304,7 +1304,7 @@ impl Context {
 
         return Ok(());
     }
-    fn init_buffer(&mut self, buf: Handle<Buffer>, info: &BufferInfo) -> Result<(), GPUError> {
+    fn init_buffer(&mut self, buf: Handle<Buffer>, info: &BufferInfo) -> Result<()> {
         if info.initial_data.is_none() {
             return Ok(());
         }
@@ -1322,7 +1322,7 @@ impl Context {
                     src_offset: 0,
                     dst_offset: 0,
                     size: unsafe { info.initial_data.unwrap_unchecked().len() },
-                }));
+                }))?;
 
                 let fence = self.submit(&mut list, &Default::default())?;
                 self.wait(fence.clone())?;
@@ -1339,7 +1339,7 @@ impl Context {
         return Ok(());
     }
 
-    fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<(), GPUError> {
+    fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
         let tmp_view = ImageView {
             img: image,
             layer: 0,
@@ -1397,7 +1397,7 @@ impl Context {
             src: staging,
             dst: tmp_view,
             src_offset: 0,
-        }));
+        }))?;
 
         // 3) barrier: TRANSFER_DST_OPTIMAL -> GENERAL
         self.transition_image_stages(
@@ -1443,7 +1443,7 @@ impl Context {
                     dst: dst_view,
                     filter: Filter::Linear,
                     ..Default::default()
-                }));
+                }))?;
 
                 self.transition_image(list.cmd_buf, src_view_handle, vk::ImageLayout::GENERAL);
                 if i + 1 < info.mip_levels - 1 {
@@ -1474,7 +1474,7 @@ impl Context {
     ///
     /// This must be called before any of the GPU timer helpers are used.
     /// Existing timers are destroyed and replaced with the new set.
-    pub fn init_gpu_timers(&mut self, count: usize) -> Result<(), GPUError> {
+    pub fn init_gpu_timers(&mut self, count: usize) -> Result<()> {
         for timer in self.gpu_timers.drain(..) {
             unsafe { timer.destroy(&self.device) };
         }
@@ -1518,7 +1518,7 @@ impl Context {
     pub fn make_dynamic_allocator(
         &mut self,
         info: &DynamicAllocatorInfo,
-    ) -> Result<DynamicAllocator, GPUError> {
+    ) -> Result<DynamicAllocator> {
         let buffer = self.make_buffer(&BufferInfo {
             debug_name: info.debug_name,
             byte_size: info.byte_size,
@@ -2094,7 +2094,7 @@ impl Context {
     /// - Swapchain acquisition order is respected.
     /// - XR session state is valid. (If using OpenXR)
     /// - Synchronization primitives are handled during presentation.
-    pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<(), GPUError> {
+    pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<()> {
         let bg = self.bind_groups.get_ref(info.bg).unwrap();
         let descriptor_set = bg.set;
 
@@ -2224,7 +2224,7 @@ impl Context {
     }
 
     /// Updates an existing bind table with new resource bindings.
-    pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) -> Result<(), GPUError> {
+    pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) -> Result<()> {
         let table = self.bind_tables.get_ref(info.table).unwrap();
         let descriptor_set = table.set;
 
@@ -2588,7 +2588,7 @@ impl Context {
         &self,
         bind_group_layout_handle: &[Option<Handle<BindGroupLayout>>],
         bind_table_layout_handle: &[Option<Handle<BindTableLayout>>],
-    ) -> Result<vk::PipelineLayout, GPUError> {
+    ) -> Result<vk::PipelineLayout> {
         let mut layouts = Vec::new();
         for (bg, bt) in bind_group_layout_handle
             .iter()
@@ -2611,7 +2611,7 @@ impl Context {
         Ok(pipeline_layout)
     }
 
-    fn create_shader_module(&self, spirv_code: &[u32]) -> Result<vk::ShaderModule, GPUError> {
+    fn create_shader_module(&self, spirv_code: &[u32]) -> Result<vk::ShaderModule> {
         // Step 1: Create Shader Module Info
         let create_info = vk::ShaderModuleCreateInfo::builder()
             .code(spirv_code) // The SPIR-V bytecode
