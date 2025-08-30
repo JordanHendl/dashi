@@ -129,7 +129,17 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
         let pos=&mut buf.slice::<[f32;2]>()[0];
         pos[0]=(timer.elapsed_ms() as f32/1000.0).sin();
         pos[1]=(timer.elapsed_ms() as f32/1000.0).cos();
-        list.append(Command::DrawIndexed(DrawIndexed{vertices,indices,index_count:INDICES.len() as u32,bind_groups:[Some(bind_group),None,None,None],dynamic_buffers:[Some(buf),None,None,None],..Default::default()}));
+        list.append(Command::DrawIndexed(DrawIndexed{
+            vertices,
+            indices,
+            index_count: INDICES.len() as u32,
+            bindings: Bindings {
+                bind_groups: [Some(bind_group), None, None, None],
+                dynamic_buffers: [Some(buf), None, None, None],
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
         list.end_drawing().unwrap();
     }).unwrap();
     framed_list.submit(&SubmitInfo::default()).unwrap();
