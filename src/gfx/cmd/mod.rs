@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::cell::Cell;
 
 use crate::{Buffer, Image};
 use crate::driver::command::{ColorAttachment, CommandEncoder, DepthAttachment, RenderPassDesc};
@@ -10,7 +9,6 @@ use crate::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
 pub struct CommandBuffer<S> {
     render_pass_active: bool,
     label_depth: u32,
-    bound_pipeline: Option<Handle<Pipeline>>,
     _state: PhantomData<S>,
 }
 
@@ -18,16 +16,17 @@ pub struct Initial;
 pub struct Recording;
 pub struct Executable;
 pub struct Pending;
+pub struct PipelineBound;
 
 impl CommandBuffer<Initial> {
     /// Create a new command buffer in the initial state.
     pub fn new() -> Self {
-        Self { render_pass_active: false, label_depth: 0, bound_pipeline: None, _state: PhantomData }
+        Self { render_pass_active: false, label_depth: 0, _state: PhantomData }
     }
 
     /// Begin recording commands.
     pub fn begin(self) -> CommandBuffer<Recording> {
-        CommandBuffer { render_pass_active: false, label_depth: 0, bound_pipeline: None, _state: PhantomData }
+        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
     }
 }
 
@@ -36,7 +35,29 @@ impl CommandBuffer<Recording> {
     pub fn end(self) -> CommandBuffer<Executable> {
         debug_assert!(!self.render_pass_active, "render pass still active");
         debug_assert_eq!(self.label_depth, 0, "debug labels still active");
-        CommandBuffer { render_pass_active: false, label_depth: 0, bound_pipeline: None, _state: PhantomData }
+        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
+    }
+
+    pub fn bind_pipeline(self, _pipeline: Handle<Pipeline>) -> CommandBuffer<PipelineBound> {
+        CommandBuffer { render_pass_active: self.render_pass_active, label_depth: self.label_depth, _state: PhantomData }
+    }
+}
+
+impl CommandBuffer<PipelineBound> {
+    pub fn bind_pipeline(self, _pipeline: Handle<Pipeline>) -> Self {
+        self
+    }
+
+    pub fn draw(&mut self, _vertices: u32, _instances: u32) {
+        debug_assert!(self.render_pass_active, "draw outside render pass");
+    }
+
+    pub fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
+
+    pub fn end(self) -> CommandBuffer<Executable> {
+        debug_assert!(!self.render_pass_active, "render pass still active");
+        debug_assert_eq!(self.label_depth, 0, "debug labels still active");
+        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
     }
 }
 
@@ -44,7 +65,7 @@ impl CommandBuffer<Executable> {
     /// Submit the recorded commands. This is a stub that simply transitions the
     /// state to pending.
     pub fn submit(self) -> CommandBuffer<Pending> {
-        CommandBuffer { render_pass_active: false, label_depth: 0, bound_pipeline: None, _state: PhantomData }
+        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
     }
 }
 
@@ -79,9 +100,6 @@ pub trait CommandBuilder {
     fn end_render_pass(&mut self);
     fn begin_debug_label(&mut self, label: &str);
     fn end_debug_label(&mut self);
-    fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>);
-    fn bind_table(&mut self, table: Handle<BindTableRes>);
-    fn draw(&mut self, vertices: u32, instances: u32);
     fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange);
     fn buffer_barrier(&mut self, buffer: Handle<Buffer>);
 }
@@ -153,27 +171,6 @@ impl<'a> CommandBuilder for EncodeTarget<'a> {
         }
     }
 
-    fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>) {
-        match self {
-            EncodeTarget::IR(enc) => enc.bind_pipeline(pipeline),
-            EncodeTarget::CB(cb) => cb.bind_pipeline(pipeline),
-        }
-    }
-
-    fn bind_table(&mut self, table: Handle<BindTableRes>) {
-        match self {
-            EncodeTarget::IR(enc) => enc.bind_table(table),
-            EncodeTarget::CB(cb) => cb.bind_table(table),
-        }
-    }
-
-    fn draw(&mut self, vertices: u32, instances: u32) {
-        match self {
-            EncodeTarget::IR(enc) => enc.draw(vertices, instances),
-            EncodeTarget::CB(cb) => cb.draw(vertices, instances),
-        }
-    }
-
     fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
         match self {
             EncodeTarget::IR(enc) => enc.texture_barrier(image, range),
@@ -209,17 +206,29 @@ impl CommandBuilder for CommandBuffer<Recording> {
         self.label_depth -= 1;
     }
 
-    fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>) {
-        self.bound_pipeline = Some(pipeline);
+    fn texture_barrier(&mut self, _image: Handle<Image>, _range: SubresourceRange) {}
+
+    fn buffer_barrier(&mut self, _buffer: Handle<Buffer>) {}
+}
+
+impl CommandBuilder for CommandBuffer<PipelineBound> {
+    fn begin_render_pass<'a>(&mut self, _desc: RenderPassDesc<'a>) {
+        debug_assert!(!self.render_pass_active, "render pass already active");
+        self.render_pass_active = true;
     }
 
-    fn bind_table(&mut self, table: Handle<BindTableRes>) {
-        assert_layout_compat(self.bound_pipeline, table);
+    fn end_render_pass(&mut self) {
+        debug_assert!(self.render_pass_active, "no render pass active");
+        self.render_pass_active = false;
     }
 
-    fn draw(&mut self, _vertices: u32, _instances: u32) {
-        assert_pipeline_bound(self.bound_pipeline);
-        debug_assert!(self.render_pass_active, "draw outside render pass");
+    fn begin_debug_label(&mut self, _label: &str) {
+        self.label_depth += 1;
+    }
+
+    fn end_debug_label(&mut self) {
+        debug_assert!(self.label_depth > 0, "no debug label active");
+        self.label_depth -= 1;
     }
 
     fn texture_barrier(&mut self, _image: Handle<Image>, _range: SubresourceRange) {}
@@ -244,23 +253,6 @@ impl CommandBuilder for CommandEncoder {
         self.end_debug_marker();
     }
 
-    fn bind_pipeline(&mut self, pipeline: Handle<Pipeline>) {
-        ENCODER_PIPELINE.with(|p| p.set(Some(pipeline)));
-        CommandEncoder::bind_pipeline(self, pipeline);
-    }
-
-    fn bind_table(&mut self, table: Handle<BindTableRes>) {
-        let pipeline = ENCODER_PIPELINE.with(|p| p.get());
-        assert_layout_compat(pipeline, table);
-        CommandEncoder::bind_table(self, table);
-    }
-
-    fn draw(&mut self, vertices: u32, instances: u32) {
-        let pipeline = ENCODER_PIPELINE.with(|p| p.get());
-        assert_pipeline_bound(pipeline);
-        CommandEncoder::draw(self, vertices, instances);
-    }
-
     fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
         CommandEncoder::texture_barrier(self, image, range);
     }
@@ -270,18 +262,18 @@ impl CommandBuilder for CommandEncoder {
     }
 }
 
-thread_local! {
-    static ENCODER_PIPELINE: Cell<Option<Handle<Pipeline>>> = Cell::new(None);
+pub trait PipelineBuilder {
+    fn bind_table(&mut self, table: Handle<BindTableRes>);
 }
 
-#[inline]
-fn assert_pipeline_bound(pipeline: Option<Handle<Pipeline>>) {
-    debug_assert!(pipeline.is_some(), "pipeline not bound");
+impl PipelineBuilder for CommandBuffer<PipelineBound> {
+    fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
 }
 
-#[inline]
-fn assert_layout_compat(pipeline: Option<Handle<Pipeline>>, _table: Handle<BindTableRes>) {
-    assert_pipeline_bound(pipeline);
+impl PipelineBuilder for CommandEncoder {
+    fn bind_table(&mut self, table: Handle<BindTableRes>) {
+        CommandEncoder::bind_table(self, table);
+    }
 }
 
 pub struct DescriptorWriteBuilder {
@@ -298,7 +290,7 @@ impl DescriptorWriteBuilder {
         self
     }
 
-    pub fn build(self, cmd: &mut impl CommandBuilder) {
+    pub fn build(self, cmd: &mut impl PipelineBuilder) {
         if let Some(t) = self.table {
             cmd.bind_table(t);
         }
