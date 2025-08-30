@@ -210,7 +210,7 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
 
     let mut timer = Timer::new();
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 2);
+    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 2).unwrap();
 
     for _ in 0..100 {
         allocator.reset();
@@ -248,8 +248,8 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
                 ..Default::default()
             }));
             list.end_drawing().unwrap();
-        });
-        framed_list.submit(&SubmitInfo::default());
+        }).unwrap();
+        framed_list.submit(&SubmitInfo::default()).unwrap();
         ctx.present_xr_display(&mut display, state).unwrap();
     }
 }

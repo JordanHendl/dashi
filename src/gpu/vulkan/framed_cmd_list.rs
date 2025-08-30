@@ -5,114 +5,135 @@ use crate::{
     CommandListInfo,
     Context,
     Fence,
+    GPUError,
     SubmitInfo,
 };
+use std::ptr::NonNull;
 
 pub struct FramedCommandList {
     cmds: Vec<CommandList>,
     fences: Vec<Option<Handle<Fence>>>,
-    ctx: *mut Context,
+    ctx: NonNull<Context>,
     curr: u16,
 }
 
 impl FramedCommandList {
-    pub fn new(ctx: &mut Context, name: &str, frame_count: usize) -> Self {
+    pub fn new(
+        ctx: &mut Context,
+        name: &str,
+        frame_count: usize,
+    ) -> Result<Self, GPUError> {
         let mut cmds = Vec::new();
         for _i in 0..frame_count {
-            cmds.push(
-                ctx.begin_command_list(&CommandListInfo {
-                    debug_name: name,
-                    should_cleanup: false,
-                })
-                .unwrap(),
-            );
+            cmds.push(ctx.begin_command_list(&CommandListInfo {
+                debug_name: name,
+                should_cleanup: false,
+            })?);
         }
 
         let fences: Vec<Option<Handle<Fence>>> = vec![None; frame_count];
 
-        Self {
+        Ok(Self {
             cmds,
             fences,
             curr: 0,
-            ctx,
-        }
+            ctx: NonNull::from(ctx),
+        })
     }
 
-    pub fn append<T>(&mut self, mut record_func: T)
+    pub fn append<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
     where
         T: FnMut(&mut CommandList),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
-            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            unsafe {
+                self.ctx.as_mut().wait(fence.clone())?;
+            }
             self.fences[self.curr as usize] = None;
         }
 
         record_func(&mut self.cmds[self.curr as usize]);
+        Ok(())
     }
 
-    pub fn record_enumerated<T>(&mut self, mut record_func: T)
+    pub fn record_enumerated<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
     where
         T: FnMut(&mut CommandList, u16),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
-            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            unsafe {
+                self.ctx.as_mut().wait(fence.clone())?;
+            }
             self.fences[self.curr as usize] = None;
         }
 
-        self.cmds[self.curr as usize].reset().unwrap();
+        self.cmds[self.curr as usize].reset()?;
         record_func(&mut self.cmds[self.curr as usize], self.curr);
+        Ok(())
     }
 
-    pub fn record<T>(&mut self, mut record_func: T)
+    pub fn record<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
     where
         T: FnMut(&mut CommandList),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
-            unsafe { (*self.ctx).wait(fence.clone()).unwrap() };
+            unsafe {
+                self.ctx.as_mut().wait(fence.clone())?;
+            }
             self.fences[self.curr as usize] = None;
         }
 
-        self.cmds[self.curr as usize].reset().unwrap();
+        self.cmds[self.curr as usize].reset()?;
         record_func(&mut self.cmds[self.curr as usize]);
+        Ok(())
     }
 
-    pub fn submit(&mut self, info: &SubmitInfo) {
+    pub fn submit(&mut self, info: &SubmitInfo) -> Result<(), GPUError> {
         self.fences[self.curr as usize] = Some(unsafe {
-            (*self.ctx)
-                .submit(&mut self.cmds[self.curr as usize], info)
-                .unwrap()
+            self.ctx
+                .as_mut()
+                .submit(&mut self.cmds[self.curr as usize], info)?
         });
 
         self.advance();
+        Ok(())
     }
 
-    pub fn submit_encoder(&mut self, encoder: &CommandEncoder, info: &SubmitInfo) {
+    pub fn submit_encoder(
+        &mut self,
+        encoder: &CommandEncoder,
+        info: &SubmitInfo,
+    ) -> Result<(), GPUError> {
         self.fences[self.curr as usize] = Some(unsafe {
-            (*self.ctx)
-                .submit_encoder(&mut self.cmds[self.curr as usize], encoder, info)
-                .unwrap()
+            self.ctx.as_mut().submit_encoder(
+                &mut self.cmds[self.curr as usize],
+                encoder,
+                info,
+            )?
         });
 
         self.advance();
+        Ok(())
     }
 
     fn advance(&mut self) {
-        self.curr = (self.curr + 1) % (self.cmds.len() - 1) as u16;
+        self.curr = (self.curr + 1) % self.cmds.len() as u16;
     }
 
     /// Waits on all in-flight fences and clears them.
-    pub fn wait_all(&mut self) {
+    pub fn wait_all(&mut self) -> Result<(), GPUError> {
         for slot in self.fences.iter_mut() {
             if let Some(fence) = slot.take() {
                 unsafe {
-                    (*self.ctx).wait(fence).unwrap();
+                    self.ctx.as_mut().wait(fence)?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Record on every frame without advancing, running the closure on each CommandList
-    pub fn record_all<T>(&mut self, mut record_func: T)
+    pub fn record_all<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
     where
         T: FnMut(&mut CommandList),
     {
@@ -120,16 +141,17 @@ impl FramedCommandList {
         for idx in 0..count {
             if let Some(fence) = self.fences[idx].take() {
                 unsafe {
-                    (*self.ctx).wait(fence).unwrap();
+                    self.ctx.as_mut().wait(fence)?;
                 }
             }
-            self.cmds[idx].reset().unwrap();
+            self.cmds[idx].reset()?;
             record_func(&mut self.cmds[idx]);
         }
+        Ok(())
     }
 
     /// Record on every frame with index, running the closure on each CommandList and its index
-    pub fn record_all_enumerated<T>(&mut self, mut record_func: T)
+    pub fn record_all_enumerated<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
     where
         T: FnMut(&mut CommandList, u16),
     {
@@ -138,22 +160,24 @@ impl FramedCommandList {
             let ui = idx as usize;
             if let Some(fence) = self.fences[ui].take() {
                 unsafe {
-                    (*self.ctx).wait(fence).unwrap();
+                    self.ctx.as_mut().wait(fence)?;
                 }
             }
-            self.cmds[ui].reset().unwrap();
+            self.cmds[ui].reset()?;
             record_func(&mut self.cmds[ui], idx);
         }
+        Ok(())
     }
 
     /// Waits on all in-flight fences, frees all command lists, and clears internal state.
     fn destroy_all(&mut self) {
         // wait on any outstanding work
-        self.wait_all();
+        let _ = self.wait_all();
         // free command buffers and fences
         unsafe {
+            let ctx = self.ctx.as_mut();
             for cmd in self.cmds.drain(..) {
-                (*self.ctx).destroy_cmd_list(cmd);
+                ctx.destroy_cmd_list(cmd);
             }
         }
     }
@@ -180,7 +204,7 @@ mod tests {
         // create a headless context
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // 3 frames
-        let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3);
+        let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3).unwrap();
 
         // do 10 cycles of append + submit
         for _ in 0..10 {
@@ -188,13 +212,14 @@ mod tests {
                 // we can even record a no-op dispatch or whatever
                 // here we just begin/end an empty command list
                 let _ = cmd;
-            });
+            })
+            .unwrap();
 
             // no semaphores or waits
             let submit_info = SubmitInfo::default();
-            fcl.submit(&submit_info);
+            fcl.submit(&submit_info).unwrap();
         }
-        fcl.wait_all();
+        fcl.wait_all().unwrap();
         // cleanup
         drop(fcl);
         ctx.destroy();
@@ -207,7 +232,7 @@ mod tests {
     fn record_and_record_enumerated_indices() {
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // choose 3 frames so we see at least two distinct indices
-        let mut fcl = FramedCommandList::new(&mut ctx, "enum", 3);
+        let mut fcl = FramedCommandList::new(&mut ctx, "enum", 3).unwrap();
 
         let mut seen_plain = Vec::new();
         let mut seen_enum = Vec::new();
@@ -215,31 +240,35 @@ mod tests {
         // record() should always invoke our closure with no index
         fcl.record(|_cmd| {
             seen_plain.push(());
-        });
-        fcl.submit(&SubmitInfo::default());
+        })
+        .unwrap();
+        fcl.submit(&SubmitInfo::default()).unwrap();
 
         fcl.record(|_cmd| {
             seen_plain.push(());
-        });
-        fcl.submit(&SubmitInfo::default());
-        fcl.wait_all();
+        })
+        .unwrap();
+        fcl.submit(&SubmitInfo::default()).unwrap();
+        fcl.wait_all().unwrap();
 
         assert_eq!(seen_plain.len(), 2);
 
         // record_enumerated() gives us the current frame index before we submit
         fcl.record_enumerated(|_cmd, idx| {
             seen_enum.push(idx);
-        });
-        fcl.submit(&SubmitInfo::default());
-        fcl.wait_all();
+        })
+        .unwrap();
+        fcl.submit(&SubmitInfo::default()).unwrap();
+        fcl.wait_all().unwrap();
 
         fcl.record_enumerated(|_cmd, idx| {
             seen_enum.push(idx);
-        });
-        fcl.submit(&SubmitInfo::default());
-        fcl.wait_all();
-        // with 3 frames and the current advance logic, we should have seen [0, 1]
-        assert_eq!(seen_enum, vec![0, 1]);
+        })
+        .unwrap();
+        fcl.submit(&SubmitInfo::default()).unwrap();
+        fcl.wait_all().unwrap();
+        // with 3 frames and the current advance logic, we should have seen [2, 0]
+        assert_eq!(seen_enum, vec![2, 0]);
 
         drop(fcl);
         ctx.destroy();
