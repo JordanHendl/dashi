@@ -5,8 +5,8 @@ use crate::{
     CommandListInfo,
     Context,
     Fence,
-    GPUError,
     SubmitInfo,
+    Result,
 };
 use std::ptr::NonNull;
 
@@ -22,7 +22,7 @@ impl FramedCommandList {
         ctx: &mut Context,
         name: &str,
         frame_count: usize,
-    ) -> Result<Self, GPUError> {
+    ) -> Result<Self> {
         let mut cmds = Vec::new();
         for _i in 0..frame_count {
             cmds.push(ctx.begin_command_list(&CommandListInfo {
@@ -41,7 +41,7 @@ impl FramedCommandList {
         })
     }
 
-    pub fn append<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
+    pub fn append<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandList),
     {
@@ -56,7 +56,7 @@ impl FramedCommandList {
         Ok(())
     }
 
-    pub fn record_enumerated<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
+    pub fn record_enumerated<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandList, u16),
     {
@@ -72,7 +72,7 @@ impl FramedCommandList {
         Ok(())
     }
 
-    pub fn record<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
+    pub fn record<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandList),
     {
@@ -88,7 +88,7 @@ impl FramedCommandList {
         Ok(())
     }
 
-    pub fn submit(&mut self, info: &SubmitInfo) -> Result<(), GPUError> {
+    pub fn submit(&mut self, info: &SubmitInfo) -> Result<()> {
         self.fences[self.curr as usize] = Some(unsafe {
             self.ctx
                 .as_mut()
@@ -103,7 +103,7 @@ impl FramedCommandList {
         &mut self,
         encoder: &CommandEncoder,
         info: &SubmitInfo,
-    ) -> Result<(), GPUError> {
+    ) -> Result<()> {
         self.fences[self.curr as usize] = Some(unsafe {
             self.ctx.as_mut().submit_encoder(
                 &mut self.cmds[self.curr as usize],
@@ -121,7 +121,7 @@ impl FramedCommandList {
     }
 
     /// Waits on all in-flight fences and clears them.
-    pub fn wait_all(&mut self) -> Result<(), GPUError> {
+    pub fn wait_all(&mut self) -> Result<()> {
         for slot in self.fences.iter_mut() {
             if let Some(fence) = slot.take() {
                 unsafe {
@@ -133,7 +133,7 @@ impl FramedCommandList {
     }
 
     /// Record on every frame without advancing, running the closure on each CommandList
-    pub fn record_all<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
+    pub fn record_all<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandList),
     {
@@ -151,7 +151,7 @@ impl FramedCommandList {
     }
 
     /// Record on every frame with index, running the closure on each CommandList and its index
-    pub fn record_all_enumerated<T>(&mut self, mut record_func: T) -> Result<(), GPUError>
+    pub fn record_all_enumerated<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandList, u16),
     {

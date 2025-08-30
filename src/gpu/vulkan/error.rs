@@ -27,6 +27,9 @@ pub enum GPUError {
     HeadlessDisplayNotSupported,
 }
 
+/// Convenient crate-wide result type.
+pub type Result<T, E = GPUError> = std::result::Result<T, E>;
+
 //impl From<SlotError> for GPUError {
 //    fn from(res: ash::vk::Result) -> Self {
 //        return GPUError::VulkanError(VulkanError{res});

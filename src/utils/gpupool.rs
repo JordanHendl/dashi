@@ -1,6 +1,7 @@
 use crate::{Buffer, BufferCopy, BufferInfo, CommandList, Context, MemoryVisibility};
 
 use super::{Handle, Pool};
+use crate::Result;
 
 pub struct GPUPool<T> {
     buffer: Handle<Buffer>,
@@ -21,51 +22,54 @@ impl<T> Default for GPUPool<T> {
 }
 
 impl<T> GPUPool<T> {
-    pub fn new(ctx: &mut Context, info: &BufferInfo) -> Self {
+    pub fn new(ctx: &mut Context, info: &BufferInfo) -> Result<Self> {
         let len = info.byte_size as usize / std::mem::size_of::<T>();
 
         let mut b = info.clone();
         let staging_name = format!("{} Staging Buffer", info.debug_name);
         b.visibility = MemoryVisibility::Gpu;
-        let buffer = ctx.make_buffer(&b).unwrap();
+        let buffer = ctx.make_buffer(&b)?;
 
         b.debug_name = &staging_name;
         b.visibility = MemoryVisibility::CpuAndGpu;
-        let staging = ctx.make_buffer(&b).unwrap();
+        let staging = ctx.make_buffer(&b)?;
 
-        let mapped = ctx.map_buffer_mut::<u8>(staging).unwrap();
+        let mapped = ctx.map_buffer_mut::<u8>(staging)?;
         let pool = Pool::new_preallocated(mapped.as_mut_ptr(), len);
 
-        Self {
+        Ok(Self {
             buffer,
             staging,
             pool,
             _ctx: ctx,
-        }
+        })
     }
 
-    pub fn destroy(&mut self) {
-        unsafe { &*self._ctx }.unmap_buffer(self.staging).unwrap();
+    pub fn destroy(&mut self) -> Result<()> {
+        unsafe { &*self._ctx }.unmap_buffer(self.staging)?;
+        Ok(())
     }
 
     pub fn get_gpu_handle(&self) -> Handle<Buffer> {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandList) {
+    pub fn sync_down(&mut self, list: &mut CommandList) -> Result<()> {
         list.copy_buffer(BufferCopy {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
-        });
+        })?;
+        Ok(())
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandList) {
+    pub fn sync_up(&mut self, list: &mut CommandList) -> Result<()> {
         list.copy_buffer(BufferCopy {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
-        });
+        })?;
+        Ok(())
     }
 
     pub fn get_empty(&self) -> &[u32] {
@@ -135,7 +139,8 @@ mod tests {
                 initial_data: None,
                 ..Default::default()
             },
-        );
+        )
+        .unwrap();
 
         assert!(pool.len() == TEST_AMT);
 
@@ -151,12 +156,12 @@ mod tests {
         assert!(pool.len() == TEST_AMT);
 
         let mut list = ctx.begin_command_list(&Default::default()).unwrap();
-        pool.sync_up(&mut list);
+        pool.sync_up(&mut list).unwrap();
         ctx.submit(&mut list, &Default::default())
             .expect("ASSERT: Should be able to sync data up");
         
         ctx.sync_current_device();
-        pool.destroy();
+        pool.destroy().unwrap();
         ctx.destroy();
     }
 }
