@@ -11,12 +11,13 @@ use crate::{
 use crate::{Context, GPUError};
 #[cfg(feature = "dashi-openxr")]
 use crate::XrDisplayInfo;
+use smallvec::SmallVec;
 
 /// Builds a RenderPass via the builder pattern.
 pub struct RenderPassBuilder<'a> {
     debug_name: &'a str,
     viewport: Viewport,
-    subpasses: Vec<SubpassDescription<'a>>,
+    subpasses: SmallVec<[SubpassDescription<'a>; 4]>,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -25,7 +26,7 @@ impl<'a> RenderPassBuilder<'a> {
         Self {
             debug_name,
             viewport,
-            subpasses: Vec::new(),
+            subpasses: SmallVec::new(),
         }
     }
 
@@ -53,6 +54,13 @@ impl<'a> RenderPassBuilder<'a> {
             subpasses: &self.subpasses,
         };
         ctx.make_render_pass(&info)
+    }
+}
+
+#[cfg(test)]
+impl<'a> RenderPassBuilder<'a> {
+    fn subpasses_spilled(&self) -> bool {
+        self.subpasses.spilled()
     }
 }
 
@@ -123,7 +131,7 @@ pub struct GraphicsPipelineLayoutBuilder<'a> {
     vertex_info: Option<VertexDescriptionInfo<'a>>,
     bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     bt_layouts: [Option<Handle<BindTableLayout>>; 4],
-    shaders: Vec<PipelineShaderInfo<'a>>,
+    shaders: SmallVec<[PipelineShaderInfo<'a>; 4]>,
     details: GraphicsPipelineDetails,
 }
 
@@ -135,7 +143,7 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
             vertex_info: None,
             bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
-            shaders: Vec::new(),
+            shaders: SmallVec::new(),
             details: GraphicsPipelineDetails::default(),
         }
     }
@@ -191,6 +199,13 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
             details: self.details,
         };
         ctx.make_graphics_pipeline_layout(&info)
+    }
+}
+
+#[cfg(test)]
+impl<'a> GraphicsPipelineLayoutBuilder<'a> {
+    fn shaders_spilled(&self) -> bool {
+        self.shaders.spilled()
     }
 }
 
@@ -326,7 +341,7 @@ impl ComputePipelineBuilder {
 /// Builds a BindGroupLayout via the builder pattern.
 pub struct BindGroupLayoutBuilder<'a> {
     debug_name: &'a str,
-    shaders: Vec<crate::ShaderInfo<'a>>,
+    shaders: SmallVec<[crate::ShaderInfo<'a>; 4]>,
 }
 
 impl<'a> BindGroupLayoutBuilder<'a> {
@@ -334,7 +349,7 @@ impl<'a> BindGroupLayoutBuilder<'a> {
     pub fn new(debug_name: &'a str) -> Self {
         Self {
             debug_name,
-            shaders: Vec::new(),
+            shaders: SmallVec::new(),
         }
     }
 
@@ -354,11 +369,18 @@ impl<'a> BindGroupLayoutBuilder<'a> {
     }
 }
 
+#[cfg(test)]
+impl<'a> BindGroupLayoutBuilder<'a> {
+    fn shaders_spilled(&self) -> bool {
+        self.shaders.spilled()
+    }
+}
+
 /// Builds a BindGroup via the builder pattern.
 pub struct BindGroupBuilder<'a> {
     debug_name: &'a str,
     layout: Handle<BindGroupLayout>,
-    bindings: Vec<crate::BindingInfo<'a>>,
+    bindings: SmallVec<[crate::BindingInfo<'a>; 8]>,
     set: u32,
 }
 
@@ -368,7 +390,7 @@ impl<'a> BindGroupBuilder<'a> {
         Self {
             debug_name,
             layout: Handle::default(),
-            bindings: Vec::new(),
+            bindings: SmallVec::new(),
             set: 0,
         }
     }
@@ -403,6 +425,13 @@ impl<'a> BindGroupBuilder<'a> {
     }
 }
 
+#[cfg(test)]
+impl<'a> BindGroupBuilder<'a> {
+    fn bindings_spilled(&self) -> bool {
+        self.bindings.spilled()
+    }
+}
+
 /// Builds a [`BindTableLayout`] via the builder pattern.
 ///
 /// # Example
@@ -420,7 +449,7 @@ impl<'a> BindGroupBuilder<'a> {
 /// ```
 pub struct BindTableLayoutBuilder<'a> {
     debug_name: &'a str,
-    shaders: Vec<crate::ShaderInfo<'a>>,
+    shaders: SmallVec<[crate::ShaderInfo<'a>; 4]>,
 }
 
 impl<'a> BindTableLayoutBuilder<'a> {
@@ -428,7 +457,7 @@ impl<'a> BindTableLayoutBuilder<'a> {
     pub fn new(debug_name: &'a str) -> Self {
         Self {
             debug_name,
-            shaders: Vec::new(),
+            shaders: SmallVec::new(),
         }
     }
 
@@ -445,6 +474,13 @@ impl<'a> BindTableLayoutBuilder<'a> {
             shaders: &self.shaders,
         };
         ctx.make_bind_table_layout(&info)
+    }
+}
+
+#[cfg(test)]
+impl<'a> BindTableLayoutBuilder<'a> {
+    fn shaders_spilled(&self) -> bool {
+        self.shaders.spilled()
     }
 }
 
@@ -469,7 +505,7 @@ impl<'a> BindTableLayoutBuilder<'a> {
 pub struct BindTableBuilder<'a> {
     debug_name: &'a str,
     layout: Handle<BindTableLayout>,
-    bindings: Vec<crate::IndexedBindingInfo<'a>>,
+    bindings: SmallVec<[crate::IndexedBindingInfo<'a>; 8]>,
     set: u32,
 }
 
@@ -479,7 +515,7 @@ impl<'a> BindTableBuilder<'a> {
         Self {
             debug_name,
             layout: Handle::default(),
-            bindings: Vec::new(),
+            bindings: SmallVec::new(),
             set: 0,
         }
     }
@@ -516,6 +552,13 @@ impl<'a> BindTableBuilder<'a> {
             set: self.set,
         };
         ctx.make_bind_table(&info)
+    }
+}
+
+#[cfg(test)]
+impl<'a> BindTableBuilder<'a> {
+    fn bindings_spilled(&self) -> bool {
+        self.bindings.spilled()
     }
 }
 // Unit tests for each builder
@@ -625,10 +668,9 @@ mod tests {
             shader_type: crate::ShaderType::All,
             variables: &[],
         };
-        let _bgl = BindGroupLayoutBuilder::new("bgl")
-            .shader(shader_info)
-            .build(&mut ctx)
-            .unwrap();
+        let builder = BindGroupLayoutBuilder::new("bgl").shader(shader_info);
+        assert!(!builder.shaders_spilled());
+        let _bgl = builder.build(&mut ctx).unwrap();
         //        ctx.destroy_bind_group_layout(_bgl);
         ctx.destroy();
     }
@@ -641,14 +683,12 @@ mod tests {
             shader_type: crate::ShaderType::All,
             variables: &[],
         };
-        let bgl = BindGroupLayoutBuilder::new("bgl")
-            .shader(shader_info)
-            .build(&mut ctx)
-            .unwrap();
-        let _bg = BindGroupBuilder::new("bg")
-            .layout(bgl)
-            .build(&mut ctx)
-            .unwrap();
+        let bgl_builder = BindGroupLayoutBuilder::new("bgl").shader(shader_info);
+        assert!(!bgl_builder.shaders_spilled());
+        let bgl = bgl_builder.build(&mut ctx).unwrap();
+        let bg_builder = BindGroupBuilder::new("bg").layout(bgl);
+        assert!(!bg_builder.bindings_spilled());
+        let _bg = bg_builder.build(&mut ctx).unwrap();
         //    ctx.destroy_bind_group(_bg);
         ctx.destroy();
     }
@@ -661,10 +701,9 @@ mod tests {
             shader_type: crate::ShaderType::All,
             variables: &[],
         };
-        let _btl = BindTableLayoutBuilder::new("btl")
-            .shader(shader_info)
-            .build(&mut ctx)
-            .unwrap();
+        let btl_builder = BindTableLayoutBuilder::new("btl").shader(shader_info);
+        assert!(!btl_builder.shaders_spilled());
+        let _btl = btl_builder.build(&mut ctx).unwrap();
         ctx.destroy();
     }
 
@@ -676,14 +715,12 @@ mod tests {
             shader_type: crate::ShaderType::All,
             variables: &[],
         };
-        let btl = BindTableLayoutBuilder::new("btl")
-            .shader(shader_info)
-            .build(&mut ctx)
-            .unwrap();
-        let _bt = BindTableBuilder::new("bt")
-            .layout(btl)
-            .build(&mut ctx)
-            .unwrap();
+        let btl_builder = BindTableLayoutBuilder::new("btl").shader(shader_info);
+        assert!(!btl_builder.shaders_spilled());
+        let btl = btl_builder.build(&mut ctx).unwrap();
+        let bt_builder = BindTableBuilder::new("bt").layout(btl);
+        assert!(!bt_builder.bindings_spilled());
+        let _bt = bt_builder.build(&mut ctx).unwrap();
         ctx.destroy();
     }
 
@@ -708,10 +745,12 @@ mod tests {
             depth_id: 0,
         };
 
-        let rp = RenderPassBuilder::new("rp_color_only", vp)
-            .add_subpass(&[color_desc], None, &[])
-            .build(&mut ctx)
-            .expect("color-only pass");
+        let color_attachments = [color_desc];
+        let deps_empty: [SubpassDependency; 0] = [];
+        let builder = RenderPassBuilder::new("rp_color_only", vp)
+            .add_subpass(&color_attachments, None, &deps_empty);
+        assert!(!builder.subpasses_spilled());
+        let rp = builder.build(&mut ctx).expect("color-only pass");
 
         // tearing down
         ctx.destroy_render_pass(rp);
@@ -725,8 +764,12 @@ mod tests {
             stencil_load_op: LoadOp::Clear,
             stencil_store_op: StoreOp::DontCare,
         };
-        let rp2 = RenderPassBuilder::new("rp_with_depth", vp)
-            .add_subpass(&[color_desc], Some(&ds_desc), &[dep])
+        let color_attachments2 = [color_desc];
+        let deps = [dep];
+        let builder2 = RenderPassBuilder::new("rp_with_depth", vp)
+            .add_subpass(&color_attachments2, Some(&ds_desc), &deps);
+        assert!(!builder2.subpasses_spilled());
+        let rp2 = builder2
             .build(&mut ctx)
             .expect("with-depth pass");
 
@@ -741,10 +784,11 @@ mod tests {
         let mut ctx = Context::headless(&Default::default()).unwrap();
         let vp = Viewport::default();
         let desc = AttachmentDescription::default();
-        let rp = RenderPassBuilder::new("rp", vp)
-            .add_subpass(&[desc], None, &[])
-            .build(&mut ctx)
-            .unwrap();
+        let color = [desc];
+        let deps_empty2: [SubpassDependency; 0] = [];
+        let builder = RenderPassBuilder::new("rp", vp).add_subpass(&color, None, &deps_empty2);
+        assert!(!builder.subpasses_spilled());
+        let rp = builder.build(&mut ctx).unwrap();
         ctx.destroy_render_pass(rp);
         ctx.destroy();
     }
@@ -774,16 +818,16 @@ mod tests {
             "#,
             vert
         );
-        let _layout = GraphicsPipelineLayoutBuilder::new("gpl")
+        let gpl_builder = GraphicsPipelineLayoutBuilder::new("gpl")
             .vertex_info(vert_info)
             .bind_group_layout(0, bgl)
             .shader(PipelineShaderInfo {
                 stage: ShaderType::Vertex,
                 spirv: spirv_vert,
                 specialization: &[],
-            })
-            .build(&mut ctx)
-            .unwrap();
+            });
+        assert!(!gpl_builder.shaders_spilled());
+        let _layout = gpl_builder.build(&mut ctx).unwrap();
         ctx.destroy();
     }
 }
