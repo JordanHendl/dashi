@@ -115,7 +115,7 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
     let bind_group = ctx.make_bind_group(&BindGroupInfo{debug_name:"OpenXR Triangle",layout:bg_layout,bindings:&[BindingInfo{resource:ShaderResource::Dynamic(&allocator),binding:0}],..Default::default()}).unwrap();
     let mut timer = Timer::new();
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx,"Default",2);
+    let mut framed_list = FramedCommandList::new(&mut ctx,"Default",2).unwrap();
     allocator.reset();
     let (_idx,state) = ctx.acquire_xr_image(&mut display).unwrap();
     framed_list.record(|list|{
@@ -131,8 +131,8 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
         pos[1]=(timer.elapsed_ms() as f32/1000.0).cos();
         list.append(Command::DrawIndexed(DrawIndexed{vertices,indices,index_count:INDICES.len() as u32,bind_groups:[Some(bind_group),None,None,None],dynamic_buffers:[Some(buf),None,None,None],..Default::default()}));
         list.end_drawing().unwrap();
-    });
-    framed_list.submit(&SubmitInfo::default());
+    }).unwrap();
+    framed_list.submit(&SubmitInfo::default()).unwrap();
     ctx.present_xr_display(&mut display,state).unwrap();
 }
 
