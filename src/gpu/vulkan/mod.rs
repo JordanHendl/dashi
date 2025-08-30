@@ -1221,7 +1221,7 @@ impl Context {
                 let mut new_info = info.clone();
                 new_info.visibility = MemoryVisibility::CpuAndGpu;
 
-                let staging = self.make_buffer(&new_info)?;
+                let staging = self.create_buffer(&new_info)?;
                 let mut list = self.begin_command_list(&Default::default())?;
                 list.append(Command::BufferCopy(BufferCopy {
                     src: staging,
@@ -1275,7 +1275,7 @@ impl Context {
             return Ok(());
         }
 
-        let staging = self.make_buffer(&BufferInfo {
+        let staging = self.create_buffer(&BufferInfo {
             debug_name: "",
             byte_size: (info.dim[0]
                 * info.dim[1]
@@ -1426,7 +1426,7 @@ impl Context {
         &mut self,
         info: &DynamicAllocatorInfo,
     ) -> Result<DynamicAllocator> {
-        let buffer = self.make_buffer(&BufferInfo {
+        let buffer = self.create_buffer(&BufferInfo {
             debug_name: info.debug_name,
             byte_size: info.byte_size,
             usage: info.usage,
@@ -1469,7 +1469,7 @@ impl Context {
         }
     }
 
-    pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
+    pub fn create_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
         let usage = vk::BufferUsageFlags::INDEX_BUFFER
             | vk::BufferUsageFlags::VERTEX_BUFFER
             | vk::BufferUsageFlags::STORAGE_BUFFER
@@ -3053,5 +3053,29 @@ impl ResourceLookup for Context {
 
     fn buffer_raw(&self, buffer: Handle<Buffer>) -> vk::Buffer {
         self.buffers.get_ref(buffer).expect("invalid buffer").buf
+    }
+}
+
+impl crate::gpu::Backend for Context {
+    type BufferInfo<'a> = BufferInfo<'a>;
+    type Buffer = Buffer;
+    type CommandList = CommandList;
+    type SubmitInfo<'a> = SubmitInfo<'a>;
+    type Fence = Fence;
+    type Error = GPUError;
+
+    fn create_buffer<'a>(
+        &mut self,
+        info: &Self::BufferInfo<'a>,
+    ) -> std::result::Result<Handle<Self::Buffer>, Self::Error> {
+        Context::create_buffer(self, info)
+    }
+
+    fn submit<'a>(
+        &mut self,
+        cmd: &mut Self::CommandList,
+        info: &Self::SubmitInfo<'a>,
+    ) -> std::result::Result<Handle<Self::Fence>, Self::Error> {
+        Context::submit(self, cmd, info)
     }
 }

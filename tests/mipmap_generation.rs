@@ -28,7 +28,7 @@ fn mipmap_generation() {
     };
 
     let buffer = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "readback",
             byte_size: 4,
             visibility: MemoryVisibility::CpuAndGpu,

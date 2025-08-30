@@ -14,7 +14,7 @@ fn compute_then_graphics() {
 
     // buffer that compute pass writes color into and graphics pass reads from
     let color_buf = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "color_buf",
             byte_size: 16,
             visibility: MemoryVisibility::Gpu,
@@ -136,7 +136,7 @@ void main(){ out_color = buf.color; }
 
     // vertex buffer for fullscreen triangle (not actually used but required)
     let vb = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "vb",
             byte_size: 4,
             visibility: MemoryVisibility::Gpu,
@@ -232,7 +232,7 @@ void main(){ out_color = buf.color; }
 
     // read back image and save
     let readback = ctx
-        .make_buffer(&BufferInfo { debug_name: "readback", byte_size: (WIDTH*HEIGHT*4) as u32, visibility: MemoryVisibility::CpuAndGpu, ..Default::default() })
+        .create_buffer(&BufferInfo { debug_name: "readback", byte_size: (WIDTH*HEIGHT*4) as u32, visibility: MemoryVisibility::CpuAndGpu, ..Default::default() })
         .unwrap();
     let mut list = ctx.begin_command_list(&Default::default()).unwrap();
     list.copy_image_to_buffer(ImageBufferCopy { src: view, dst: readback, dst_offset: 0 });
