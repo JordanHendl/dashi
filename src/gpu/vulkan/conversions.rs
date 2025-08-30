@@ -1,7 +1,7 @@
 use ash::vk;
 use crate::{
     AspectMask, BarrierPoint, BlendFactor, BlendOp, BorderColor, ColorBlendState, DynamicState,
-    Filter, Format, LoadOp, Rect2D, SampleCount, SamplerAddressMode, SamplerInfo,
+    Filter, Format, GPUError, LoadOp, Rect2D, SampleCount, SamplerAddressMode, SamplerInfo,
     SamplerMipmapMode, StoreOp, WriteMask,
 };
 
@@ -177,16 +177,16 @@ pub(super) fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
     }
 }
 
-pub(super) fn vk_to_lib_image_format(fmt: vk::Format) -> Format {
+pub(super) fn vk_to_lib_image_format(fmt: vk::Format) -> Result<Format, GPUError> {
     match fmt {
-        vk::Format::R8G8B8_SRGB => Format::RGB8,
-        vk::Format::R32G32B32A32_SFLOAT => Format::RGBA32F,
-        vk::Format::R8G8B8A8_SRGB => Format::RGBA8,
-        vk::Format::B8G8R8A8_SRGB => Format::BGRA8,
-        vk::Format::B8G8R8A8_SNORM => Format::BGRA8Unorm,
-        vk::Format::R8_SINT => Format::R8Sint,
-        vk::Format::R8_UINT => Format::R8Uint,
-        _ => todo!(),
+        vk::Format::R8G8B8_SRGB => Ok(Format::RGB8),
+        vk::Format::R32G32B32A32_SFLOAT => Ok(Format::RGBA32F),
+        vk::Format::R8G8B8A8_SRGB => Ok(Format::RGBA8),
+        vk::Format::B8G8R8A8_SRGB => Ok(Format::BGRA8),
+        vk::Format::B8G8R8A8_SNORM => Ok(Format::BGRA8Unorm),
+        vk::Format::R8_SINT => Ok(Format::R8Sint),
+        vk::Format::R8_UINT => Ok(Format::R8Uint),
+        other => Err(GPUError::UnsupportedFormat(other)),
     }
 }
 

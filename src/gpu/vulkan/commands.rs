@@ -1410,12 +1410,22 @@ impl CommandList {
         }
      }
  
-     fn debug_marker_begin(&mut self, _cmd: &crate::driver::command::DebugMarkerBegin) {
+    fn debug_marker_begin(&mut self, _cmd: &crate::driver::command::DebugMarkerBegin) {
         // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
         unsafe { self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]) };
-     }
+    }
 
     fn debug_marker_end(&mut self, _cmd: &crate::driver::command::DebugMarkerEnd) {
-        todo!()
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[],
+            )
+        };
     }
- }
+}

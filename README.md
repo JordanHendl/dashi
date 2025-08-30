@@ -82,6 +82,12 @@ is mutually exclusive with them.
 
 Detailed documentation is available [here](https://github.com/JordanHendl/dashi/wiki). It includes guides, API references, and examples to help you get the most out of Dashi.
 
+## Unimplemented Features
+
+- Constant buffer bindings in bind groups and bind tables are not yet supported.
+- Graphics pipeline layouts only accept vertex and fragment stages; other stages return an error.
+- Only a limited set of Vulkan image formats is supported; unsupported formats will produce a `GPUError`.
+
 ## Roadmap
 
 - [x] Vulkan backend support

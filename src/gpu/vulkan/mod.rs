@@ -2210,7 +2210,9 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::ConstBuffer(_) => todo!(),
+                    ShaderResource::ConstBuffer(_) => {
+                        return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                    }
                 }
             }
         }
@@ -2339,7 +2341,9 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::ConstBuffer(_) => todo!(),
+                    ShaderResource::ConstBuffer(_) => {
+                        return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                    }
                 }
             }
         }
@@ -2534,7 +2538,9 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
-                ShaderResource::ConstBuffer(_) => todo!(),
+                ShaderResource::ConstBuffer(_) => {
+                    return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                }
             }
         }
 
@@ -2847,25 +2853,26 @@ impl Context {
         &mut self,
         info: &GraphicsPipelineLayoutInfo,
     ) -> Result<Handle<GraphicsPipelineLayout>, GPUError> {
-        let shader_stages: Vec<vk::PipelineShaderStageCreateInfo> = info
-            .shaders
-            .iter()
-            .map(|shader_info| {
-                let stage_flags = match shader_info.stage {
-                    ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
-                    ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
-                    ShaderType::All => vk::ShaderStageFlags::ALL,
-                    _ => todo!(),
-                };
+        let mut shader_stages: Vec<vk::PipelineShaderStageCreateInfo> =
+            Vec::with_capacity(info.shaders.len());
+        for shader_info in info.shaders {
+            let stage_flags = match shader_info.stage {
+                ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
+                ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
+                ShaderType::All => vk::ShaderStageFlags::ALL,
+                other => {
+                    return Err(GPUError::UnsupportedShaderStage(other));
+                }
+            };
 
+            shader_stages.push(
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(stage_flags)
                     .module(self.create_shader_module(shader_info.spirv).unwrap())
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
-                    //                    .specialization_info(None) // Handle specialization constants if needed
-                    .build()
-            })
-            .collect();
+                    .build(),
+            );
+        }
 
         // Step 2: Create Vertex Input State
         let vertex_binding_description = vk::VertexInputBindingDescription::builder()
