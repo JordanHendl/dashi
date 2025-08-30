@@ -1,4 +1,7 @@
 use std::fmt;
+use ash::vk;
+use super::structs::ShaderType;
+
 #[derive(Debug)]
 pub struct VulkanError {
     res: ash::vk::Result,
@@ -25,6 +28,9 @@ pub enum GPUError {
     LibraryError(),
     SlotError(),
     HeadlessDisplayNotSupported,
+    UnsupportedFormat(vk::Format),
+    UnsupportedShaderStage(ShaderType),
+    Unimplemented(&'static str),
 }
 
 /// Convenient crate-wide result type.

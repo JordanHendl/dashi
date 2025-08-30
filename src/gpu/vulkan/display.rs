@@ -306,7 +306,7 @@ impl Context {
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
-                format: super::vk_to_lib_image_format(wanted_format),
+                format: super::vk_to_lib_image_format(wanted_format)?,
             }) {
                 Some(handle) => {
                     self.oneshot_transition_image_noview(
@@ -335,7 +335,7 @@ impl Context {
                     view_handles.push(h);
                     handles.push(handle)
                 }
-                None => todo!(),
+                None => return Err(GPUError::SlotError()),
             };
         }
 
