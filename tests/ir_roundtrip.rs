@@ -4,7 +4,7 @@ use dashi::driver::command::{
     Draw, EndRenderPass, ImageBarrier, LoadOp, Op, RenderPassDesc, StoreOp,
 };
 use dashi::driver::state::SubresourceRange;
-use dashi::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
+use dashi::driver::types::{BindTable, Handle, Pipeline};
 use dashi::{Buffer, Image};
 use dashi::ir::{CommandReplayer, Replayer};
 
@@ -75,7 +75,7 @@ fn ir_roundtrip_core_ops() {
     let buf_a = Handle::<Buffer>::new(3, 0);
     let buf_b = Handle::<Buffer>::new(4, 0);
     let pipe = Handle::<Pipeline>::new(5, 0);
-    let table = Handle::<BindTableRes>::new(6, 0);
+    let table = Handle::<BindTable>::new(6, 0);
     let range = SubresourceRange::new(0, 1, 0, 1);
 
     let color = ColorAttachment {

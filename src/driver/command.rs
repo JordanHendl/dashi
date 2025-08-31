@@ -5,7 +5,7 @@ use crate::{Image, Buffer};
 
 use super::{
     state::{StateTracker, SubresourceRange},
-    types::{BindTable as BindTableRes, Pipeline, UsageBits, Handle},
+    types::{BindTable, Pipeline, UsageBits, Handle},
 };
 
 //===----------------------------------------------------------------------===//
@@ -99,7 +99,7 @@ pub struct BindPipeline {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct BindTableCmd {
-    pub table: Handle<BindTableRes>,
+    pub table: Handle<BindTable>,
 }
 
 #[repr(C)]
@@ -252,7 +252,7 @@ impl CommandEncoder {
     }
 
     /// Bind a table of resources.
-    pub fn bind_table(&mut self, table: Handle<BindTableRes>) {
+    pub fn bind_table(&mut self, table: Handle<BindTable>) {
         let payload = BindTableCmd { table };
         self.push(Op::BindTable, &payload);
     }

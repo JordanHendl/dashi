@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::{Buffer, Image};
 use crate::driver::command::{ColorAttachment, CommandEncoder, DepthAttachment, RenderPassDesc};
 use crate::driver::state::SubresourceRange;
-use crate::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
+use crate::driver::types::{BindTable, Handle, Pipeline};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandBuffer<S> {
@@ -52,7 +52,7 @@ impl CommandBuffer<PipelineBound> {
         debug_assert!(self.render_pass_active, "draw outside render pass");
     }
 
-    pub fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
+    pub fn bind_table(&mut self, _table: Handle<BindTable>) {}
 
     pub fn end(self) -> CommandBuffer<Executable> {
         debug_assert!(!self.render_pass_active, "render pass still active");
@@ -263,21 +263,21 @@ impl CommandBuilder for CommandEncoder {
 }
 
 pub trait PipelineBuilder {
-    fn bind_table(&mut self, table: Handle<BindTableRes>);
+    fn bind_table(&mut self, table: Handle<BindTable>);
 }
 
 impl PipelineBuilder for CommandBuffer<PipelineBound> {
-    fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
+    fn bind_table(&mut self, _table: Handle<BindTable>) {}
 }
 
 impl PipelineBuilder for CommandEncoder {
-    fn bind_table(&mut self, table: Handle<BindTableRes>) {
+    fn bind_table(&mut self, table: Handle<BindTable>) {
         CommandEncoder::bind_table(self, table);
     }
 }
 
 pub struct DescriptorWriteBuilder {
-    table: Option<Handle<BindTableRes>>,
+    table: Option<Handle<BindTable>>,
 }
 
 impl DescriptorWriteBuilder {
@@ -285,7 +285,7 @@ impl DescriptorWriteBuilder {
         Self { table: None }
     }
 
-    pub fn table(mut self, table: Handle<BindTableRes>) -> Self {
+    pub fn table(mut self, table: Handle<BindTable>) -> Self {
         self.table = Some(table);
         self
     }

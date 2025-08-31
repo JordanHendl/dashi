@@ -12,10 +12,11 @@ use super::{
 use crate::driver::command::CommandSink;
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline,
+    BarrierPoint, BindGroup, Buffer, ClearValue, CommandList, ComputePipeline,
     Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
     IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Viewport,
 };
+use super::descriptor_sets::BindTable;
 
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     match cv {

@@ -2,7 +2,8 @@ use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
-use crate::{utils::Handle, BindGroup, BindTable, Semaphore};
+use crate::{utils::Handle, BindGroup, Semaphore};
+use super::descriptor_sets::BindTable;
 use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "dashi-serde")]

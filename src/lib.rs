@@ -5,7 +5,7 @@ pub mod sync;
 pub mod gfx;
 pub mod framegraph;
 
-pub use driver::types::{Handle, IndexType, UsageBits};
+pub use driver::types::{BindTable, Handle, IndexType, UsageBits};
 pub use gfx::cmd::{
     CommandBuffer,
     CommandBuilder,

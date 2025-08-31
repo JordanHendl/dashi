@@ -2,7 +2,7 @@
 
 use crate::utils::Handle;
 use crate::{
-    AttachmentDescription, BindGroupLayout, BindTable, BindTableLayout, ComputePipeline,
+    AttachmentDescription, BindGroupLayout, BindTableLayout, ComputePipeline,
     ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
     GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
     GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
@@ -12,6 +12,7 @@ use crate::{Context, GPUError};
 #[cfg(feature = "dashi-openxr")]
 use crate::XrDisplayInfo;
 use smallvec::SmallVec;
+use super::descriptor_sets::BindTable;
 
 /// Builds a RenderPass via the builder pattern.
 pub struct RenderPassBuilder<'a> {
