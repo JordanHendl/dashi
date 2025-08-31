@@ -102,7 +102,7 @@ fn main() {
 
     // Allocate the vertices & indices.
     let vertices = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "vertices",
             byte_size: (VERTICES.len() * std::mem::size_of::<f32>() * 2) as u32,
             visibility: MemoryVisibility::Gpu,
@@ -112,7 +112,7 @@ fn main() {
         .unwrap();
 
     let indices = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "indices",
             byte_size: (INDICES.len() * std::mem::size_of::<u32>()) as u32,
             visibility: MemoryVisibility::Gpu,

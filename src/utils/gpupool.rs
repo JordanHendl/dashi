@@ -28,11 +28,11 @@ impl<T> GPUPool<T> {
         let mut b = info.clone();
         let staging_name = format!("{} Staging Buffer", info.debug_name);
         b.visibility = MemoryVisibility::Gpu;
-        let buffer = ctx.make_buffer(&b)?;
+        let buffer = ctx.create_buffer(&b)?;
 
         b.debug_name = &staging_name;
         b.visibility = MemoryVisibility::CpuAndGpu;
-        let staging = ctx.make_buffer(&b)?;
+        let staging = ctx.create_buffer(&b)?;
 
         let mapped = ctx.map_buffer_mut::<u8>(staging)?;
         let pool = Pool::new_preallocated(mapped.as_mut_ptr(), len);

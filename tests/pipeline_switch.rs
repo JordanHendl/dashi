@@ -108,7 +108,7 @@ fn pipeline_switch() {
         .unwrap();
 
     let vb = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "vb",
             byte_size: 4,
             visibility: MemoryVisibility::Gpu,

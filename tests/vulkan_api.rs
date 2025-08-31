@@ -17,7 +17,7 @@ fn test_buffer() {
     let mut ctx = Context::headless(&Default::default()).unwrap();
 
     let initial_data = vec![c_test_val as u8; c_buffer_size as usize];
-    let buffer_res = ctx.make_buffer(&BufferInfo {
+    let buffer_res = ctx.create_buffer(&BufferInfo {
         debug_name: "Test Buffer",
         byte_size: c_buffer_size,
         visibility: MemoryVisibility::CpuAndGpu,
@@ -88,13 +88,13 @@ fn test_headless_context_creation() {
 
     // Core Vulkan ops still work:
     let buf = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "headless-buffer",
             byte_size: 128,
             visibility: MemoryVisibility::CpuAndGpu,
             ..Default::default()
         })
-        .expect("make_buffer failed in headless mode");
+        .expect("create_buffer failed in headless mode");
     ctx.destroy_buffer(buf);
 
     // And we can clean up without panicking
@@ -213,7 +213,7 @@ outputData[index] = inputData[index] + num_to_add;
     const BUFF_SIZE: u32 = 2048 * std::mem::size_of::<f32>() as u32;
     let initial_data = vec![0; BUFF_SIZE as usize];
     let input = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "input_test",
             byte_size: BUFF_SIZE,
             visibility: MemoryVisibility::Gpu,
@@ -223,7 +223,7 @@ outputData[index] = inputData[index] + num_to_add;
         .unwrap();
 
     let output = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "output_test",
             byte_size: BUFF_SIZE,
             visibility: MemoryVisibility::CpuAndGpu,

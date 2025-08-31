@@ -26,7 +26,7 @@ fn framebuffer_compare() {
     let view = ImageView { img: image, ..Default::default() };
 
     let buffer = ctx
-        .make_buffer(&BufferInfo {
+        .create_buffer(&BufferInfo {
             debug_name: "readback",
             byte_size: (width * height * 4) as u32,
             visibility: MemoryVisibility::CpuAndGpu,
