@@ -1,15 +1,12 @@
-use dashi::{
-    driver::command::CommandEncoder,
-    *,
-};
+use dashi::{driver::command::CommandEncoder, *};
 
 #[test]
-fn submit_encoder() {
+fn submit_with_encoder() {
     let mut ctx = match gpu::Context::headless(&ContextInfo::default()) {
         Ok(ctx) => ctx,
         Err(err) => {
             eprintln!(
-                "Skipping submit_encoder test: Vulkan initialization unavailable: {:?}",
+                "Skipping submit_with test: Vulkan initialization unavailable: {:?}",
                 err
             );
             return;
@@ -22,7 +19,7 @@ fn submit_encoder() {
 
     let enc = CommandEncoder::new();
     let fence = ctx
-        .submit_encoder(&mut list, &enc, &SubmitInfo::default())
+        .submit_with(&mut list, &enc, &SubmitInfo::default())
         .unwrap();
     ctx.wait(fence).unwrap();
 

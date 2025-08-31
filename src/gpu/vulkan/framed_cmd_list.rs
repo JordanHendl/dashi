@@ -1,5 +1,5 @@
 use crate::{
-    driver::command::CommandEncoder,
+    driver::command::Recorder,
     utils::Handle,
     CommandList,
     CommandListInfo,
@@ -99,17 +99,14 @@ impl FramedCommandList {
         Ok(())
     }
 
-    pub fn submit_encoder(
-        &mut self,
-        encoder: &CommandEncoder,
-        info: &SubmitInfo,
-    ) -> Result<()> {
+    pub fn record_submit<R>(&mut self, recorder: R, info: &SubmitInfo) -> Result<()>
+    where
+        R: Recorder<CommandList>,
+    {
         self.fences[self.curr as usize] = Some(unsafe {
-            self.ctx.as_mut().submit_encoder(
-                &mut self.cmds[self.curr as usize],
-                encoder,
-                info,
-            )?
+            self.ctx
+                .as_mut()
+                .submit_with(&mut self.cmds[self.curr as usize], recorder, info)?
         });
 
         self.advance();

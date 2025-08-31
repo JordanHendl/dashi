@@ -18,6 +18,7 @@ pub use gfx::cmd::{
     DescriptorWriteBuilder,
     DynamicRenderingBuilder,
 };
+pub use driver::command::Recorder;
 
 pub mod gpu;
 #[cfg(feature = "dx12")]
