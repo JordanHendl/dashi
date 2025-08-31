@@ -8,6 +8,8 @@ use super::{
     types::{BindTable as BindTableRes, Pipeline, UsageBits, Handle},
 };
 
+use crate::gfx::cmd::{CommandBuilder, PipelineBuilder};
+
 //===----------------------------------------------------------------------===//
 // Command definitions
 //===----------------------------------------------------------------------===//
@@ -349,6 +351,42 @@ impl CommandEncoder {
 impl Default for CommandEncoder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+//===----------------------------------------------------------------------===//
+// CommandBuilder integration
+//===----------------------------------------------------------------------===//
+
+impl CommandBuilder for CommandEncoder {
+    fn begin_render_pass<'a>(&mut self, desc: RenderPassDesc<'a>) {
+        CommandEncoder::begin_render_pass(self, desc);
+    }
+
+    fn end_render_pass(&mut self) {
+        CommandEncoder::end_render_pass(self);
+    }
+
+    fn begin_debug_label(&mut self, _label: &str) {
+        self.begin_debug_marker();
+    }
+
+    fn end_debug_label(&mut self) {
+        self.end_debug_marker();
+    }
+
+    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+        CommandEncoder::texture_barrier(self, image, range);
+    }
+
+    fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+        CommandEncoder::buffer_barrier(self, buffer);
+    }
+}
+
+impl PipelineBuilder for CommandEncoder {
+    fn bind_table(&mut self, table: Handle<BindTableRes>) {
+        CommandEncoder::bind_table(self, table);
     }
 }
 

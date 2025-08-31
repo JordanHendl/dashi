@@ -1,14 +1,15 @@
 use std::marker::PhantomData;
 
 use crate::{Buffer, Image};
-use crate::driver::command::{ColorAttachment, CommandEncoder, DepthAttachment, RenderPassDesc};
+use crate::driver::command::{
+    ColorAttachment, CommandEncoder, CommandSink, DepthAttachment, RenderPassDesc,
+};
 use crate::driver::state::SubresourceRange;
 use crate::driver::types::{BindTable as BindTableRes, Handle, Pipeline};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandBuffer<S> {
-    render_pass_active: bool,
-    label_depth: u32,
+    enc: CommandEncoder,
     _state: PhantomData<S>,
 }
 
@@ -21,51 +22,51 @@ pub struct PipelineBound;
 impl CommandBuffer<Initial> {
     /// Create a new command buffer in the initial state.
     pub fn new() -> Self {
-        Self { render_pass_active: false, label_depth: 0, _state: PhantomData }
+        Self { enc: CommandEncoder::new(), _state: PhantomData }
     }
 
     /// Begin recording commands.
     pub fn begin(self) -> CommandBuffer<Recording> {
-        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
+        CommandBuffer { enc: self.enc, _state: PhantomData }
     }
 }
 
 impl CommandBuffer<Recording> {
     /// Finish recording and transition to an executable state.
     pub fn end(self) -> CommandBuffer<Executable> {
-        debug_assert!(!self.render_pass_active, "render pass still active");
-        debug_assert_eq!(self.label_depth, 0, "debug labels still active");
-        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
+        CommandBuffer { enc: self.enc, _state: PhantomData }
     }
 
-    pub fn bind_pipeline(self, _pipeline: Handle<Pipeline>) -> CommandBuffer<PipelineBound> {
-        CommandBuffer { render_pass_active: self.render_pass_active, label_depth: self.label_depth, _state: PhantomData }
+    pub fn bind_pipeline(mut self, pipeline: Handle<Pipeline>) -> CommandBuffer<PipelineBound> {
+        self.enc.bind_pipeline(pipeline);
+        CommandBuffer { enc: self.enc, _state: PhantomData }
     }
 }
 
 impl CommandBuffer<PipelineBound> {
-    pub fn bind_pipeline(self, _pipeline: Handle<Pipeline>) -> Self {
+    pub fn bind_pipeline(mut self, pipeline: Handle<Pipeline>) -> Self {
+        self.enc.bind_pipeline(pipeline);
         self
     }
 
-    pub fn draw(&mut self, _vertices: u32, _instances: u32) {
-        debug_assert!(self.render_pass_active, "draw outside render pass");
+    pub fn draw(&mut self, vertices: u32, instances: u32) {
+        self.enc.draw(vertices, instances);
     }
 
-    pub fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
+    pub fn bind_table(&mut self, table: Handle<BindTableRes>) {
+        self.enc.bind_table(table);
+    }
 
     pub fn end(self) -> CommandBuffer<Executable> {
-        debug_assert!(!self.render_pass_active, "render pass still active");
-        debug_assert_eq!(self.label_depth, 0, "debug labels still active");
-        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
+        CommandBuffer { enc: self.enc, _state: PhantomData }
     }
 }
 
 impl CommandBuffer<Executable> {
-    /// Submit the recorded commands. This is a stub that simply transitions the
-    /// state to pending.
-    pub fn submit(self) -> CommandBuffer<Pending> {
-        CommandBuffer { render_pass_active: false, label_depth: 0, _state: PhantomData }
+    /// Submit the recorded commands to a sink and transition to pending.
+    pub fn submit<S: CommandSink>(self, sink: &mut S) -> CommandBuffer<Pending> {
+        self.enc.submit(sink);
+        CommandBuffer { enc: self.enc, _state: PhantomData }
     }
 }
 
@@ -187,78 +188,54 @@ impl<'a> CommandBuilder for EncodeTarget<'a> {
 }
 
 impl CommandBuilder for CommandBuffer<Recording> {
-    fn begin_render_pass<'a>(&mut self, _desc: RenderPassDesc<'a>) {
-        debug_assert!(!self.render_pass_active, "render pass already active");
-        self.render_pass_active = true;
-    }
-
-    fn end_render_pass(&mut self) {
-        debug_assert!(self.render_pass_active, "no render pass active");
-        self.render_pass_active = false;
-    }
-
-    fn begin_debug_label(&mut self, _label: &str) {
-        self.label_depth += 1;
-    }
-
-    fn end_debug_label(&mut self) {
-        debug_assert!(self.label_depth > 0, "no debug label active");
-        self.label_depth -= 1;
-    }
-
-    fn texture_barrier(&mut self, _image: Handle<Image>, _range: SubresourceRange) {}
-
-    fn buffer_barrier(&mut self, _buffer: Handle<Buffer>) {}
-}
-
-impl CommandBuilder for CommandBuffer<PipelineBound> {
-    fn begin_render_pass<'a>(&mut self, _desc: RenderPassDesc<'a>) {
-        debug_assert!(!self.render_pass_active, "render pass already active");
-        self.render_pass_active = true;
-    }
-
-    fn end_render_pass(&mut self) {
-        debug_assert!(self.render_pass_active, "no render pass active");
-        self.render_pass_active = false;
-    }
-
-    fn begin_debug_label(&mut self, _label: &str) {
-        self.label_depth += 1;
-    }
-
-    fn end_debug_label(&mut self) {
-        debug_assert!(self.label_depth > 0, "no debug label active");
-        self.label_depth -= 1;
-    }
-
-    fn texture_barrier(&mut self, _image: Handle<Image>, _range: SubresourceRange) {}
-
-    fn buffer_barrier(&mut self, _buffer: Handle<Buffer>) {}
-}
-
-impl CommandBuilder for CommandEncoder {
     fn begin_render_pass<'a>(&mut self, desc: RenderPassDesc<'a>) {
-        CommandEncoder::begin_render_pass(self, desc);
+        self.enc.begin_render_pass(desc);
     }
 
     fn end_render_pass(&mut self) {
-        CommandEncoder::end_render_pass(self);
+        self.enc.end_render_pass();
     }
 
     fn begin_debug_label(&mut self, _label: &str) {
-        self.begin_debug_marker();
+        self.enc.begin_debug_marker();
     }
 
     fn end_debug_label(&mut self) {
-        self.end_debug_marker();
+        self.enc.end_debug_marker();
     }
 
     fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
-        CommandEncoder::texture_barrier(self, image, range);
+        self.enc.texture_barrier(image, range);
     }
 
     fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
-        CommandEncoder::buffer_barrier(self, buffer);
+        self.enc.buffer_barrier(buffer);
+    }
+}
+
+impl CommandBuilder for CommandBuffer<PipelineBound> {
+    fn begin_render_pass<'a>(&mut self, desc: RenderPassDesc<'a>) {
+        self.enc.begin_render_pass(desc);
+    }
+
+    fn end_render_pass(&mut self) {
+        self.enc.end_render_pass();
+    }
+
+    fn begin_debug_label(&mut self, _label: &str) {
+        self.enc.begin_debug_marker();
+    }
+
+    fn end_debug_label(&mut self) {
+        self.enc.end_debug_marker();
+    }
+
+    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+        self.enc.texture_barrier(image, range);
+    }
+
+    fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+        self.enc.buffer_barrier(buffer);
     }
 }
 
@@ -267,12 +244,8 @@ pub trait PipelineBuilder {
 }
 
 impl PipelineBuilder for CommandBuffer<PipelineBound> {
-    fn bind_table(&mut self, _table: Handle<BindTableRes>) {}
-}
-
-impl PipelineBuilder for CommandEncoder {
     fn bind_table(&mut self, table: Handle<BindTableRes>) {
-        CommandEncoder::bind_table(self, table);
+        self.enc.bind_table(table);
     }
 }
 
