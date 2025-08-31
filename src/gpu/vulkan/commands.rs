@@ -33,12 +33,35 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
         },
     }
 }
+/// Parameters for a buffer-to-buffer copy command.
+///
+/// Offsets and sizes are specified in bytes.
+///
+/// # Examples
+/// ```no_run
+/// # use dashi::gpu::vulkan::{BufferCopy, CommandList};
+/// # use dashi::utils::Handle;
+/// # let mut list = CommandList::default();
+/// # let (src, dst) = (Handle::default(), Handle::default());
+/// list.copy_buffer(BufferCopy { src, dst, src_offset: 0, dst_offset: 0, size: 128 }).unwrap();
+/// ```
+///
+/// # Safety
+/// The source and destination buffers must be valid and large enough for
+/// the requested region, and they must have been created with the
+/// appropriate transfer usage flags.
 #[derive(Clone)]
 pub struct BufferCopy {
+    /// Source buffer handle.
     pub src: Handle<Buffer>,
+    /// Destination buffer handle.
     pub dst: Handle<Buffer>,
+    /// Source offset in bytes.
     pub src_offset: usize,
+    /// Destination offset in bytes.
     pub dst_offset: usize,
+    /// Number of bytes to copy. A value of `0` copies the minimum of
+    /// source and destination sizes.
     pub size: usize,
 }
 
@@ -54,26 +77,51 @@ impl Default for BufferCopy {
     }
 }
 
+/// Parameters for copying image data into a buffer.
+///
+/// # Safety
+/// The destination buffer must have been created with transfer usage and
+/// be large enough to hold the image region.
 #[derive(Clone, Default)]
 pub struct ImageBufferCopy {
+    /// Source image view to copy from.
     pub src: ImageView,
+    /// Destination buffer handle.
     pub dst: Handle<Buffer>,
+    /// Destination offset in bytes.
     pub dst_offset: usize,
 }
 
+/// Parameters for copying buffer data into an image.
+///
+/// # Safety
+/// The source buffer must contain enough data and the destination image
+/// must be in a layout compatible with transfer writes.
 #[derive(Clone, Default)]
 pub struct BufferImageCopy {
+    /// Source buffer handle.
     pub src: Handle<Buffer>,
+    /// Destination image view.
     pub dst: ImageView,
+    /// Offset within the source buffer.
     pub src_offset: usize,
 }
 
+/// Describes a blit operation between two image regions.
+///
+/// # Safety
+/// Both images must be compatible and in layouts supporting blits.
 #[derive(Clone)]
 pub struct ImageBlit {
+    /// Source image view.
     pub src: ImageView,
+    /// Destination image view.
     pub dst: ImageView,
+    /// Filtering mode to apply.
     pub filter: Filter,
+    /// Region in the source image.
     pub src_region: Rect2D,
+    /// Region in the destination image.
     pub dst_region: Rect2D,
 }
 
@@ -89,14 +137,19 @@ impl Default for ImageBlit {
     }
 }
 
+/// Collection of resources bound before draw or dispatch commands.
 #[derive(Clone, Copy, Default)]
 pub struct Bindings {
+    /// Optional bind groups to be set.
     pub bind_groups: [Option<Handle<BindGroup>>; 4],
+    /// Optional bind tables to be set.
     pub bind_tables: [Option<Handle<BindTable>>; 4],
+    /// Optional dynamic buffers used for offsets.
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
 }
 
 impl Bindings {
+    /// Iterate over pairs of bind tables and bind groups to be bound.
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (Option<Handle<BindTable>>, Option<Handle<BindGroup>>)> + '_ {
@@ -114,6 +167,7 @@ impl Bindings {
             })
     }
 
+    /// Iterate over dynamic buffer offsets used by these bindings.
     pub fn dynamic_offsets(&self) -> impl Iterator<Item = u32> + '_ {
         self.dynamic_buffers
             .iter()
@@ -121,10 +175,14 @@ impl Bindings {
     }
 }
 
+/// Information required to dispatch a compute workload.
 #[derive(Clone)]
 pub struct Dispatch {
+    /// Compute pipeline to execute.
     pub compute: Handle<ComputePipeline>,
+    /// Resources to bind before dispatch.
     pub bindings: Bindings,
+    /// Work group counts in X/Y/Z.
     pub workgroup_size: [u32; 3],
 }
 
@@ -138,29 +196,46 @@ impl Default for Dispatch {
     }
 }
 
+/// Parameters for beginning a draw pass.
 #[derive(Clone)]
 pub struct DrawBegin<'a> {
+    /// Viewport to render into.
     pub viewport: Viewport,
+    /// Pipeline used for subsequent draw calls.
     pub pipeline: Handle<GraphicsPipeline>,
+    /// Render target to attach.
     pub render_target: Handle<RenderTarget>,
+    /// Clear values for attachments.
     pub clear_values: &'a [ClearValue],
 }
 
+/// Non-indexed draw parameters.
 #[derive(Clone, Default)]
 pub struct Draw {
+    /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
+    /// Resources to bind before drawing.
     pub bindings: Bindings,
+    /// Number of instances to draw.
     pub instance_count: u32,
+    /// Number of vertices to draw.
     pub count: u32,
 }
 
+/// Indexed draw using dynamically allocated buffers.
 #[derive(Clone)]
 pub struct DrawIndexedDynamic {
+    /// Vertex buffer allocation.
     pub vertices: DynamicBuffer,
+    /// Index buffer allocation.
     pub indices: DynamicBuffer,
+    /// Resources to bind before drawing.
     pub bindings: Bindings,
+    /// Number of indices to draw.
     pub index_count: u32,
+    /// Number of instances to draw.
     pub instance_count: u32,
+    /// First instance ID.
     pub first_instance: u32,
 }
 
@@ -177,25 +252,38 @@ impl Default for DrawIndexedDynamic {
     }
 }
 
+/// Binding information for indexed bind groups.
 #[derive(Clone)]
 pub struct BindIndexedBG {
+    /// Optional bind groups to be used with indexed drawing.
     pub bind_groups: [Option<Handle<IndexedBindGroup>>; 4],
 }
 
+/// Parameters to begin a render pass.
 #[derive(Clone, Default)]
 pub struct RenderPassBegin<'a> {
+    /// Render target to start the pass on.
     pub render_target: Handle<RenderTarget>,
+    /// Viewport to use.
     pub viewport: Viewport,
+    /// Clear values for attachments.
     pub clear_values: &'a [ClearValue],
 }
 
+/// Parameters for an indexed draw call.
 #[derive(Clone)]
 pub struct DrawIndexed {
+    /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
+    /// Index buffer handle.
     pub indices: Handle<Buffer>,
+    /// Resources to bind before drawing.
     pub bindings: Bindings,
+    /// Number of indices.
     pub index_count: u32,
+    /// Number of instances.
     pub instance_count: u32,
+    /// First instance ID.
     pub first_instance: u32,
 }
 
@@ -212,12 +300,18 @@ impl Default for DrawIndexed {
     }
 }
 
+/// Parameters for an indexed indirect draw call.
 #[derive(Clone)]
 pub struct DrawIndexedIndirect {
+    /// Buffer containing `IndexedIndirectCommand` structures.
     pub draw_params: Handle<Buffer>,
+    /// Resources to bind before drawing.
     pub bindings: Bindings,
+    /// Byte offset within the parameter buffer.
     pub offset: u32,
+    /// Number of draws to execute.
     pub draw_count: u32,
+    /// Stride between draws in bytes.
     pub stride: u32,
 }
 
@@ -233,12 +327,18 @@ impl Default for DrawIndexedIndirect {
     }
 }
 
+/// Parameters for a non-indexed indirect draw call.
 #[derive(Clone)]
 pub struct DrawIndirect {
+    /// Buffer containing `IndirectCommand` structures.
     pub draw_params: Handle<Buffer>,
+    /// Resources to bind before drawing.
     pub bindings: Bindings,
+    /// Byte offset within the parameter buffer.
     pub offset: u32,
+    /// Number of draws to execute.
     pub draw_count: u32,
+    /// Stride between draws in bytes.
     pub stride: u32,
 }
 
@@ -254,33 +354,54 @@ impl Default for DrawIndirect {
     }
 }
 
+/// Pipeline binding command parameters.
 #[derive(Clone, Copy, Default)]
 pub struct BindPipeline {
+    /// Optional graphics pipeline to bind.
     pub gfx: Option<Handle<GraphicsPipeline>>,
+    /// Optional compute pipeline to bind.
     pub compute: Option<Handle<ComputePipeline>>,
+    /// Resources to bind after the pipeline.
     pub bindings: Bindings,
 }
 
+/// Describes a synchronization barrier for an image view.
 #[derive(Clone, Copy)]
 pub struct ImageBarrier {
+    /// Image view to transition.
     pub view: ImageView,
+    /// Source usage for the barrier.
     pub src: BarrierPoint,
+    /// Destination usage for the barrier.
     pub dst: BarrierPoint,
 }
 
+/// High level command description used for manual command recording.
 #[derive(Clone)]
 pub enum Command {
+    /// Copy data between buffers.
     BufferCopy(BufferCopy),
+    /// Copy data from a buffer into an image.
     BufferImageCopy(BufferImageCopy),
+    /// Copy data from an image into a buffer.
     ImageBufferCopy(ImageBufferCopy),
+    /// Issue a non-indexed draw.
     Draw(Draw),
+    /// Issue an indexed draw.
     DrawIndexed(DrawIndexed),
+    /// Issue an indexed draw using dynamic buffers.
     DrawIndexedDynamic(DrawIndexedDynamic),
+    /// Issue an indexed indirect draw.
     DrawIndexedIndirect(DrawIndexedIndirect),
+    /// Issue a non-indexed indirect draw.
     DrawIndirect(DrawIndirect),
+    /// Bind a pipeline.
     BindPipeline(BindPipeline),
+    /// Blit between images.
     Blit(ImageBlit),
+    /// Insert an image barrier.
     ImageBarrier(ImageBarrier),
+    /// Dispatch a compute workload.
     Dispatch(Dispatch),
 }
 

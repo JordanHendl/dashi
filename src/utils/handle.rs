@@ -5,19 +5,47 @@ use std::ops::{Index, IndexMut};
 
 use bytemuck::{Pod, Zeroable};
 
+/// Lightweight typed reference to an item stored in a [`Pool`].
+///
+/// A `Handle<T>` can be copied freely and is typically returned by
+/// [`Pool::insert`].  It becomes invalid once the associated item is
+/// released from the pool.
+///
+/// # Examples
+/// ```no_run
+/// # use dashi::utils::{Handle, Pool};
+/// let mut pool = Pool::new(4);
+/// let handle = pool.insert(42u32).unwrap();
+/// assert!(handle.valid());
+/// assert_eq!(*pool.get_ref(handle).unwrap(), 42);
+/// pool.release(handle);
+/// // handle slot is now free for reuse
+/// ```
 #[repr(C)]
 #[derive(Debug)]
 pub struct Handle<T> {
+    /// Slot index within the pool.
     pub slot: u16,
     pub generation: u16,
     phantom: PhantomData<fn() -> T>,
 }
 
 impl<T> Handle<T> {
+    /// Returns `true` if this handle refers to a valid pool entry.
+    ///
+    /// The default handle created by `Handle::default()` is considered
+    /// invalid.
     pub fn valid(&self) -> bool {
         return self.slot != std::u16::MAX && self.generation != std::u16::MAX;
     }
 
+    /// Creates a new handle from a slot and generation.
+    ///
+    /// # Safety
+    /// This function does not validate that the given slot and
+    /// generation actually correspond to a live item in a pool.  It is
+    /// intended to be used by `Pool` internals; constructing handles with
+    /// arbitrary values may yield dangling references.
     pub fn new(slot: u16, generation: u16) -> Self {
         Self { slot, generation, phantom: PhantomData }
     }
@@ -224,6 +252,22 @@ impl<'a, T> IntoIterator for &'a ItemList<T> {
     }
 }
 
+/// Growable collection that hands out [`Handle`]s for stored items.
+///
+/// The pool maintains generation counters to validate handles and
+/// recycles freed slots.  It is not thread-safe and expects exclusive
+/// access when mutated.
+///
+/// # Examples
+/// ```no_run
+/// # use dashi::utils::Pool;
+/// let mut pool = Pool::new(16);
+/// let handle = pool.insert(String::from("hello")).unwrap();
+/// if let Some(text) = pool.get_ref(handle) {
+///     println!("{}", text);
+/// }
+/// pool.release(handle);
+/// ```
 pub struct Pool<T> {
     items: ItemList<T>,
     empty: Vec<u32>,
@@ -245,6 +289,7 @@ impl<T> Default for Pool<T> {
     }
 }
 impl<T> Pool<T> {
+    /// Creates a new pool with the given starting capacity.
     pub fn new(initial_size: usize) -> Self {
         let mut p = Pool {
             items: ItemList::new(initial_size as u32),
@@ -257,6 +302,12 @@ impl<T> Pool<T> {
         return p;
     }
 
+    /// Creates a pool that manages a pre-allocated memory block.
+    ///
+    /// # Safety
+    /// The caller must ensure that `ptr` points to a valid, writable
+    /// memory region capable of holding `len` items of type `G` and that
+    /// it lives for the lifetime of the pool.
     pub fn new_preallocated<G>(ptr: *mut G, len: usize) -> Self {
         let mut p = Pool {
             items: ItemList::new_from_prealloc(ptr as *mut u8, len as u32),
@@ -268,10 +319,15 @@ impl<T> Pool<T> {
         return p;
     }
 
+    /// Returns a slice of indices representing free slots in the pool.
     pub fn get_empty(&self) -> &[u32] {
         &self.empty
     }
 
+    /// Inserts an item into the pool, returning a [`Handle`] if
+    /// successful.
+    ///
+    /// The pool will automatically expand if full.
     pub fn insert(&mut self, item: T) -> Option<Handle<T>> {
         const DEFAULT_EXPAND_AMT: usize = 1024;
         if let Some(empty_slot) = self.empty.pop() {
@@ -299,6 +355,7 @@ impl<T> Pool<T> {
         return None;
     }
 
+    /// Grows the pool by `amount` additional slots.
     pub fn expand(&mut self, amount: usize) {
         let old_len = self.items.len();
         self.items.expand(amount);
@@ -311,10 +368,12 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Returns the total number of slots currently managed by the pool.
     pub fn len(&self) -> usize {
         return self.items.len();
     }
 
+    /// Calls `func` for each occupied handle in the pool.
     pub fn for_each_occupied_handle<F>(&self, func: F)
     where
         F: Fn(Handle<T>),
@@ -332,6 +391,7 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Mutable variant of [`Pool::for_each_occupied_handle`].
     pub fn for_each_occupied_handle_mut<F>(&self, mut func: F)
     where
         F: FnMut(Handle<T>),
@@ -349,6 +409,7 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Calls `func` for each occupied item reference.
     pub fn for_each_occupied<F>(&self, mut func: F)
     where
         F: FnMut(&T),
@@ -361,6 +422,7 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Calls `func` for each occupied mutable reference.
     pub fn for_each_occupied_mut<F>(&mut self, mut func: F)
     where
         F: FnMut(&mut T),
@@ -373,10 +435,12 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Releases a handle, making its slot available for reuse.
     pub fn release(&mut self, item: Handle<T>) {
         self.empty.push(item.slot as u32);
     }
 
+    /// Returns an immutable reference to the item associated with `item`.
     pub fn get_ref(&self, item: Handle<T>) -> Option<&T> {
         assert!(item.valid());
         assert!(self.items.len() != 0);
@@ -389,6 +453,7 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Returns a mutable reference to the item associated with `item`.
     pub fn get_mut_ref(&mut self, item: Handle<T>) -> Option<&mut T> {
         assert!(item.valid());
         assert!(!self.generation.is_empty());
@@ -400,6 +465,7 @@ impl<T> Pool<T> {
         }
     }
 
+    /// Clears all entries and resets generation counters.
     pub fn clear(&mut self) {
         self.empty = (0..(self.items.len()) as u32).collect();
         self.generation.fill(0);
