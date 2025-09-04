@@ -469,7 +469,7 @@ impl<T> Pool<T> {
     pub fn clear(&mut self) {
         self.empty = (0..(self.items.len()) as u32).collect();
         self.generation.fill(0);
-        assert!(self.generation.is_empty());
+        assert!(!self.generation.is_empty());
     }
 }
 
@@ -500,6 +500,19 @@ mod tests {
         pool.for_each_occupied_mut(|f| {
             f._big_data[0] = 5;
         });
+    }
+
+    #[test]
+    #[serial]
+    fn test_clear_allows_inserts() {
+        #[derive(Default)]
+        struct S {
+            _val: u32,
+        }
+        let mut pool: Pool<S> = Pool::new(1);
+        assert!(pool.insert(S::default()).is_some());
+        pool.clear();
+        assert!(pool.insert(S::default()).is_some());
     }
 
     #[test]
