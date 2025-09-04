@@ -51,7 +51,7 @@ impl CommandSink for Recorder {
     fn copy_buffer(&mut self, cmd: &CopyBuffer) {
         self.cmds.push(Recorded::CopyBuffer(*cmd));
     }
-    fn copy_texture(&mut self, cmd: &CopyImage) {
+    fn copy_image(&mut self, cmd: &CopyImage) {
         self.cmds.push(Recorded::CopyImage(*cmd));
     }
     fn texture_barrier(&mut self, cmd: &ImageBarrier) {
@@ -89,7 +89,7 @@ fn ir_roundtrip_core_ops() {
 
     let mut enc = CommandEncoder::new();
     enc.begin_debug_marker();
-    enc.copy_texture(img_a, img_b, range);
+    enc.copy_image(img_a, img_b, range);
     enc.begin_render_pass(RenderPassDesc { colors: &[color], depth: None });
     enc.bind_pipeline(pipe);
     enc.bind_table(table);
