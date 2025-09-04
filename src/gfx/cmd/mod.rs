@@ -187,47 +187,39 @@ impl<'a> CommandBuilder for EncodeTarget<'a> {
     }
 }
 
-trait CommandEncoderAccess {
-    fn enc(&mut self) -> &mut CommandEncoder;
+macro_rules! impl_command_builder {
+    ($($state:ty),+) => {
+        $(
+            impl CommandBuilder for CommandBuffer<$state> {
+                fn begin_render_pass<'a>(&mut self, desc: RenderPassDesc<'a>) {
+                    self.enc.begin_render_pass(desc);
+                }
+
+                fn end_render_pass(&mut self) {
+                    self.enc.end_render_pass();
+                }
+
+                fn begin_debug_label(&mut self, _label: &str) {
+                    self.enc.begin_debug_marker();
+                }
+
+                fn end_debug_label(&mut self) {
+                    self.enc.end_debug_marker();
+                }
+
+                fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
+                    self.enc.texture_barrier(image, range);
+                }
+
+                fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
+                    self.enc.buffer_barrier(buffer);
+                }
+            }
+        )+
+    };
 }
 
-impl CommandEncoderAccess for CommandBuffer<Recording> {
-    fn enc(&mut self) -> &mut CommandEncoder {
-        &mut self.enc
-    }
-}
-
-impl CommandEncoderAccess for CommandBuffer<PipelineBound> {
-    fn enc(&mut self) -> &mut CommandEncoder {
-        &mut self.enc
-    }
-}
-
-impl<T: CommandEncoderAccess> CommandBuilder for T {
-    fn begin_render_pass<'a>(&mut self, desc: RenderPassDesc<'a>) {
-        self.enc().begin_render_pass(desc);
-    }
-
-    fn end_render_pass(&mut self) {
-        self.enc().end_render_pass();
-    }
-
-    fn begin_debug_label(&mut self, _label: &str) {
-        self.enc().begin_debug_marker();
-    }
-
-    fn end_debug_label(&mut self) {
-        self.enc().end_debug_marker();
-    }
-
-    fn texture_barrier(&mut self, image: Handle<Image>, range: SubresourceRange) {
-        self.enc().texture_barrier(image, range);
-    }
-
-    fn buffer_barrier(&mut self, buffer: Handle<Buffer>) {
-        self.enc().buffer_barrier(buffer);
-    }
-}
+impl_command_builder!(Recording, PipelineBound);
 
 pub trait PipelineBuilder {
     fn bind_table(&mut self, table: Handle<BindTableRes>);
