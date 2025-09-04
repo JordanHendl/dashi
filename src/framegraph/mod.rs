@@ -1,5 +1,4 @@
 use smallvec::SmallVec;
-use rayon::prelude::*;
 
 use crate::Handle;
 use crate::sync::state::ResState;
@@ -101,17 +100,20 @@ impl Graph {
     }
 
     /// Execute nodes in topological order. Each node's closure will be
-    /// executed in parallel as a stand-in for recording secondary command
-    /// buffers. The execution order can be retrieved with `execution_order`.
-    pub fn execute(&mut self) {
+    /// executed sequentially as a stand-in for recording secondary command
+    /// buffers. Returns an error if a cycle is detected. The execution order
+    /// can be retrieved with `execution_order`.
+    pub fn execute(&mut self) -> Result<(), &'static str> {
         self.order = self.kahn_sort();
-        let mut tasks: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
+        if self.order.len() != self.nodes.len() {
+            return Err("Cycle detected in graph");
+        }
         for &idx in &self.order {
             if let Some(exec) = self.nodes[idx].exec.take() {
-                tasks.push(exec);
+                (exec)();
             }
         }
-        tasks.into_par_iter().for_each(|f| f());
+        Ok(())
     }
 
     /// Returns the execution order produced by the last `execute` call.
@@ -130,8 +132,18 @@ mod tests {
         let a = g.add_node(Node::new(PassDecl::new(), || {}));
         let b = g.add_node(Node::new(PassDecl::new(), || {}));
         g.add_dependency(b, a);
-        g.execute();
-        assert_eq!(g.execution_order(), &[0,1]);
+        g.execute().unwrap();
+        assert_eq!(g.execution_order(), &[0, 1]);
+    }
+
+    #[test]
+    fn detect_cycle() {
+        let mut g = Graph::new();
+        let a = g.add_node(Node::new(PassDecl::new(), || {}));
+        let b = g.add_node(Node::new(PassDecl::new(), || {}));
+        g.add_dependency(a, b);
+        g.add_dependency(b, a);
+        assert!(g.execute().is_err());
     }
 }
 
