@@ -284,7 +284,7 @@ impl CommandEncoder {
     }
 
     /// Copy data between images, emitting required barriers.
-    pub fn copy_texture(
+    pub fn copy_image(
         &mut self,
         src: Handle<Image>,
         dst: Handle<Image>,
@@ -298,6 +298,17 @@ impl CommandEncoder {
         }
         let payload = CopyImage { src, dst };
         self.push(Op::CopyImage, &payload);
+    }
+
+    #[deprecated(note = "renamed to copy_image")]
+    /// Deprecated: renamed to [`copy_image`].
+    pub fn copy_texture(
+        &mut self,
+        src: Handle<Image>,
+        dst: Handle<Image>,
+        range: SubresourceRange,
+    ) {
+        self.copy_image(src, dst, range)
     }
 
     /// Begin a debug marker region.
@@ -333,7 +344,7 @@ impl CommandEncoder {
                 Op::Draw => sink.draw(cmd.payload()),
                 Op::Dispatch => sink.dispatch(cmd.payload()),
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
-                Op::CopyImage => sink.copy_texture(cmd.payload()),
+                Op::CopyImage => sink.copy_image(cmd.payload()),
                 Op::ImageBarrier => sink.texture_barrier(cmd.payload()),
                 Op::BufferBarrier => sink.buffer_barrier(cmd.payload()),
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload()),
@@ -473,7 +484,12 @@ pub trait CommandSink {
     fn draw(&mut self, cmd: &Draw);
     fn dispatch(&mut self, cmd: &Dispatch);
     fn copy_buffer(&mut self, cmd: &CopyBuffer);
-    fn copy_texture(&mut self, cmd: &CopyImage);
+    fn copy_image(&mut self, cmd: &CopyImage);
+    #[deprecated(note = "renamed to copy_image")]
+    /// Deprecated: renamed to [`copy_image`].
+    fn copy_texture(&mut self, cmd: &CopyImage) {
+        self.copy_image(cmd)
+    }
     fn texture_barrier(&mut self, cmd: &ImageBarrier);
     fn buffer_barrier(&mut self, cmd: &BufferBarrier);
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);

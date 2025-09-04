@@ -31,8 +31,8 @@ impl CommandSink for PrintSink {
     fn copy_buffer(&mut self, _: &CopyBuffer) {
         println!("copy_buffer");
     }
-    fn copy_texture(&mut self, _: &CopyImage) {
-        println!("copy_texture");
+    fn copy_image(&mut self, _: &CopyImage) {
+        println!("copy_image");
     }
     fn texture_barrier(&mut self, _: &ImageBarrier) {
         println!("texture_barrier");
@@ -65,7 +65,7 @@ fn main() {
     let mut enc = CommandEncoder::new();
 
     // "Compute" step: copy data into the destination image.
-    enc.copy_texture(src, dst, range);
+    enc.copy_image(src, dst, range);
 
     // "Graphics" step: render to the same image.
     enc.begin_render_pass(RenderPassDesc { colors: &[color], depth: None });

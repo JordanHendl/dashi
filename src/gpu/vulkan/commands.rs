@@ -1477,8 +1477,8 @@ impl CommandList {
         let _ = self.copy_buffer(info);
      }
  
-     fn copy_texture(&mut self, _cmd: &crate::driver::command::CopyImage) {
-     }
+    fn copy_image(&mut self, _cmd: &crate::driver::command::CopyImage) {
+    }
 
      fn texture_barrier(&mut self, _cmd: &crate::driver::command::ImageBarrier) {
 //        let barrier = ImageBarrier { view: Handle::new(cmd.image.index(), cmd.image.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };

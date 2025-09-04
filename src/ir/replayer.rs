@@ -33,7 +33,7 @@ pub trait Replayer<S: CommandSink> {
                     CommandSink::copy_buffer(sink, cmd.payload::<CopyBuffer>())
                 }
                 OpTag::CopyImage => {
-                    CommandSink::copy_texture(sink, cmd.payload::<CopyImage>())
+                    CommandSink::copy_image(sink, cmd.payload::<CopyImage>())
                 }
                 OpTag::ImageBarrier => {
                     CommandSink::texture_barrier(sink, cmd.payload::<ImageBarrier>())
