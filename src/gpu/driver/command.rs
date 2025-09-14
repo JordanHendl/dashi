@@ -1,9 +1,9 @@
-use bytemuck::{bytes_of, from_bytes, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, Rect2D, RenderTarget, SubmitInfo2, Viewport,
+    GraphicsPipeline, Image, ImageView, Rect2D, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -69,8 +69,10 @@ unsafe impl Pod for StoreOp {}
 pub struct BeginDrawing {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub target: Handle<RenderTarget>,
-    pub clear_values: [Option<ClearValue>; 4],
+    pub colors: [Option<ImageView>; 4],
+    pub depth: Option<ImageView>,
+    pub color_clears: [Option<ClearValue>; 4],
+    pub depth_clear: Option<ClearValue>,
 }
 
 #[repr(C)]
@@ -248,6 +250,8 @@ pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
     state: StateTracker,
+    curr_colors: [Option<ImageView>; 4],
+    curr_depth: Option<ImageView>,
 }
 
 impl CommandEncoder {
@@ -258,6 +262,8 @@ impl CommandEncoder {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
             state: StateTracker::new(),
+            curr_colors: [None; 4],
+            curr_depth: None,
         }
     }
 
@@ -266,6 +272,8 @@ impl CommandEncoder {
         self.data.clear();
         self.side.clear();
         self.state.reset();
+        self.curr_colors = [None; 4];
+        self.curr_depth = None;
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
@@ -333,11 +341,50 @@ impl CommandEncoder {
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
+        self.curr_colors = desc.colors;
+        self.curr_depth = desc.depth;
+        for view in desc.colors.iter().flatten() {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            if let Some(bar) =
+                self.state
+                    .request_image_state(view.img, range, UsageBits::RT_WRITE, Layout::ColorAttachment)
+            {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
+        if let Some(view) = desc.depth {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            if let Some(bar) =
+                self.state
+                    .request_image_state(view.img, range, UsageBits::DEPTH_WRITE, Layout::DepthStencilAttachment)
+            {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
         self.push(Op::BeginDrawing, desc);
     }
 
     /// End the current render pass.
     pub fn end_drawing(&mut self) {
+        let colors = self.curr_colors;
+        for view in colors.into_iter().flatten() {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            if let Some(bar) = self
+                .state
+                .request_image_state(view.img, range, UsageBits::SAMPLED, Layout::ShaderReadOnly)
+            {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
+        if let Some(view) = self.curr_depth {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            if let Some(bar) = self
+                .state
+                .request_image_state(view.img, range, UsageBits::DEPTH_READ, Layout::DepthStencilReadOnly)
+            {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
         self.push(Op::EndDrawing, &EndDrawing::default());
     }
 
