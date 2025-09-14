@@ -227,13 +227,6 @@ void main() {
         })
         .unwrap();
 
-    let render_target = ctx
-        .make_render_target(&RenderTargetInfo {
-            debug_name: "rt",
-            render_pass,
-            attachments: &[fb_view],
-        })
-        .unwrap();
 
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
@@ -327,8 +320,15 @@ void main() {
                         ..Default::default()
                     },
                     pipeline: graphics_pipeline,
-                    render_target,
-                    clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                    colors: [Some(fb_view), None, None, None],
+                    depth: None,
+                    color_clears: [
+                        Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
+                        None,
+                        None,
+                        None,
+                    ],
+                    depth_clear: None,
                 });
 
                 // Bump alloc some data to write the triangle position to.

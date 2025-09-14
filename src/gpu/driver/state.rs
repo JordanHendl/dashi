@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{Buffer, Image};
 
 use super::{
-    command::{BufferBarrier, ImageBarrier},
+    command::BufferBarrier,
     types::{Handle, UsageBits},
 };
 

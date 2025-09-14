@@ -163,13 +163,6 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
         })
         .unwrap();
 
-    let render_target = ctx
-        .make_render_target(&RenderTargetInfo {
-            debug_name: "rt",
-            render_pass,
-            attachments: &[fb_view],
-        })
-        .unwrap();
 
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
@@ -199,15 +192,22 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
         let (_idx, state) = ctx.acquire_xr_image(&mut display).unwrap();
 
         framed_list.record(|list| {
-            list.begin_drawing(&DrawBegin {
+            list.begin_drawing(&BeginDrawing {
                 viewport: Viewport {
                     area: FRect2D { w: width as f32, h: height as f32, ..Default::default() },
                     scissor: Rect2D { w: width, h: height, ..Default::default() },
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                render_target,
-                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                colors: [Some(fb_view), None, None, None],
+                depth: None,
+                color_clears: [
+                    Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
+                    None,
+                    None,
+                    None,
+                ],
+                depth_clear: None,
             }).unwrap();
             let mut buf = allocator.bump().unwrap();
             let pos = &mut buf.slice::<[f32; 2]>()[0];

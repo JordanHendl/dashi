@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
 use crate::driver::command::{BeginDrawing, BlitImage, Dispatch, Draw, DrawIndexed};
-use crate::driver::state::SubresourceRange;
 use crate::driver::types::Handle;
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
-use crate::{BindTable, Buffer, ComputePipeline, Fence, GraphicsPipeline, Image, SubmitInfo2};
+use crate::{BindTable, Fence, GraphicsPipeline, SubmitInfo2};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
