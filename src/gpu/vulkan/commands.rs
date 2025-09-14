@@ -3,20 +3,57 @@
 use ash::vk;
 
 use super::{
-    convert_barrier_point_vk,
-    convert_rect2d_to_vulkan,
-    ImageView,
-    RenderTarget,
-    VkImageView,
+    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderTarget, VkImageView,
 };
 use crate::driver::command::CommandSink;
+use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
+use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline,
-    Context, DynamicBuffer, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
-    IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Viewport,
+    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
 };
 
+// --- New: helpers to map engine Layout/UsageBits to Vulkan ---
+#[inline]
+pub fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
+    match layout {
+        Layout::Undefined => vk::ImageLayout::UNDEFINED,
+        Layout::General => vk::ImageLayout::GENERAL,
+        Layout::ShaderReadOnly => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        Layout::ColorAttachment => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        Layout::DepthStencilAttachment => vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        Layout::DepthStencilReadOnly => vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        Layout::TransferSrc => vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        Layout::TransferDst => vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        Layout::Present => vk::ImageLayout::PRESENT_SRC_KHR,
+    }
+}
+
+#[inline]
+pub fn usage_to_stages(usage: UsageBits) -> vk::PipelineStageFlags {
+    let mut flags = vk::PipelineStageFlags::empty();
+    for (u, s) in USAGE_TO_STAGE {
+        if usage.contains(*u) {
+            flags |= *s;
+        }
+    }
+    // Fallback: something benign
+    if flags.is_empty() {
+        flags = vk::PipelineStageFlags::TOP_OF_PIPE;
+    }
+    flags
+}
+
+#[inline]
+pub fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
+    let mut flags = vk::AccessFlags::empty();
+    for (u, a) in USAGE_TO_ACCESS {
+        if usage.contains(*u) {
+            flags |= *a;
+        }
+    }
+    flags
+}
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     match cv {
         ClearValue::Color(cols) => vk::ClearValue {
@@ -29,1266 +66,15 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
             color: vk::ClearColorValue { uint32: *cols },
         },
         ClearValue::DepthStencil { depth, stencil } => vk::ClearValue {
-            depth_stencil: vk::ClearDepthStencilValue { depth: *depth, stencil: *stencil },
+            depth_stencil: vk::ClearDepthStencilValue {
+                depth: *depth,
+                stencil: *stencil,
+            },
         },
     }
 }
-/// Parameters for a buffer-to-buffer copy command.
-///
-/// Offsets and sizes are specified in bytes.
-///
-/// # Examples
-/// ```no_run
-/// # use dashi::gpu::vulkan::{BufferCopy, CommandList};
-/// # use dashi::utils::Handle;
-/// # let mut list = CommandList::default();
-/// # let (src, dst) = (Handle::default(), Handle::default());
-/// list.copy_buffer(BufferCopy { src, dst, src_offset: 0, dst_offset: 0, size: 128 }).unwrap();
-/// ```
-///
-/// # Safety
-/// The source and destination buffers must be valid and large enough for
-/// the requested region, and they must have been created with the
-/// appropriate transfer usage flags.
-#[derive(Clone)]
-pub struct BufferCopy {
-    /// Source buffer handle.
-    pub src: Handle<Buffer>,
-    /// Destination buffer handle.
-    pub dst: Handle<Buffer>,
-    /// Source offset in bytes.
-    pub src_offset: usize,
-    /// Destination offset in bytes.
-    pub dst_offset: usize,
-    /// Number of bytes to copy. A value of `0` copies the minimum of
-    /// source and destination sizes.
-    pub size: usize,
-}
-
-impl Default for BufferCopy {
-    fn default() -> Self {
-        Self {
-            src: Default::default(),
-            dst: Default::default(),
-            src_offset: 0,
-            dst_offset: 0,
-            size: 0,
-        }
-    }
-}
-
-/// Parameters for copying image data into a buffer.
-///
-/// # Safety
-/// The destination buffer must have been created with transfer usage and
-/// be large enough to hold the image region.
-#[derive(Clone, Default)]
-pub struct ImageBufferCopy {
-    /// Source image view to copy from.
-    pub src: ImageView,
-    /// Destination buffer handle.
-    pub dst: Handle<Buffer>,
-    /// Destination offset in bytes.
-    pub dst_offset: usize,
-}
-
-/// Parameters for copying buffer data into an image.
-///
-/// # Safety
-/// The source buffer must contain enough data and the destination image
-/// must be in a layout compatible with transfer writes.
-#[derive(Clone, Default)]
-pub struct BufferImageCopy {
-    /// Source buffer handle.
-    pub src: Handle<Buffer>,
-    /// Destination image view.
-    pub dst: ImageView,
-    /// Offset within the source buffer.
-    pub src_offset: usize,
-}
-
-/// Describes a blit operation between two image regions.
-///
-/// # Safety
-/// Both images must be compatible and in layouts supporting blits.
-#[derive(Clone)]
-pub struct ImageBlit {
-    /// Source image view.
-    pub src: ImageView,
-    /// Destination image view.
-    pub dst: ImageView,
-    /// Filtering mode to apply.
-    pub filter: Filter,
-    /// Region in the source image.
-    pub src_region: Rect2D,
-    /// Region in the destination image.
-    pub dst_region: Rect2D,
-}
-
-impl Default for ImageBlit {
-    fn default() -> Self {
-        Self {
-            src: Default::default(),
-            dst: Default::default(),
-            filter: Filter::Nearest,
-            src_region: Default::default(),
-            dst_region: Default::default(),
-        }
-    }
-}
-
-/// Collection of resources bound before draw or dispatch commands.
-#[derive(Clone, Copy, Default)]
-pub struct Bindings {
-    /// Optional bind groups to be set.
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
-    /// Optional bind tables to be set.
-    pub bind_tables: [Option<Handle<BindTable>>; 4],
-    /// Optional dynamic buffers used for offsets.
-    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
-}
-
-impl Bindings {
-    /// Iterate over pairs of bind tables and bind groups to be bound.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (Option<Handle<BindTable>>, Option<Handle<BindGroup>>)> + '_ {
-        self.bind_tables
-            .iter()
-            .copied()
-            .zip(self.bind_groups.iter().copied())
-            .enumerate()
-            .filter_map(|(_i, (bt, bg))| {
-                if bt.is_some() || bg.is_some() {
-                    Some((bt, bg))
-                } else {
-                    None
-                }
-            })
-    }
-
-    /// Iterate over dynamic buffer offsets used by these bindings.
-    pub fn dynamic_offsets(&self) -> impl Iterator<Item = u32> + '_ {
-        self.dynamic_buffers
-            .iter()
-            .filter_map(|&d| d.map(|b| b.alloc.offset))
-    }
-}
-
-/// Information required to dispatch a compute workload.
-#[derive(Clone)]
-pub struct Dispatch {
-    /// Compute pipeline to execute.
-    pub compute: Handle<ComputePipeline>,
-    /// Resources to bind before dispatch.
-    pub bindings: Bindings,
-    /// Work group counts in X/Y/Z.
-    pub workgroup_size: [u32; 3],
-}
-
-impl Default for Dispatch {
-    fn default() -> Self {
-        Self {
-            compute: Default::default(),
-            bindings: Default::default(),
-            workgroup_size: Default::default(),
-        }
-    }
-}
-
-/// Parameters for beginning a draw pass.
-#[derive(Clone)]
-pub struct DrawBegin<'a> {
-    /// Viewport to render into.
-    pub viewport: Viewport,
-    /// Pipeline used for subsequent draw calls.
-    pub pipeline: Handle<GraphicsPipeline>,
-    /// Render target to attach.
-    pub render_target: Handle<RenderTarget>,
-    /// Clear values for attachments.
-    pub clear_values: &'a [ClearValue],
-}
-
-/// Non-indexed draw parameters.
-#[derive(Clone, Default)]
-pub struct Draw {
-    /// Vertex buffer handle.
-    pub vertices: Handle<Buffer>,
-    /// Resources to bind before drawing.
-    pub bindings: Bindings,
-    /// Number of instances to draw.
-    pub instance_count: u32,
-    /// Number of vertices to draw.
-    pub count: u32,
-}
-
-/// Indexed draw using dynamically allocated buffers.
-#[derive(Clone)]
-pub struct DrawIndexedDynamic {
-    /// Vertex buffer allocation.
-    pub vertices: DynamicBuffer,
-    /// Index buffer allocation.
-    pub indices: DynamicBuffer,
-    /// Resources to bind before drawing.
-    pub bindings: Bindings,
-    /// Number of indices to draw.
-    pub index_count: u32,
-    /// Number of instances to draw.
-    pub instance_count: u32,
-    /// First instance ID.
-    pub first_instance: u32,
-}
-
-impl Default for DrawIndexedDynamic {
-    fn default() -> Self {
-        Self {
-            vertices: Default::default(),
-            indices: Default::default(),
-            index_count: Default::default(),
-            instance_count: 1,
-            first_instance: 0,
-            bindings: Default::default(),
-        }
-    }
-}
-
-/// Binding information for indexed bind groups.
-#[derive(Clone)]
-pub struct BindIndexedBG {
-    /// Optional bind groups to be used with indexed drawing.
-    pub bind_groups: [Option<Handle<IndexedBindGroup>>; 4],
-}
-
-/// Parameters to begin a render pass.
-#[derive(Clone, Default)]
-pub struct RenderPassBegin<'a> {
-    /// Render target to start the pass on.
-    pub render_target: Handle<RenderTarget>,
-    /// Viewport to use.
-    pub viewport: Viewport,
-    /// Clear values for attachments.
-    pub clear_values: &'a [ClearValue],
-}
-
-/// Parameters for an indexed draw call.
-#[derive(Clone)]
-pub struct DrawIndexed {
-    /// Vertex buffer handle.
-    pub vertices: Handle<Buffer>,
-    /// Index buffer handle.
-    pub indices: Handle<Buffer>,
-    /// Resources to bind before drawing.
-    pub bindings: Bindings,
-    /// Number of indices.
-    pub index_count: u32,
-    /// Number of instances.
-    pub instance_count: u32,
-    /// First instance ID.
-    pub first_instance: u32,
-}
-
-impl Default for DrawIndexed {
-    fn default() -> Self {
-        Self {
-            vertices: Default::default(),
-            indices: Default::default(),
-            index_count: Default::default(),
-            instance_count: 1,
-            first_instance: 0,
-            bindings: Default::default(),
-        }
-    }
-}
-
-/// Parameters for an indexed indirect draw call.
-#[derive(Clone)]
-pub struct DrawIndexedIndirect {
-    /// Buffer containing `IndexedIndirectCommand` structures.
-    pub draw_params: Handle<Buffer>,
-    /// Resources to bind before drawing.
-    pub bindings: Bindings,
-    /// Byte offset within the parameter buffer.
-    pub offset: u32,
-    /// Number of draws to execute.
-    pub draw_count: u32,
-    /// Stride between draws in bytes.
-    pub stride: u32,
-}
-
-impl Default for DrawIndexedIndirect {
-    fn default() -> Self {
-        Self {
-            draw_params: Default::default(),
-            bindings: Default::default(),
-            offset: 0,
-            draw_count: 0,
-            stride: std::mem::size_of::<IndexedIndirectCommand>() as u32,
-        }
-    }
-}
-
-/// Parameters for a non-indexed indirect draw call.
-#[derive(Clone)]
-pub struct DrawIndirect {
-    /// Buffer containing `IndirectCommand` structures.
-    pub draw_params: Handle<Buffer>,
-    /// Resources to bind before drawing.
-    pub bindings: Bindings,
-    /// Byte offset within the parameter buffer.
-    pub offset: u32,
-    /// Number of draws to execute.
-    pub draw_count: u32,
-    /// Stride between draws in bytes.
-    pub stride: u32,
-}
-
-impl Default for DrawIndirect {
-    fn default() -> Self {
-        Self {
-            draw_params: Default::default(),
-            bindings: Default::default(),
-            offset: 0,
-            draw_count: 0,
-            stride: std::mem::size_of::<IndirectCommand>() as u32,
-        }
-    }
-}
-
-/// Pipeline binding command parameters.
-#[derive(Clone, Copy, Default)]
-pub struct BindPipeline {
-    /// Optional graphics pipeline to bind.
-    pub gfx: Option<Handle<GraphicsPipeline>>,
-    /// Optional compute pipeline to bind.
-    pub compute: Option<Handle<ComputePipeline>>,
-    /// Resources to bind after the pipeline.
-    pub bindings: Bindings,
-}
-
-/// Describes a synchronization barrier for an image view.
-#[derive(Clone, Copy)]
-pub struct ImageBarrier {
-    /// Image view to transition.
-    pub view: ImageView,
-    /// Source usage for the barrier.
-    pub src: BarrierPoint,
-    /// Destination usage for the barrier.
-    pub dst: BarrierPoint,
-}
-
-/// High level command description used for manual command recording.
-#[derive(Clone)]
-pub enum Command {
-    /// Copy data between buffers.
-    BufferCopy(BufferCopy),
-    /// Copy data from a buffer into an image.
-    BufferImageCopy(BufferImageCopy),
-    /// Copy data from an image into a buffer.
-    ImageBufferCopy(ImageBufferCopy),
-    /// Issue a non-indexed draw.
-    Draw(Draw),
-    /// Issue an indexed draw.
-    DrawIndexed(DrawIndexed),
-    /// Issue an indexed draw using dynamic buffers.
-    DrawIndexedDynamic(DrawIndexedDynamic),
-    /// Issue an indexed indirect draw.
-    DrawIndexedIndirect(DrawIndexedIndirect),
-    /// Issue a non-indexed indirect draw.
-    DrawIndirect(DrawIndirect),
-    /// Bind a pipeline.
-    BindPipeline(BindPipeline),
-    /// Blit between images.
-    Blit(ImageBlit),
-    /// Insert an image barrier.
-    ImageBarrier(ImageBarrier),
-    /// Dispatch a compute workload.
-    Dispatch(Dispatch),
-}
 
 impl CommandList {
-    /// Append a generic command to the list and mark the command list dirty.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn append(&mut self, cmd: Command) -> Result<()> {
-        if self.ctx.is_null() {
-            return Ok(());
-        }
-        match cmd {
-            Command::BufferCopy(c) => self.copy_buffer(c)?,
-            Command::BufferImageCopy(c) => self.copy_buffer_to_image(c)?,
-            Command::ImageBufferCopy(c) => self.copy_image_to_buffer(c)?,
-            Command::Blit(c) => self.blit_image(c)?,
-            Command::ImageBarrier(b) => self.image_barrier(b)?,
-            Command::Dispatch(d) => self.dispatch_compute(d)?,
-            Command::Draw(d) => self.draw(d)?,
-            Command::DrawIndexed(d) => self.draw_indexed(d)?,
-            Command::DrawIndexedDynamic(d) => self.draw_indexed_dynamic(d)?,
-            Command::DrawIndexedIndirect(d) => self.draw_indexed_indirect(d)?,
-            Command::DrawIndirect(d) => self.draw_indirect(d)?,
-            Command::BindPipeline(p) => self.cmd_bind_pipeline(p)?,
-        }
-        self.dirty = true;
-        Ok(())
-    }
-
-    /// Copy data between two buffers.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_buffer(&mut self, info: BufferCopy) -> Result<()> {
-        unsafe {
-            let src = self
-                .ctx_ref()
-                .buffers
-                .get_ref(info.src)
-                .ok_or(GPUError::SlotError())?;
-            let dst = self
-                .ctx_ref()
-                .buffers
-                .get_ref(info.dst)
-                .ok_or(GPUError::SlotError())?;
-            self.ctx_ref().device.cmd_copy_buffer(
-                self.cmd_buf,
-                src.buf,
-                dst.buf,
-                &[vk::BufferCopy {
-                    src_offset: info.src_offset as u64,
-                    dst_offset: info.dst_offset as u64,
-                    size: if info.size == 0 {
-                        src.size.min(dst.size) as u64
-                    } else {
-                        info.size as u64
-                    },
-                }],
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::MEMORY_WRITE,
-            );
-        }
-        Ok(())
-    }
-
-    /// Copy data from a buffer to an image.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_buffer_to_image(&mut self, rec: BufferImageCopy) -> Result<()> {
-        unsafe {
-            let handle = self.ctx_ref().get_or_create_image_view(&rec.dst)?;
-            let view_data = self
-                .ctx_ref()
-                .image_views
-                .get_ref(handle)
-                .ok_or(GPUError::SlotError())?;
-            let img_data = self
-                .ctx_ref()
-                .images
-                .get_ref(view_data.img)
-                .ok_or(GPUError::SlotError())?;
-            let mip = view_data.range.base_mip_level as usize;
-            let old_layout = img_data.layouts[mip];
-            self.transition_image(
-                handle,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::TRANSFER_WRITE,
-            )?;
-
-            let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
-            self.ctx_ref().device.cmd_copy_buffer_to_image(
-                self.cmd_buf,
-                self.ctx_ref()
-                    .buffers
-                    .get_ref(rec.src)
-                    .ok_or(GPUError::SlotError())?
-                    .buf,
-                img_data.img,
-                img_data.layouts[mip],
-                &[vk::BufferImageCopy {
-                    buffer_offset: rec.src_offset as u64,
-                    image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: img_data.sub_layers.aspect_mask,
-                        mip_level: view_data.range.base_mip_level,
-                        base_array_layer: view_data.range.base_array_layer,
-                        layer_count: view_data.range.layer_count,
-                    },
-                    image_extent: vk::Extent3D { width: dims[0], height: dims[1], depth: dims[2] },
-                    ..Default::default()
-                }],
-            );
-
-            self.transition_image_layout(
-                handle,
-                old_layout,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::TRANSFER_READ,
-            )?;
-            self.update_last_access(
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::MEMORY_WRITE,
-            );
-        }
-        Ok(())
-    }
-
-    /// Copy image data into a buffer.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn copy_image_to_buffer(&mut self, rec: ImageBufferCopy) -> Result<()> {
-        unsafe {
-            let handle = self.ctx_ref().get_or_create_image_view(&rec.src)?;
-            let view_data = self
-                .ctx_ref()
-                .image_views
-                .get_ref(handle)
-                .ok_or(GPUError::SlotError())?;
-            let img_data = self
-                .ctx_ref()
-                .images
-                .get_ref(view_data.img)
-                .ok_or(GPUError::SlotError())?;
-            let mip = view_data.range.base_mip_level as usize;
-            let old_layout = img_data.layouts[mip];
-            self.transition_image(
-                handle,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::TRANSFER_READ,
-            )?;
-
-            let dims = crate::gpu::mip_dimensions(img_data.dim, view_data.range.base_mip_level);
-            self.ctx_ref().device.cmd_copy_image_to_buffer(
-                self.cmd_buf,
-                img_data.img,
-                img_data.layouts[mip],
-                self.ctx_ref()
-                    .buffers
-                    .get_ref(rec.dst)
-                    .ok_or(GPUError::SlotError())?
-                    .buf,
-                &[vk::BufferImageCopy {
-                    buffer_offset: rec.dst_offset as u64,
-                    image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: img_data.sub_layers.aspect_mask,
-                        mip_level: view_data.range.base_mip_level,
-                        base_array_layer: view_data.range.base_array_layer,
-                        layer_count: view_data.range.layer_count,
-                    },
-                    image_extent: vk::Extent3D { width: dims[0], height: dims[1], depth: dims[2] },
-                    ..Default::default()
-                }],
-            );
-
-            self.transition_image_layout(
-                handle,
-                old_layout,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::MEMORY_READ,
-            )?;
-            self.update_last_access(
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::MEMORY_WRITE,
-            );
-        }
-        Ok(())
-    }
-
-    /// Blit one image region into another.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn blit_image(&mut self, cmd: ImageBlit) -> Result<()> {
-        unsafe {
-            let src_handle = self.ctx_ref().get_or_create_image_view(&cmd.src)?;
-            let dst_handle = self.ctx_ref().get_or_create_image_view(&cmd.dst)?;
-            let src_view = self
-                .ctx_ref()
-                .image_views
-                .get_ref(src_handle)
-                .ok_or(GPUError::SlotError())?;
-            let dst_view = self
-                .ctx_ref()
-                .image_views
-                .get_ref(dst_handle)
-                .ok_or(GPUError::SlotError())?;
-            let src_data = self
-                .ctx_ref()
-                .images
-                .get_ref(src_view.img)
-                .ok_or(GPUError::SlotError())?;
-            let dst_data = self
-                .ctx_ref()
-                .images
-                .get_ref(dst_view.img)
-                .ok_or(GPUError::SlotError())?;
-            let src_dim = crate::gpu::mip_dimensions(src_data.dim, src_view.range.base_mip_level);
-            let dst_dim = crate::gpu::mip_dimensions(dst_data.dim, dst_view.range.base_mip_level);
-            let regions = [vk::ImageBlit {
-                src_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: src_view.range.aspect_mask,
-                    mip_level: src_view.range.base_mip_level,
-                    base_array_layer: src_view.range.base_array_layer,
-                    layer_count: src_view.range.layer_count,
-                },
-                src_offsets: [
-                    vk::Offset3D {
-                        x: cmd.src_region.x as i32,
-                        y: cmd.src_region.y as i32,
-                        z: 0,
-                    },
-                    vk::Offset3D {
-                        x: (cmd.src_region.w.max(src_dim[0])) as i32,
-                        y: (cmd.src_region.h.max(src_dim[1])) as i32,
-                        z: 1,
-                    },
-                ],
-                dst_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: dst_view.range.aspect_mask,
-                    mip_level: dst_view.range.base_mip_level,
-                    base_array_layer: dst_view.range.base_array_layer,
-                    layer_count: dst_view.range.layer_count,
-                },
-                dst_offsets: [
-                    vk::Offset3D {
-                        x: cmd.dst_region.x as i32,
-                        y: cmd.dst_region.y as i32,
-                        z: 0,
-                    },
-                    vk::Offset3D {
-                        x: (cmd.dst_region.w.max(dst_dim[0])) as i32,
-                        y: (cmd.dst_region.h.max(dst_dim[1])) as i32,
-                        z: 1,
-                    },
-                ],
-            }];
-            let src_mip = src_view.range.base_mip_level as usize;
-            let dst_mip = dst_view.range.base_mip_level as usize;
-            let src_layout = src_data.layouts[src_mip];
-            let dst_layout = dst_data.layouts[dst_mip];
-
-            self.transition_image_layout(
-                src_handle,
-                vk::ImageLayout::GENERAL,
-                vk::PipelineStageFlags::TRANSFER,
-                self.last_op_access,
-            )?;
-            self.transition_image_layout(
-                dst_handle,
-                vk::ImageLayout::GENERAL,
-                vk::PipelineStageFlags::TRANSFER,
-                self.last_op_access,
-            )?;
-            self.ctx_ref().device.cmd_blit_image(
-                self.cmd_buf,
-                src_data.img,
-                src_data.layouts[src_mip],
-                dst_data.img,
-                dst_data.layouts[dst_mip],
-                &regions,
-                cmd.filter.into(),
-            );
-
-            self.transition_image_layout(
-                src_handle,
-                src_layout,
-                vk::PipelineStageFlags::TRANSFER,
-                self.last_op_access,
-            )?;
-            self.transition_image_layout(
-                dst_handle,
-                dst_layout,
-                vk::PipelineStageFlags::TRANSFER,
-                self.last_op_access,
-            )?;
-            self.update_last_access(
-                vk::PipelineStageFlags::TRANSFER,
-                vk::AccessFlags::TRANSFER_WRITE,
-            );
-        }
-        Ok(())
-    }
-
-    /// Insert a barrier for an image without changing its layout.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn image_barrier(&mut self, barrier: ImageBarrier) -> Result<()> {
-        unsafe {
-            let handle = self.ctx_ref().get_or_create_image_view(&barrier.view)?;
-            let view_data = self
-                .ctx_ref()
-                .image_views
-                .get_ref(handle)
-                .ok_or(GPUError::SlotError())?;
-            let img_data = self
-                .ctx_ref()
-                .images
-                .get_ref(view_data.img)
-                .ok_or(GPUError::SlotError())?;
-            let mip = view_data.range.base_mip_level as usize;
-            self.ctx_ref().device.cmd_pipeline_barrier(
-                self.cmd_buf,
-                self.last_op_stage,
-                convert_barrier_point_vk(barrier.dst),
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layouts[mip])
-                    .new_layout(img_data.layouts[mip])
-                    .src_access_mask(self.last_op_access)
-                    .dst_access_mask(vk::AccessFlags::empty())
-                    .image(img_data.img)
-                    .subresource_range(view_data.range)
-                    .build()],
-            );
-        }
-        Ok(())
-    }
-
-    /// Dispatch a compute pipeline with the given workgroup size.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn dispatch_compute(&mut self, cmd: Dispatch) -> Result<()> {
-        unsafe {
-            // Bind pipeline
-            let pipeline = self
-                .ctx_ref()
-                .compute_pipelines
-                .get_ref(cmd.compute)
-                .ok_or(GPUError::SlotError())?;
-            let layout = self
-                .ctx_ref()
-                .compute_pipeline_layouts
-                .get_ref(pipeline.layout)
-                .ok_or(GPUError::SlotError())?
-                .layout;
-            self.ctx_ref().device.cmd_bind_pipeline(
-                self.cmd_buf,
-                vk::PipelineBindPoint::COMPUTE,
-                pipeline.raw,
-            );
-
-            let offsets: Vec<u32> = cmd.bindings.dynamic_offsets().collect();
-            for (bt, bg) in cmd.bindings.iter() {
-                self.bind_descriptor_set(
-                    vk::PipelineBindPoint::COMPUTE,
-                    layout,
-                    bt,
-                    bg,
-                    &offsets,
-                );
-            }
-
-            // Dispatch
-            self.ctx_ref().device.cmd_dispatch(
-                self.cmd_buf,
-                cmd.workgroup_size[0],
-                cmd.workgroup_size[1],
-                cmd.workgroup_size[2],
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::COMPUTE_SHADER,
-                vk::AccessFlags::SHADER_WRITE,
-            );
-        }
-        Ok(())
-    }
-
-    /// Begin a render pass if the requested one is not already active.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn begin_render_pass(&mut self, info: &RenderPassBegin) -> Result<()> {
-        let rt = self
-            .ctx_ref()
-            .render_targets
-            .get_ref(info.render_target)
-            .ok_or(GPUError::SlotError())?;
-        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
-            return Ok(());
-        }
-        // end previous pass
-        if self.curr_rp.is_some() {
-            unsafe {
-                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
-            }
-        }
-        self.curr_rp = Some(rt.render_pass);
-
-        unsafe {
-            let rp_obj = self
-                .ctx_ref()
-                .render_passes
-                .get_ref(rt.render_pass)
-                .ok_or(GPUError::SlotError())?;
-            let clears: Vec<vk::ClearValue> =
-                info.clear_values.iter().map(clear_value_to_vk).collect();
-            self.ctx_ref().device.cmd_begin_render_pass(
-                self.cmd_buf,
-                &vk::RenderPassBeginInfo::builder()
-                    .render_pass(rp_obj.raw)
-                    .framebuffer(rt.fb)
-                    .render_area(convert_rect2d_to_vulkan(info.viewport.scissor))
-                    .clear_values(&clears)
-                    .build(),
-                vk::SubpassContents::INLINE,
-            );
-            self.update_last_access(vk::PipelineStageFlags::NONE, vk::AccessFlags::empty());
-        }
-        Ok(())
-    }
-
-    /// Issue a non-indexed draw call.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn draw(&mut self, cmd: Draw) -> Result<()> {
-        unsafe {
-            self.bind_draw_descriptor_sets(&cmd.bindings)?;
-            let buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            static OFFSET: vk::DeviceSize = 0;
-            self.ctx_ref()
-                .device
-                .cmd_bind_vertex_buffers(self.cmd_buf, 0, &[buf.buf], &[OFFSET]);
-            self.ctx_ref()
-                .device
-                .cmd_draw(self.cmd_buf, cmd.count, cmd.instance_count, 0, 0);
-            self.update_last_access(
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
-            );
-        }
-        Ok(())
-    }
-
-    /// Issue an indexed draw call.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed(&mut self, cmd: DrawIndexed) -> Result<()> {
-        unsafe {
-            self.bind_draw_descriptor_sets(&cmd.bindings)?;
-            let v_buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            let i_buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.indices)
-                .ok_or(GPUError::SlotError())?;
-            static OFFSET: vk::DeviceSize = 0;
-            self.ctx_ref()
-                .device
-                .cmd_bind_vertex_buffers(self.cmd_buf, 0, &[v_buf.buf], &[OFFSET]);
-            self.ctx_ref().device.cmd_bind_index_buffer(
-                self.cmd_buf,
-                i_buf.buf,
-                OFFSET,
-                vk::IndexType::UINT32,
-            );
-            self.ctx_ref().device.cmd_draw_indexed(
-                self.cmd_buf,
-                cmd.index_count,
-                cmd.instance_count,
-                0,
-                0,
-                cmd.first_instance,
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
-            );
-        }
-        Ok(())
-    }
-
-    /// Draw indexed geometry using dynamic buffers.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed_dynamic(&mut self, cmd: DrawIndexedDynamic) -> Result<()> {
-        unsafe {
-            self.bind_draw_descriptor_sets(&cmd.bindings)?;
-            let v_buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices.handle())
-                .ok_or(GPUError::SlotError())?;
-            let i_buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.indices.handle())
-                .ok_or(GPUError::SlotError())?;
-            let vb_offset = cmd.vertices.offset() as u64;
-            let ib_offset = cmd.indices.offset() as u64;
-            self.ctx_ref().device.cmd_bind_vertex_buffers(
-                self.cmd_buf,
-                0,
-                &[v_buf.buf],
-                &[vb_offset],
-            );
-            self.ctx_ref().device.cmd_bind_index_buffer(
-                self.cmd_buf,
-                i_buf.buf,
-                ib_offset,
-                vk::IndexType::UINT32,
-            );
-            self.ctx_ref().device.cmd_draw_indexed(
-                self.cmd_buf,
-                cmd.index_count,
-                cmd.instance_count,
-                0,
-                0,
-                cmd.first_instance,
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
-            );
-        }
-        Ok(())
-    }
-
-    /// Issue an indexed draw call using indirect parameters.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indexed_indirect(&mut self, cmd: DrawIndexedIndirect) -> Result<()> {
-        unsafe {
-            let buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.draw_params)
-                .ok_or(GPUError::SlotError())?;
-            self.ctx_ref().device.cmd_draw_indexed_indirect(
-                self.cmd_buf,
-                buf.buf,
-                cmd.offset as u64,
-                cmd.draw_count,
-                cmd.stride,
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
-            );
-        }
-        Ok(())
-    }
-
-    /// Issue a draw call using indirect parameters.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn draw_indirect(&mut self, cmd: DrawIndirect) -> Result<()> {
-        unsafe {
-            let buf = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.draw_params)
-                .ok_or(GPUError::SlotError())?;
-            self.ctx_ref().device.cmd_draw_indirect(
-                self.cmd_buf,
-                buf.buf,
-                cmd.offset as u64,
-                cmd.draw_count,
-                cmd.stride,
-            );
-            self.update_last_access(
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
-            );
-        }
-        Ok(())
-    }
-
-    /// Bind descriptor sets and dynamic offsets for a draw.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn bind_draw_descriptor_sets(&mut self, bindings: &Bindings) -> Result<()> {
-        let p = self
-            .ctx_ref()
-            .gfx_pipelines
-            .get_ref(self.curr_pipeline.ok_or(GPUError::LibraryError())?)
-            .ok_or(GPUError::SlotError())?;
-        let p_layout = self
-            .ctx_ref()
-            .gfx_pipeline_layouts
-            .get_ref(p.layout)
-            .ok_or(GPUError::SlotError())?
-            .layout;
-        let offsets: Vec<u32> = bindings.dynamic_offsets().collect();
-        for (bt, bg) in bindings.iter() {
-            self.bind_descriptor_set(
-                vk::PipelineBindPoint::GRAPHICS,
-                p_layout,
-                bt,
-                bg,
-                &offsets,
-            );
-        }
-        Ok(())
-    }
-
-    /// Set the active viewport for subsequent draw calls.
-    ///
-    /// This should be used when the bound pipeline enables the `Viewport`
-    /// dynamic state. The provided [`Viewport`] is converted to Vulkan's
-    /// [`vk::Viewport`] and applied using `cmd_set_viewport`.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn set_viewport(&mut self, viewport: Viewport) {
-        let vk_viewport = vk::Viewport {
-            x: viewport.area.x,
-            y: viewport.area.y,
-            width: viewport.area.w,
-            height: viewport.area.h,
-            min_depth: viewport.min_depth,
-            max_depth: viewport.max_depth,
-        };
-
-        unsafe {
-            self.ctx_ref()
-                .device
-                .cmd_set_viewport(self.cmd_buf, 0, &[vk_viewport]);
-        }
-    }
-  
-    fn cmd_bind_pipeline(&mut self, info: BindPipeline) -> Result<()> {
-        unsafe {
-            if let Some(pipeline) = info.gfx {
-                let gfx = self
-                    .ctx_ref()
-                    .gfx_pipelines
-                    .get_ref(pipeline)
-                    .ok_or(GPUError::SlotError())?;
-                let layout = self
-                    .ctx_ref()
-                    .gfx_pipeline_layouts
-                    .get_ref(gfx.layout)
-                    .ok_or(GPUError::SlotError())?
-                    .layout;
-                self.ctx_ref().device.cmd_bind_pipeline(
-                    self.cmd_buf,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    gfx.raw,
-                );
-                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
-                for (bt, bg) in info.bindings.iter() {
-                    self.bind_descriptor_set(
-                        vk::PipelineBindPoint::GRAPHICS,
-                        layout,
-                        bt,
-                        bg,
-                        &offsets,
-                    );
-                }
-            }
-            if let Some(pipeline) = info.compute {
-                let comp = self
-                    .ctx_ref()
-                    .compute_pipelines
-                    .get_ref(pipeline)
-                    .ok_or(GPUError::SlotError())?;
-                let layout = self
-                    .ctx_ref()
-                    .compute_pipeline_layouts
-                    .get_ref(comp.layout)
-                    .ok_or(GPUError::SlotError())?
-                    .layout;
-                self.ctx_ref().device.cmd_bind_pipeline(
-                    self.cmd_buf,
-                    vk::PipelineBindPoint::COMPUTE,
-                    comp.raw,
-                );
-                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
-                for (bt, bg) in info.bindings.iter() {
-                    self.bind_descriptor_set(
-                        vk::PipelineBindPoint::COMPUTE,
-                        layout,
-                        bt,
-                        bg,
-                        &offsets,
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Bind a graphics pipeline for subsequent draw calls.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn bind_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
-        if self.curr_rp.is_none() {
-            return Err(GPUError::LibraryError());
-        }
-        if self.curr_pipeline == Some(pipeline) {
-            return Ok(());
-        }
-        self.curr_pipeline = Some(pipeline);
-        self.cmd_bind_pipeline(BindPipeline {
-            gfx: Some(pipeline),
-            ..Default::default()
-        })?;
-        Ok(())
-    }
-
-    /// Set the scissor rectangle used for rendering.
-    ///
-    /// Call this when the pipeline uses the `Scissor` dynamic state.
-    /// The [`Rect2D`] is converted to [`vk::Rect2D`] before being passed to
-    /// `cmd_set_scissor`.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn set_scissor(&mut self, rect: Rect2D) {
-        let vk_rect = convert_rect2d_to_vulkan(rect);
-
-        unsafe {
-            self.ctx_ref()
-                .device
-                .cmd_set_scissor(self.cmd_buf, 0, &[vk_rect]);
-        }
-    }
-
-    /// Begin drawing by starting the render pass and binding the pipeline.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn begin_drawing(&mut self, info: &DrawBegin) -> Result<()> {
-        let pipeline = info.pipeline;
-        let gfx = self
-            .ctx_ref()
-            .gfx_pipelines
-            .get_ref(pipeline)
-            .ok_or(GPUError::SlotError())?;
-        let rt = self
-            .ctx_ref()
-            .render_targets
-            .get_ref(info.render_target)
-            .ok_or(GPUError::SlotError())?;
-        if rt.render_pass != gfx.render_pass {
-            return Err(GPUError::LibraryError());
-        }
-        self.begin_render_pass(&RenderPassBegin {
-            render_target: info.render_target,
-            viewport: info.viewport,
-            clear_values: info.clear_values,
-        })?;
-        self.bind_pipeline(pipeline)
-    }
-
-    /// End the current render pass and reset cached state.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn end_drawing(&mut self) -> Result<()> {
-        match self.curr_rp {
-            Some(_) => {
-                unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
-                self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
-                self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
-                self.curr_rp = None;
-                self.curr_pipeline = None;
-                Ok(())
-            }
-            None => return Err(GPUError::LibraryError()),
-        }
-    }
-
-    /// Advance to the next subpass in the active render pass.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn next_subpass(&mut self) -> Result<()> {
-        if self.curr_rp.is_none() {
-            return Err(GPUError::LibraryError());
-        }
-
-        unsafe {
-            (*self.ctx)
-                .device
-                .cmd_next_subpass(self.cmd_buf, vk::SubpassContents::INLINE);
-        }
-
-        self.last_op_stage = vk::PipelineStageFlags::NONE;
-        self.last_op_access = vk::AccessFlags::NONE;
-
-        Ok(())
-    }
-
     /// Reset the command buffer and begin recording again.
     ///
     /// # Vulkan prerequisites
@@ -1313,90 +99,126 @@ impl CommandList {
         self.curr_pipeline = None;
         Ok(())
     }
-
-    /// Transition image with stage/access based on last_op
-    fn transition_image_layout(
+    pub fn submit(
         &mut self,
-        view: Handle<VkImageView>,
-        layout: vk::ImageLayout,
-        new_stage: vk::PipelineStageFlags,
-        new_access: vk::AccessFlags,
-    ) -> Result<()> {
-        unsafe {
-            let view_data = self
-                .ctx_ref()
-                .image_views
-                .get_ref(view)
-                .ok_or(GPUError::SlotError())?;
-            let img_data = self
-                .ctx_ref()
-                .images
-                .get_mut_ref(view_data.img)
-                .ok_or(GPUError::SlotError())?;
-            let mip = view_data.range.base_mip_level as usize;
-            let (src_stage, src_access, dst_stage, dst_access) = self
-                .ctx_ref()
-                .barrier_masks_for_transition(img_data.layouts[mip], layout);
-            self.ctx_ref().device.cmd_pipeline_barrier(
-                self.cmd_buf,
-                src_stage,
-                dst_stage,
-                vk::DependencyFlags::default(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layouts[mip])
-                    .new_layout(layout)
-                    .src_access_mask(src_access)
-                    .dst_access_mask(dst_access)
-                    .image(img_data.img)
-                    .subresource_range(view_data.range)
-                    .build()],
-            );
-            img_data.layouts[mip] = layout;
-            self.last_op_stage = new_stage;
-            self.last_op_access = new_access;
+        info: &SubmitInfo2,
+    ) -> Result<Handle<Fence>, GPUError> {
+        if self.dirty {
+            unsafe { (*self.ctx).device.end_command_buffer(self.cmd_buf)? };
+            self.dirty = false;
         }
-        Ok(())
+
+        unsafe {
+            let wait_sems: Vec<Handle<Semaphore>> = info
+                .wait_sems
+                .iter()
+                .copied()
+                .filter(|h| h.valid())
+                .collect();
+
+            let signal_sems: Vec<Handle<Semaphore>> = info
+                .signal_sems
+                .iter()
+                .copied()
+                .filter(|h| h.valid())
+                .collect();
+
+            let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
+                .into_iter()
+                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
+                .collect();
+
+            let raw_signal_sems: Vec<vk::Semaphore> = signal_sems
+                .into_iter()
+                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
+                .collect();
+
+            let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+
+            let queue = (*self.ctx).gfx_queue.queue;
+            (*self.ctx).device.queue_submit(
+                queue,
+                &[vk::SubmitInfo::builder()
+                    .command_buffers(&[self.cmd_buf])
+                    .signal_semaphores(&raw_signal_sems)
+                    .wait_dst_stage_mask(&stage_masks)
+                    .wait_semaphores(&raw_wait_sems)
+                    .build()],
+                (*self.ctx).fences.get_ref(self.fence).unwrap().raw.clone(),
+            )?;
+
+            return Ok(self.fence.clone());
+        }
     }
 
-    /// Transition image with stage/access based on last_op
-    fn transition_image(
-        &mut self,
-        view: Handle<VkImageView>,
-        new_stage: vk::PipelineStageFlags,
-        new_access: vk::AccessFlags,
-    ) -> Result<()> {
+    pub fn bind_compute_pipeline(&mut self, pipeline: Handle<ComputePipeline>) -> Result<()> {
+        todo!()
+        //        if self.curr_rp.is_none() {
+        //            return Err(GPUError::LibraryError());
+        //        }
+        //        if self.curr_pipeline == Some(pipeline) {
+        //            return Ok(());
+        //        }
+        //        self.curr_pipeline = Some(pipeline);
+        //        unsafe {
+        //            if let Some(pipeline) = info.compute {
+        //                let comp = self
+        //                    .ctx_ref()
+        //                    .compute_pipelines
+        //                    .get_ref(pipeline)
+        //                    .ok_or(GPUError::SlotError())?;
+        //                let layout = self
+        //                    .ctx_ref()
+        //                    .compute_pipeline_layouts
+        //                    .get_ref(comp.layout)
+        //                    .ok_or(GPUError::SlotError())?
+        //                    .layout;
+        //                self.ctx_ref().device.cmd_bind_pipeline(
+        //                    self.cmd_buf,
+        //                    vk::PipelineBindPoint::COMPUTE,
+        //                    comp.raw,
+        //                );
+        //                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
+        //                for (bt, bg) in info.bindings.iter() {
+        //                    self.bind_descriptor_set(
+        //                        vk::PipelineBindPoint::COMPUTE,
+        //                        layout,
+        //                        bt,
+        //                        bg,
+        //                        &offsets,
+        //                    );
+        //                }
+        //            }
+        //        }
+        //        Ok(())
+    }
+
+    /// Bind a graphics pipeline for subsequent draw calls.
+    ///
+    /// # Vulkan prerequisites
+    /// - Command list must be recording.
+    /// - Resources must have matching usage flags and layouts.
+    /// - Required pipelines and bind groups must be bound beforehand.
+    /// - Transitions must be handled via appropriate barriers.
+    pub fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
+        if self.curr_rp.is_none() {
+            return Err(GPUError::LibraryError());
+        }
+        if self.curr_pipeline == Some(pipeline) {
+            return Ok(());
+        }
+        self.curr_pipeline = Some(pipeline);
         unsafe {
-            let view_data = self
+            let gfx = self
                 .ctx_ref()
-                .image_views
-                .get_ref(view)
+                .gfx_pipelines
+                .get_ref(pipeline)
                 .ok_or(GPUError::SlotError())?;
-            let img_data = self
-                .ctx_ref()
-                .images
-                .get_ref(view_data.img)
-                .ok_or(GPUError::SlotError())?;
-            let mip = view_data.range.base_mip_level as usize;
-            self.ctx_ref().device.cmd_pipeline_barrier(
+            self.ctx_ref().device.cmd_bind_pipeline(
                 self.cmd_buf,
-                self.last_op_stage,
-                new_stage,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .old_layout(img_data.layouts[mip])
-                    .new_layout(img_data.layouts[mip])
-                    .src_access_mask(self.last_op_access)
-                    .dst_access_mask(new_access)
-                    .image(img_data.img)
-                    .subresource_range(view_data.range)
-                    .build()],
+                vk::PipelineBindPoint::GRAPHICS,
+                gfx.raw,
             );
-            self.last_op_stage = new_stage;
-            self.last_op_access = new_access;
         }
         Ok(())
     }
@@ -1409,92 +231,528 @@ impl CommandList {
     pub(crate) fn ctx_ref(&self) -> &'static mut Context {
         unsafe { &mut *self.ctx }
     }
-
 }
 
- impl CommandSink for CommandList {
-    fn begin_render_pass(&mut self, _pass: &crate::driver::command::BeginRenderPass) {}
- 
-     fn end_render_pass(&mut self, _pass: &crate::driver::command::EndRenderPass) {
+impl CommandSink for CommandList {
+    fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
+        let rt = self
+            .ctx_ref()
+            .render_targets
+            .get_ref(cmd.target)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
+            return;
+        }
+        // end previous pass
+        if self.curr_rp.is_some() {
+            unsafe {
+                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
+            }
+        }
+        self.curr_rp = Some(rt.render_pass);
+
+        unsafe {
+            let rp_obj = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(rt.render_pass)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+
+            let clears: Vec<vk::ClearValue> = cmd
+                .clear_values
+                .iter() // Iterator<Item = &Option<ClearValue>>
+                .flatten() // Iterator<Item = &ClearValue> (drops Nones)
+                .map(clear_value_to_vk)
+                .collect();
+
+            self.ctx_ref().device.cmd_begin_render_pass(
+                self.cmd_buf,
+                &vk::RenderPassBeginInfo::builder()
+                    .render_pass(rp_obj.raw)
+                    .framebuffer(rt.fb)
+                    .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
+                    .clear_values(&clears)
+                    .build(),
+                vk::SubpassContents::INLINE,
+            );
+
+            let _ = self.bind_graphics_pipeline(cmd.pipeline);
+            self.update_last_access(vk::PipelineStageFlags::NONE, vk::AccessFlags::empty());
+        }
+    }
+
+    fn end_drawing(&mut self, _pass: &crate::driver::command::EndDrawing) {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
         self.curr_rp = None;
         self.curr_pipeline = None;
-     }
- 
-     fn bind_pipeline(&mut self, cmd: &crate::driver::command::BindPipeline) {
-        let bind_pipeline = BindPipeline {
-            gfx: Some(Handle::new(cmd.pipeline.slot, cmd.pipeline.generation)),
-            ..Default::default()
-        };
-        let _ = self.cmd_bind_pipeline(bind_pipeline);
-     }
- 
-     fn bind_table(&mut self, cmd: &crate::driver::command::BindTableCmd) {
-        let table = Handle::new(cmd.table.slot, cmd.table.generation);
-        if let Some(curr) = self.curr_pipeline {
-            if let Some(p) = self.ctx_ref().gfx_pipelines.get_ref(curr) {
-                if let Some(layout) =
-                    self.ctx_ref().gfx_pipeline_layouts.get_ref(p.layout)
-                {
-                    self.bind_descriptor_set(
-                        vk::PipelineBindPoint::GRAPHICS,
-                        layout.layout,
-                        Some(table),
-                        None,
-                        &[],
-                    );
+    }
+
+    fn bind_graphics_pipeline(&mut self, cmd: &crate::driver::command::BindGraphicsPipeline) {
+        let _ = self.bind_graphics_pipeline(cmd.pipeline);
+    }
+
+    fn blit_image(&mut self, cmd: &crate::driver::command::BlitImage) {
+        unsafe {
+            let src_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.src)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            let dst_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.dst)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            let src_dim = crate::gpu::mip_dimensions(src_data.dim, cmd.src_range.base_mip);
+            let dst_dim = crate::gpu::mip_dimensions(dst_data.dim, cmd.dst_range.base_mip);
+            let regions = [vk::ImageBlit {
+                src_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: cmd.src_range.base_mip,
+                    base_array_layer: cmd.src_range.base_layer,
+                    layer_count: cmd.src_range.layer_count,
+                },
+                src_offsets: [
+                    vk::Offset3D {
+                        x: cmd.src_region.x as i32,
+                        y: cmd.src_region.y as i32,
+                        z: 0,
+                    },
+                    vk::Offset3D {
+                        x: (cmd.src_region.w.max(src_data.dim[0])) as i32,
+                        y: (cmd.src_region.h.max(src_data.dim[1])) as i32,
+                        z: 1,
+                    },
+                ],
+                dst_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: cmd.dst_range.base_mip,
+                    base_array_layer: cmd.dst_range.base_layer,
+                    layer_count: cmd.dst_range.layer_count,
+                },
+                dst_offsets: [
+                    vk::Offset3D {
+                        x: cmd.dst_region.x as i32,
+                        y: cmd.dst_region.y as i32,
+                        z: 0,
+                    },
+                    vk::Offset3D {
+                        x: (cmd.dst_region.w.max(dst_data.dim[0])) as i32,
+                        y: (cmd.dst_region.h.max(dst_data.dim[1])) as i32,
+                        z: 1,
+                    },
+                ],
+            }];
+            let src_mip = cmd.src_range.base_mip as usize;
+            let dst_mip = cmd.dst_range.base_mip as usize;
+
+            self.ctx_ref().device.cmd_blit_image(
+                self.cmd_buf,
+                src_data.img,
+                src_data.layouts[src_mip],
+                dst_data.img,
+                dst_data.layouts[dst_mip],
+                &regions,
+                cmd.filter.into(),
+            );
+
+            self.update_last_access(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::TRANSFER_WRITE,
+            );
+        }
+    }
+
+    fn draw(&mut self, cmd: &crate::driver::command::Draw) {
+        let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
+        unsafe {
+            self.ctx_ref().device.cmd_bind_vertex_buffers(
+                self.cmd_buf,
+                0,
+                &[v.buf],
+                &[v.offset as u64],
+            );
+        }
+        let offsets: Vec<u32> = cmd
+            .dynamic_buffers
+            .iter()
+            .filter_map(|&d| d.map(|b| b.alloc.offset))
+            .collect();
+
+        if let Some(pipe) = self.curr_pipeline {
+            let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
+            let l = self
+                .ctx_ref()
+                .gfx_pipeline_layouts
+                .get_ref(p.layout)
+                .unwrap();
+
+            unsafe {
+                for table in &cmd.bind_tables {
+                    if let Some(bt) = *table {
+                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bt_data.set_id,
+                            &[bt_data.set],
+                            &[],
+                        );
+                    }
+                }
+
+                for group in cmd.bind_groups {
+                    if let Some(bg) = group {
+                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bg_data.set_id,
+                            &[bg_data.set],
+                            &offsets,
+                        );
+                    }
                 }
             }
         }
-     }
- 
-     fn draw(&mut self, cmd: &crate::driver::command::Draw) {
+
         unsafe {
             self.ctx_ref()
                 .device
-                .cmd_draw(self.cmd_buf, cmd.vertex_count, cmd.instance_count, 0, 0);
+                .cmd_draw(self.cmd_buf, cmd.count, cmd.instance_count, 0, 0);
             self.update_last_access(
                 vk::PipelineStageFlags::VERTEX_SHADER,
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
-     }
- 
-     fn dispatch(&mut self, cmd: &crate::driver::command::Dispatch) {
+    }
+
+    fn draw_indexed(&mut self, cmd: &crate::driver::command::DrawIndexed) {
+        let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
+        let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
-            self.ctx_ref().device.cmd_dispatch(self.cmd_buf, cmd.x, cmd.y, cmd.z);
+            self.ctx_ref().device.cmd_bind_vertex_buffers(
+                self.cmd_buf,
+                0,
+                &[v.buf],
+                &[v.offset as u64],
+            );
+
+            self.ctx_ref().device.cmd_bind_index_buffer(
+                self.cmd_buf,
+                i.buf,
+                i.offset as u64,
+                vk::IndexType::UINT32,
+            );
+        }
+        let offsets: Vec<u32> = cmd
+            .dynamic_buffers
+            .iter()
+            .filter_map(|&d| d.map(|b| b.alloc.offset))
+            .collect();
+
+        if let Some(pipe) = self.curr_pipeline {
+            let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
+            let l = self
+                .ctx_ref()
+                .gfx_pipeline_layouts
+                .get_ref(p.layout)
+                .unwrap();
+
+            unsafe {
+                for table in &cmd.bind_tables {
+                    if let Some(bt) = *table {
+                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bt_data.set_id,
+                            &[bt_data.set],
+                            &[],
+                        );
+                    }
+                }
+
+                for group in cmd.bind_groups {
+                    if let Some(bg) = group {
+                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bg_data.set_id,
+                            &[bg_data.set],
+                            &offsets,
+                        );
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            self.ctx_ref().device.cmd_draw_indexed(
+                self.cmd_buf,
+                cmd.index_count as u32,
+                cmd.instance_count,
+                0,
+                0,
+                cmd.first_instance,
+            );
+            self.update_last_access(
+                vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            );
+        }
+    }
+
+    fn dispatch(&mut self, cmd: &crate::driver::command::Dispatch) {
+        unsafe {
+            self.ctx_ref()
+                .device
+                .cmd_dispatch(self.cmd_buf, cmd.x, cmd.y, cmd.z);
             self.update_last_access(
                 vk::PipelineStageFlags::COMPUTE_SHADER,
                 vk::AccessFlags::SHADER_WRITE,
             );
         }
-     }
- 
-    fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
-        let info = BufferCopy { src: cmd.src, dst: cmd.dst, src_offset: 0, dst_offset: 0, size: 0 };
-        let _ = self.copy_buffer(info);
-     }
- 
-    fn copy_image(&mut self, _cmd: &crate::driver::command::CopyImage) {
     }
 
-     fn texture_barrier(&mut self, _cmd: &crate::driver::command::ImageBarrier) {
-//        let barrier = ImageBarrier { view: Handle::new(cmd.image.index(), cmd.image.version()), src: BarrierPoint::BlitRead, dst: BarrierPoint::BlitWrite };
-//        self.image_barrier(barrier);
-     }
- 
-     fn buffer_barrier(&mut self, _cmd: &crate::driver::command::BufferBarrier) {
-        // Buffer barriers are not directly supported in Vulkan, so we need to use a memory barrier
+    fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
         unsafe {
-            self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]);
+            let src = self.ctx_ref().buffers.get_ref(cmd.src).unwrap();
+            let dst = self.ctx_ref().buffers.get_ref(cmd.dst).unwrap();
+            self.ctx_ref().device.cmd_copy_buffer(
+                self.cmd_buf,
+                src.buf,
+                dst.buf,
+                &[vk::BufferCopy {
+                    src_offset: cmd.src_offset as u64,
+                    dst_offset: cmd.dst_offset as u64,
+                    size: if cmd.amount == 0 {
+                        src.size.min(dst.size) as u64
+                    } else {
+                        cmd.amount as u64
+                    },
+                }],
+            );
+            self.update_last_access(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::MEMORY_WRITE,
+            );
         }
-     }
- 
+    }
+
+    fn copy_buffer_to_image(&mut self, cmd: &crate::driver::command::CopyBufferImage) {
+        unsafe {
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.dst)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            let mip = cmd.range.base_mip as usize;
+            let dims = crate::gpu::mip_dimensions(img_data.dim, cmd.range.base_mip);
+            self.ctx_ref().device.cmd_copy_buffer_to_image(
+                self.cmd_buf,
+                self.ctx_ref()
+                    .buffers
+                    .get_ref(cmd.src)
+                    .ok_or(GPUError::SlotError())
+                    .unwrap()
+                    .buf,
+                img_data.img,
+                img_data.layouts[mip],
+                &[vk::BufferImageCopy {
+                    buffer_offset: cmd.src_offset as u64,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: img_data.sub_layers.aspect_mask,
+                        mip_level: cmd.range.base_mip,
+                        base_array_layer: cmd.range.base_layer,
+                        layer_count: cmd.range.layer_count,
+                    },
+                    image_extent: vk::Extent3D {
+                        width: dims[0],
+                        height: dims[1],
+                        depth: dims[2],
+                    },
+                    ..Default::default()
+                }],
+            );
+
+            self.update_last_access(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::MEMORY_WRITE,
+            );
+        }
+    }
+
+    fn copy_image_to_buffer(&mut self, cmd: &crate::driver::command::CopyImageBuffer) {
+        unsafe {
+            let img_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.src)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            let mip = cmd.range.base_mip as usize;
+
+            let dims = crate::gpu::mip_dimensions(img_data.dim, cmd.range.base_mip);
+            self.ctx_ref().device.cmd_copy_image_to_buffer(
+                self.cmd_buf,
+                img_data.img,
+                img_data.layouts[mip],
+                self.ctx_ref()
+                    .buffers
+                    .get_ref(cmd.dst)
+                    .ok_or(GPUError::SlotError())
+                    .unwrap()
+                    .buf,
+                &[vk::BufferImageCopy {
+                    buffer_offset: cmd.dst_offset as u64,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: img_data.sub_layers.aspect_mask,
+                        mip_level: cmd.range.base_mip,
+                        base_array_layer: cmd.range.base_layer,
+                        layer_count: cmd.range.layer_count,
+                    },
+                    image_extent: vk::Extent3D {
+                        width: dims[0],
+                        height: dims[1],
+                        depth: dims[2],
+                    },
+                    ..Default::default()
+                }],
+            );
+
+            self.update_last_access(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::MEMORY_WRITE,
+            );
+        }
+    }
+
+    fn copy_image(&mut self, _cmd: &crate::driver::command::CopyImage) {
+        todo!()
+    }
+
+    fn image_barrier(&mut self, cmd: &LayoutTransition) {
+        let img_data = self
+            .ctx_ref()
+            .images
+            .get_ref(cmd.image)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        // Heuristic aspect selection. If you track format, prefer using that.
+        let aspect = if cmd
+            .new_usage
+            .intersects(UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE)
+        {
+            vk::ImageAspectFlags::DEPTH
+        } else {
+            vk::ImageAspectFlags::COLOR
+        };
+
+        let sub = vk::ImageSubresourceRange {
+            aspect_mask: aspect,
+            base_mip_level: cmd.range.base_mip,
+            level_count: cmd.range.level_count,
+            base_array_layer: cmd.range.base_layer,
+            layer_count: cmd.range.layer_count,
+        };
+
+        let dst_stage = usage_to_stages(cmd.new_usage);
+        let src_access = usage_to_access(cmd.old_usage);
+        let dst_access = usage_to_access(cmd.new_usage);
+
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .old_layout(layout_to_vk(cmd.old_layout))
+            .new_layout(layout_to_vk(cmd.new_layout))
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(img_data.img)
+            .subresource_range(sub)
+            .build();
+
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                self.last_op_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            )
+        };
+    }
+
+    fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
+        let buffer = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.buffer)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        // If you track previous usage per-buffer, use it for src masks; otherwise fall back to TOP_OF_PIPE/empty.
+        let src_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+        let src_access = vk::AccessFlags::empty();
+
+        let dst_stage = usage_to_stages(cmd.usage);
+        let dst_access = usage_to_access(cmd.usage);
+
+        let barrier = vk::BufferMemoryBarrier::builder()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .buffer(buffer.buf)
+            .offset(buffer.offset as u64)
+            .size(buffer.size as u64)
+            .build();
+
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::BY_REGION,
+                &[],
+                std::slice::from_ref(&barrier),
+                &[],
+            );
+        }
+    }
+
+    fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Handle<Fence> {
+        self.submit(cmd).unwrap()
+    }
+
     fn debug_marker_begin(&mut self, _cmd: &crate::driver::command::DebugMarkerBegin) {
         // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
-        unsafe { self.ctx_ref().device.cmd_pipeline_barrier(self.cmd_buf, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &[]) };
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[],
+            )
+        };
     }
 
     fn debug_marker_end(&mut self, _cmd: &crate::driver::command::DebugMarkerEnd) {

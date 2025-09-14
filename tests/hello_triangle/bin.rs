@@ -1,8 +1,8 @@
 use dashi::*;
-use winit::event::{Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode};
-use winit::event_loop::{ControlFlow};
-use winit::platform::run_return::EventLoopExtRunReturn;
 use std::time::{Duration, Instant};
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event_loop::ControlFlow;
+use winit::platform::run_return::EventLoopExtRunReturn;
 
 #[cfg(feature = "dashi-tests")]
 pub struct Timer {
@@ -126,7 +126,10 @@ fn main() {
         })
         .unwrap();
 
-    let fb_view = ImageView { img: fb, ..Default::default() };
+    let fb_view = ImageView {
+        img: fb,
+        ..Default::default()
+    };
 
     // Make the bind group layout. This describes the bindings into a shader.
     let bg_layout = ctx
@@ -264,7 +267,10 @@ void main() {
     let mut timer = Timer::new();
 
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 3).unwrap();
+    let mut ring = ctx
+        .make_command_ring(&CommandListInfo2 { debug_name: "cmd" })
+        .unwrap();
+
     let sems = ctx.make_semaphores(2).unwrap();
     'running: loop {
         // Reset the allocator
@@ -279,9 +285,15 @@ void main() {
                 if let Event::WindowEvent { event, .. } = event {
                     match event {
                         WindowEvent::CloseRequested => should_exit = true,
-                        WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Escape), state: ElementState::Pressed, .. }, .. } => {
-                            should_exit = true
-                        }
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    state: ElementState::Pressed,
+                                    ..
+                                },
+                            ..
+                        } => should_exit = true,
                         _ => {}
                     }
                 }
@@ -294,62 +306,65 @@ void main() {
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
-        framed_list.record(|list| {
-            // Begin render pass & bind pipeline
-            list.begin_drawing(&DrawBegin {
-                viewport: Viewport {
-                    area: FRect2D {
-                        w: WIDTH as f32,
-                        h: HEIGHT as f32,
+        ring
+            .record(|list| {
+
+                let mut stream = CommandStream::new().record();
+
+                // Begin render pass & bind pipeline
+                stream.begin_drawing(&BeginDrawing {
+                    viewport: Viewport {
+                        area: FRect2D {
+                            w: WIDTH as f32,
+                            h: HEIGHT as f32,
+                            ..Default::default()
+                        },
+                        scissor: Rect2D {
+                            w: WIDTH,
+                            h: HEIGHT,
+                            ..Default::default()
+                        },
                         ..Default::default()
                     },
-                    scissor: Rect2D {
-                        w: WIDTH,
-                        h: HEIGHT,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                pipeline: graphics_pipeline,
-                render_target,
-                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
-            })
-            .unwrap();
+                    pipeline: graphics_pipeline,
+                    render_target,
+                    clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                });
 
-            // Bump alloc some data to write the triangle position to.
-            let mut buf = allocator.bump().unwrap();
-            let pos = &mut buf.slice::<[f32; 2]>()[0];
-            pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
-            pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
-
-            // Append a draw call using our vertices & indices & dynamic buffers
-            list.append(Command::DrawIndexed(DrawIndexed {
-                vertices,
-                indices,
-                index_count: INDICES.len() as u32,
-                bindings: Bindings {
+                // Bump alloc some data to write the triangle position to.
+                let mut buf = allocator.bump().unwrap();
+                let pos = &mut buf.slice::<[f32; 2]>()[0];
+                pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
+                pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
+                
+                
+                // Append a draw call using our vertices & indices & dynamic buffers
+                stream.draw_indexed(&DrawIndexed {
+                    vertices,
+                    indices,
+                    index_count: INDICES.len() as u32,
                     bind_groups: [Some(bind_group), None, None, None],
                     dynamic_buffers: [Some(buf), None, None, None],
                     ..Default::default()
-                },
-                ..Default::default()
-            }));
+                }));
 
-            // End drawing.
-            list.end_drawing().expect("Error ending drawing!");
+                // End drawing.
+                stream.end_drawing();
 
-            // Blit the framebuffer to the display's image
-            list.blit_image(ImageBlit {
-                src: fb_view,
-                dst: img,
-                filter: Filter::Nearest,
-                ..Default::default()
-            });
-        })
-        .unwrap();
+                // Blit the framebuffer to the display's image
+                stream.blit_image(BlitImage {
+                    src: fb_view,
+                    dst: img,
+                    filter: Filter::Nearest,
+                    ..Default::default()
+                });
+
+                stream.append(list);
+            })
+            .unwrap();
 
         // Submit our recorded commands
-        framed_list
+        ring
             .submit(&SubmitInfo {
                 wait_sems: &[sem],
                 signal_sems: &[sems[0], sems[1]],

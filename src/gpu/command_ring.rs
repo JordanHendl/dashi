@@ -1,5 +1,4 @@
 use crate::{
-    driver::command::Recorder,
     utils::Handle,
     CommandList,
     CommandListInfo,
@@ -10,14 +9,14 @@ use crate::{
 };
 use std::ptr::NonNull;
 
-pub struct FramedCommandList {
+pub struct CommandRing {
     cmds: Vec<CommandList>,
     fences: Vec<Option<Handle<Fence>>>,
     ctx: NonNull<Context>,
     curr: u16,
 }
 
-impl FramedCommandList {
+impl CommandRing {
     pub fn new(
         ctx: &mut Context,
         name: &str,
@@ -99,20 +98,6 @@ impl FramedCommandList {
         Ok(())
     }
 
-    pub fn record_submit<R>(&mut self, recorder: R, info: &SubmitInfo) -> Result<()>
-    where
-        R: Recorder<CommandList>,
-    {
-        self.fences[self.curr as usize] = Some(unsafe {
-            self.ctx
-                .as_mut()
-                .submit_with(&mut self.cmds[self.curr as usize], recorder, info)?
-        });
-
-        self.advance();
-        Ok(())
-    }
-
     fn advance(&mut self) {
         self.curr = (self.curr + 1) % self.cmds.len() as u16;
     }
@@ -180,7 +165,7 @@ impl FramedCommandList {
     }
 }
 
-impl Drop for FramedCommandList {
+impl Drop for CommandRing {
     fn drop(&mut self) {
         // ensure all GPU work is finished and command lists freed
         self.destroy_all();
@@ -193,7 +178,7 @@ mod tests {
     use crate::{Context, ContextInfo, SubmitInfo};
     use serial_test::serial;
 
-    /// Build a 3-frame FramedCommandList, do a few cycles of append+submit
+    /// Build a 3-frame CommandRing, do a few cycles of append+submit
     /// and make sure nothing panics.
     #[test]
     #[serial]
@@ -201,7 +186,7 @@ mod tests {
         // create a headless context
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // 3 frames
-        let mut fcl = FramedCommandList::new(&mut ctx, "basic", 3).unwrap();
+        let mut fcl = CommandRing::new(&mut ctx, "basic", 3).unwrap();
 
         // do 10 cycles of append + submit
         for _ in 0..10 {
@@ -229,7 +214,7 @@ mod tests {
     fn record_and_record_enumerated_indices() {
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // choose 3 frames so we see at least two distinct indices
-        let mut fcl = FramedCommandList::new(&mut ctx, "enum", 3).unwrap();
+        let mut fcl = CommandRing::new(&mut ctx, "enum", 3).unwrap();
 
         let mut seen_plain = Vec::new();
         let mut seen_enum = Vec::new();

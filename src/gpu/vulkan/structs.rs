@@ -2,9 +2,10 @@ use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
-use crate::{utils::Handle, BindGroup, BindTable, Semaphore};
+use crate::{utils::Handle, BindGroup, BindTable, CommandList, Semaphore};
 use std::hash::{Hash, Hasher};
 
+use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +26,10 @@ pub enum BufferUsage {
     STORAGE,
 }
 
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum QueueType {
+    #[default]
     Graphics,
     Compute,
     Transfer,
@@ -117,13 +119,16 @@ pub enum BarrierPoint {
     Present,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Zeroable, Default, Debug, Clone, Copy, Eq, PartialEq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Filter {
+    #[default]
     Nearest,
     Linear,
 }
 
+unsafe impl Pod for Filter {}
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SamplerAddressMode {
@@ -189,8 +194,8 @@ pub struct Extent {
     pub width: u32,
     pub height: u32,
 }
-
-#[derive(Debug, Hash, Default, Clone, Copy)]
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Rect2D {
     pub x: u32,
@@ -254,7 +259,8 @@ impl<'a> Default for ImageInfo<'a> {
     }
 }
 
-#[derive(Hash, Clone, Debug, Default, Copy, PartialEq, Eq)]
+#[repr(C)]
+#[derive(Zeroable, Hash, Clone, Debug, Default, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum AspectMask {
     #[default]
@@ -264,7 +270,10 @@ pub enum AspectMask {
     DepthStencil,
 }
 
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+unsafe impl Pod for AspectMask {}
+
+#[repr(C)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct ImageView {
     pub img: Handle<Image>,
     pub layer: u32,
@@ -330,6 +339,13 @@ pub struct CommandListInfo<'a> {
     pub should_cleanup: bool,
 }
 
+#[derive(Default)]
+pub struct CommandListInfo2<'a> {
+    pub debug_name: &'a str,
+    pub parent: Option<&'a CommandList>,
+    pub queue_type: QueueType,
+}
+
 impl<'a> Default for CommandListInfo<'a> {
     fn default() -> Self {
         Self {
@@ -352,6 +368,14 @@ impl<'a> Default for SubmitInfo<'a> {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubmitInfo2 {
+    pub wait_sems: [Handle<Semaphore>; 4],
+    pub signal_sems: [Handle<Semaphore>; 4],
+}
+
 
 #[derive(Clone, Copy, Debug)]
 pub struct AttachmentDescription {
@@ -459,7 +483,6 @@ impl BufferView {
         Self { handle, offset: 0 }
     }
 }
-
 
 pub enum ShaderResource<'a> {
     Buffer(Handle<Buffer>),
@@ -736,13 +759,16 @@ pub struct SubpassDescription<'a> {
     pub subpass_dependencies: &'a [SubpassDependency],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+#[derive(Zeroable, Debug, Clone, Copy, PartialEq)]
 pub enum ClearValue {
     Color([f32; 4]),
     IntColor([i32; 4]),
     UintColor([u32; 4]),
     DepthStencil { depth: f32, stencil: u32 },
 }
+
+unsafe impl Pod for ClearValue{}
 
 impl Hash for ClearValue {
     fn hash<H: Hasher>(&self, state: &mut H) {

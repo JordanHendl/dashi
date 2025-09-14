@@ -1,8 +1,9 @@
 mod error;
 use crate::{
-    driver::command::Recorder,
-    utils::{Handle, Pool},
-    sync::ResourceLookup,
+    cmd::{CommandStream, Executable}, driver::{
+        command::{CopyBuffer, CopyBufferImage, CopyImageBuffer},
+        state::SubresourceRange,
+    }, utils::{Handle, Pool}, CommandRing
 };
 use ash::*;
 pub use error::*;
@@ -20,16 +21,14 @@ pub use structs::*;
 pub mod builders;
 pub mod commands;
 pub use commands::*;
-pub mod framed_cmd_list;
-pub use framed_cmd_list::*;
 pub mod timing;
 pub use timing::*;
 #[cfg(feature = "dashi-minifb")]
 pub mod minifb_window;
-#[cfg(feature = "dashi-winit")]
-pub mod winit_window;
 #[cfg(feature = "dashi-openxr")]
 pub mod openxr_window;
+#[cfg(feature = "dashi-winit")]
+pub mod winit_window;
 
 mod conversions;
 pub use conversions::*;
@@ -47,14 +46,11 @@ pub use descriptor_sets::*;
 mod pipelines;
 pub use pipelines::*;
 
-#[cfg(test)]
-mod examples;
 
 /// Names of debugging layers that should be enabled when validation is requested.
 /// Only includes the standard Vulkan validation layer to avoid enabling any extra layers.
-pub const DEBUG_LAYER_NAMES: [*const c_char; 1] = [
-    b"VK_LAYER_KHRONOS_validation\0".as_ptr() as *const c_char,
-];
+pub const DEBUG_LAYER_NAMES: [*const c_char; 1] =
+    [b"VK_LAYER_KHRONOS_validation\0".as_ptr() as *const c_char];
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -85,9 +81,6 @@ pub struct RenderTarget {
     pub(super) render_pass: Handle<RenderPass>,
 }
 
-
-
-
 #[derive(Clone)]
 pub struct Fence {
     raw: vk::Fence,
@@ -111,7 +104,6 @@ impl Fence {
 pub struct Semaphore {
     raw: vk::Semaphore,
 }
-
 
 #[derive(Clone)]
 pub struct CommandList {
@@ -139,7 +131,6 @@ impl Default for CommandList {
         }
     }
 }
-
 
 #[derive(Default)]
 #[allow(dead_code)]
@@ -254,9 +245,10 @@ impl Context {
             let available_layers = entry.enumerate_instance_layer_properties()?;
             for &layer in &DEBUG_LAYER_NAMES {
                 let name = unsafe { CStr::from_ptr(layer) };
-                if available_layers.iter().any(|prop| unsafe {
-                    CStr::from_ptr(prop.layer_name.as_ptr()) == name
-                }) {
+                if available_layers
+                    .iter()
+                    .any(|prop| unsafe { CStr::from_ptr(prop.layer_name.as_ptr()) == name })
+                {
                     inst_layers.push(layer);
                 }
             }
@@ -308,7 +300,10 @@ impl Context {
         let compute_family = compute_family.unwrap_or(gfx_family);
         let transfer_family = transfer_family.unwrap_or(compute_family);
 
-        let mut gfx_queue = Queue { family: gfx_family, ..Default::default() };
+        let mut gfx_queue = Queue {
+            family: gfx_family,
+            ..Default::default()
+        };
         let mut compute_queue = if compute_family != gfx_family {
             Some(Queue {
                 family: compute_family,
@@ -494,7 +489,9 @@ impl Context {
     /// (device selection, fence lifetimes, and queue limitations) see
     /// [`Self::new`].
     pub fn headless(info: &ContextInfo) -> Result<Self> {
-        let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
+        let enable_validation = std::env::var("DASHI_VALIDATION")
+            .map(|v| v == "1")
+            .unwrap_or(false);
         let (
             entry,
             instance,
@@ -593,7 +590,9 @@ impl Context {
     /// - Vulkan queues require command lists to be finished before submission;
     ///   [`Self::submit`] will end a still-recording list automatically.
     pub fn new(info: &ContextInfo) -> Result<Self> {
-        let enable_validation = std::env::var("DASHI_VALIDATION").map(|v| v == "1").unwrap_or(false);
+        let enable_validation = std::env::var("DASHI_VALIDATION")
+            .map(|v| v == "1")
+            .unwrap_or(false);
         let (
             entry,
             instance,
@@ -738,18 +737,90 @@ impl Context {
     pub fn queue(&self, ty: QueueType) -> vk::Queue {
         match ty {
             QueueType::Graphics => self.gfx_queue.queue,
-            QueueType::Compute => self
-                .compute_queue
-                .as_ref()
-                .unwrap_or(&self.gfx_queue)
-                .queue,
-            QueueType::Transfer => self
-                .transfer_queue
-                .as_ref()
-                .or(self.compute_queue.as_ref())
-                .unwrap_or(&self.gfx_queue)
-                .queue,
+            QueueType::Compute => self.compute_queue.as_ref().unwrap_or(&self.gfx_queue).queue,
+            QueueType::Transfer => {
+                self.transfer_queue
+                    .as_ref()
+                    .or(self.compute_queue.as_ref())
+                    .unwrap_or(&self.gfx_queue)
+                    .queue
+            }
         }
+    }
+
+    pub fn record(
+        &mut self,
+        stream: CommandStream<Executable>,
+        info: &CommandListInfo,
+    ) -> Result<CommandList> {
+        todo!()
+    }
+
+
+    /// Creates a ringbuffer of CommandLists
+    pub fn make_command_ring(&mut self, info: &CommandListInfo2) -> Result<CommandRing> {
+        Ok(CommandRing::new(self, info.debug_name, 3)?) 
+    }
+
+    /// Allocate and begin recording a new command list.
+    ///
+    /// The returned [`CommandList`] starts in the recording state and may be
+    /// submitted once. [`Self::submit`] will end the list automatically if it
+    /// is still recording.
+    pub fn make_command_list(&mut self, info: &CommandListInfo2) -> Result<CommandList> {
+        let pool = match info.queue_type {
+            QueueType::Graphics => self.gfx_pool,
+            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
+        };
+
+        let level = if info.parent.is_none() {
+            vk::CommandBufferLevel::PRIMARY
+        } else {
+            vk::CommandBufferLevel::SECONDARY
+        };
+
+        let cmd = unsafe {
+            self.device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::builder()
+                    .command_pool(pool)
+                    .command_buffer_count(1)
+                    .level(level)
+                    .build(),
+            )
+        }?;
+
+        self.set_name(cmd[0], info.debug_name, vk::ObjectType::COMMAND_BUFFER);
+
+        let f = unsafe {
+            self.device.create_fence(
+                &vk::FenceCreateInfo::builder()
+                    .flags(vk::FenceCreateFlags::empty())
+                    .build(),
+                None,
+            )
+        }?;
+
+        self.set_name(
+            f,
+            format!("{}.fence", info.debug_name).as_str(),
+            vk::ObjectType::FENCE,
+        );
+
+        unsafe {
+            self.device
+                .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
+        };
+
+        return Ok(CommandList {
+            cmd_buf: cmd[0],
+            fence: self.fences.insert(Fence::new(f)).unwrap(),
+            dirty: true,
+            ctx: self,
+            ..Default::default()
+        });
     }
 
     /// Allocate and begin recording a new command list.
@@ -813,7 +884,12 @@ impl Context {
     }
 
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
-        let tmp_view = ImageView { img, layer: 0, mip_level: 0, aspect: Default::default() };
+        let tmp_view = ImageView {
+            img,
+            layer: 0,
+            mip_level: 0,
+            aspect: Default::default(),
+        };
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
         let mut list = self
@@ -1000,19 +1076,6 @@ impl Context {
         };
 
         return Ok(cmd.fence.clone());
-    }
-
-    /// Reset the given command list, record commands using the provided recorder,
-    /// and submit it.
-    pub fn submit_with<R: Recorder<CommandList>>(
-        &mut self,
-        cmd: &mut CommandList,
-        recorder: R,
-        info: &SubmitInfo,
-    ) -> Result<Handle<Fence>, GPUError> {
-        cmd.reset()?;
-        recorder.record(cmd);
-        self.submit(cmd, info)
     }
 
     pub fn make_semaphores(&mut self, count: usize) -> Result<Vec<Handle<Semaphore>>, GPUError> {
@@ -1218,14 +1281,18 @@ impl Context {
                 new_info.visibility = MemoryVisibility::CpuAndGpu;
 
                 let staging = self.make_buffer(&new_info)?;
+
                 let mut list = self.begin_command_list(&Default::default())?;
-                list.append(Command::BufferCopy(BufferCopy {
+                let mut stream = CommandStream::new().begin();
+                stream.copy_buffers(&CopyBuffer {
                     src: staging,
                     dst: buf,
                     src_offset: 0,
                     dst_offset: 0,
-                    size: unsafe { info.initial_data.unwrap_unchecked().len() },
-                }))?;
+                    amount: unsafe { info.initial_data.unwrap_unchecked().len() } as u32,
+                });
+
+                stream.end().append(&mut list);
 
                 let fence = self.submit(&mut list, &Default::default())?;
                 self.wait(fence.clone())?;
@@ -1243,31 +1310,8 @@ impl Context {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
-        let tmp_view = ImageView {
-            img: image,
-            layer: 0,
-            mip_level: 0,
-            aspect: match info.format {
-                Format::R8Sint
-                    | Format::R8Uint
-                    | Format::RGB8
-                    | Format::BGRA8
-                    | Format::BGRA8Unorm
-                    | Format::RGBA8
-                    | Format::RGBA32F => AspectMask::Color,
-                Format::D24S8 => AspectMask::DepthStencil,
-                _ => AspectMask::Color,
-            },
-        };
-        let tmp_view_handle = self.get_or_create_image_view(&tmp_view)?;
-
         let mut list = self.begin_command_list(&Default::default())?;
         if info.initial_data.is_none() {
-            self.transition_image(list.cmd_buf, tmp_view_handle, vk::ImageLayout::GENERAL);
-            let fence = self.submit(&mut list, &Default::default())?;
-            self.wait(fence)?;
-            self.destroy_cmd_list(list);
-            self.destroy_image_view(tmp_view_handle);
             return Ok(());
         }
 
@@ -1284,87 +1328,40 @@ impl Context {
         })?;
 
         let mut list = self.begin_command_list(&Default::default())?;
-
-        // 1) barrier: UNDEFINED -> TRANSFER_DST_OPTIMAL
-        self.transition_image_stages(
-            list.cmd_buf,
-            tmp_view_handle,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-            Default::default(),
-            vk::AccessFlags::TRANSFER_WRITE,
-        );
-
-        list.append(Command::BufferImageCopy(BufferImageCopy {
+        let mut cmd = CommandStream::new().begin();
+        cmd.copy_buffer_to_image(&CopyBufferImage {
             src: staging,
-            dst: tmp_view,
-            src_offset: 0,
-        }))?;
-
-        // 3) barrier: TRANSFER_DST_OPTIMAL -> GENERAL
-        self.transition_image_stages(
-            list.cmd_buf,
-            tmp_view_handle,
-            vk::ImageLayout::GENERAL,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::AccessFlags::TRANSFER_WRITE,
-            vk::AccessFlags::TRANSFER_READ,
-        );
+            dst: image,
+            range: SubresourceRange {
+                base_mip: 0,
+                level_count: 1,
+                base_layer: 0,
+                layer_count: 1,
+            },
+            ..Default::default()
+        });
 
         if info.mip_levels > 1 {
             for i in 0..info.mip_levels - 1 {
-                let src_view = ImageView {
-                    img: image,
-                    layer: 0,
-                    mip_level: i,
-                    aspect: if info.format == Format::D24S8 {
-                        AspectMask::DepthStencil
-                    } else {
-                        AspectMask::Color
+                cmd.copy_buffer_to_image(&CopyBufferImage {
+                    src: staging,
+                    dst: image,
+                    range: SubresourceRange {
+                        base_mip: i,
+                        level_count: 1,
+                        base_layer: 0,
+                        layer_count: 1,
                     },
-                };
-                let src_view_handle = self.get_or_create_image_view(&src_view)?;
-                let dst_view = ImageView {
-                    img: image,
-                    layer: 0,
-                    mip_level: i + 1,
-                    aspect: if info.format == Format::D24S8 {
-                        AspectMask::DepthStencil
-                    } else {
-                        AspectMask::Color
-                    },
-                };
-                let dst_view_handle = self.get_or_create_image_view(&dst_view)?;
-
-                self.transition_image(list.cmd_buf, src_view_handle, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-                self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-
-                list.append(Command::Blit(ImageBlit {
-                    src: src_view,
-                    dst: dst_view,
-                    filter: Filter::Linear,
                     ..Default::default()
-                }))?;
-
-                self.transition_image(list.cmd_buf, src_view_handle, vk::ImageLayout::GENERAL);
-                if i + 1 < info.mip_levels - 1 {
-                    self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-                } else {
-                    self.transition_image(list.cmd_buf, dst_view_handle, vk::ImageLayout::GENERAL);
-                }
-
-                self.destroy_image_view(src_view_handle);
-                self.destroy_image_view(dst_view_handle);
+                });
             }
         }
 
+        cmd.end().append(&mut list);
         let fence = self.submit(&mut list, &Default::default())?;
         self.wait(fence)?;
         self.destroy_cmd_list(list);
         self.destroy_buffer(staging);
-        self.destroy_image_view(tmp_view_handle);
         Ok(())
     }
 
@@ -1449,14 +1446,14 @@ impl Context {
     ) -> Option<Handle<Buffer>> {
         let src = self.buffers.get_ref(parent).unwrap();
         let mut cpy = src.clone();
-        
+
         if src.size - cpy.offset + offset < size {
             return None;
         }
 
         cpy.size = size;
         cpy.offset += offset;
-        cpy.suballocated = true; 
+        cpy.suballocated = true;
         match self.buffers.insert(cpy) {
             Some(handle) => {
                 return Some(handle);
@@ -1725,7 +1722,13 @@ impl Context {
         let to_destroy: Vec<Handle<VkImageView>> = self
             .image_view_cache
             .iter()
-            .filter_map(|(info, view_handle)| if info.img == handle { Some(*view_handle) } else { None })
+            .filter_map(|(info, view_handle)| {
+                if info.img == handle {
+                    Some(*view_handle)
+                } else {
+                    None
+                }
+            })
             .collect();
         for view_handle in &to_destroy {
             if let Some(view) = self.image_views.get_ref(*view_handle) {
@@ -1770,7 +1773,10 @@ impl Context {
     ///   executing the list.
     /// - The context must still be alive.
     pub fn destroy_cmd_list(&mut self, list: CommandList) {
-        unsafe { self.device.free_command_buffers(self.gfx_pool, &[list.cmd_buf]) };
+        unsafe {
+            self.device
+                .free_command_buffers(self.gfx_pool, &[list.cmd_buf])
+        };
         self.destroy_fence(list.fence);
     }
 
@@ -1872,19 +1878,18 @@ impl Context {
         );
 
         // Step 4: Return the BindTableLayout
-        return Ok(
-            self.bind_table_layouts
-                .insert(BindTableLayout {
-                    pool: descriptor_pool,
-                    layout: descriptor_set_layout,
-                    variables: info
-                        .shaders
-                        .iter()
-                        .flat_map(|shader| shader.variables.iter().cloned())
-                        .collect(),
-                })
-                .unwrap(),
-        );
+        return Ok(self
+            .bind_table_layouts
+            .insert(BindTableLayout {
+                pool: descriptor_pool,
+                layout: descriptor_set_layout,
+                variables: info
+                    .shaders
+                    .iter()
+                    .flat_map(|shader| shader.variables.iter().cloned())
+                    .collect(),
+            })
+            .unwrap());
     }
 
     /// Creates a bind group layout for standard resources.
@@ -2114,7 +2119,9 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => {
-                        return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                        return Err(GPUError::Unimplemented(
+                            "Constant buffers are not supported",
+                        ))
                     }
                 }
             }
@@ -2245,7 +2252,9 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(_) => {
-                        return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                        return Err(GPUError::Unimplemented(
+                            "Constant buffers are not supported",
+                        ))
                     }
                 }
             }
@@ -2442,7 +2451,9 @@ impl Context {
                     write_descriptor_sets.push(write_descriptor_set);
                 }
                 ShaderResource::ConstBuffer(_) => {
-                    return Err(GPUError::Unimplemented("Constant buffers are not supported"))
+                    return Err(GPUError::Unimplemented(
+                        "Constant buffers are not supported",
+                    ))
                 }
             }
         }
@@ -2534,13 +2545,6 @@ impl Context {
     }
 
     /// Builds a render pass with the supplied subpass configuration.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
     pub fn make_render_pass(
         &mut self,
         info: &RenderPassInfo,
@@ -2644,15 +2648,14 @@ impl Context {
 
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
-        return Ok(
-            self.render_passes
-                .insert(RenderPass {
-                    raw: render_pass,
-                    viewport: info.viewport,
-                    attachment_formats,
-                })
-                .unwrap(),
-        );
+        return Ok(self
+            .render_passes
+            .insert(RenderPass {
+                raw: render_pass,
+                viewport: info.viewport,
+                attachment_formats,
+            })
+            .unwrap());
     }
 
     /// Create a render target from a set of image views and a render pass.
@@ -2706,15 +2709,15 @@ impl Context {
         };
         let fb = unsafe { self.device.create_framebuffer(&fb_info, None)? };
         self.set_name(fb, info.debug_name, vk::ObjectType::FRAMEBUFFER);
-        Ok(
-            self.render_targets
-                .insert(RenderTarget {
-                    fb,
-                    render_pass: info.render_pass,
-                })
-                .unwrap(),
-        )
+        Ok(self
+            .render_targets
+            .insert(RenderTarget {
+                fb,
+                render_pass: info.render_pass,
+            })
+            .unwrap())
     }
+
     /// Creates a compute pipeline layout from shader and bind group layouts.
     ///
     /// # Prerequisites
@@ -3038,16 +3041,5 @@ impl Context {
                 layout: info.layout,
             })
             .unwrap());
-    }
-
-}
-
-impl ResourceLookup for Context {
-    fn image_raw(&self, image: Handle<Image>) -> vk::Image {
-        self.images.get_ref(image).expect("invalid image").img
-    }
-
-    fn buffer_raw(&self, buffer: Handle<Buffer>) -> vk::Buffer {
-        self.buffers.get_ref(buffer).expect("invalid buffer").buf
     }
 }

@@ -1,26 +1,7 @@
 pub mod utils;
-pub mod driver;
-pub mod ir;
-pub mod sync;
-pub mod gfx;
-pub mod framegraph;
-
-pub use driver::types::{Handle, IndexType, UsageBits};
-pub use gfx::cmd::{
-    CommandBuffer,
-    CommandBuilder,
-    CommandBuilderExt,
-    DebugLabelScope,
-    EncodeTarget,
-    PipelineBound,
-    PipelineBuilder,
-    RenderScope,
-    DescriptorWriteBuilder,
-    DynamicRenderingBuilder,
-};
-pub use driver::command::Recorder;
-
 pub mod gpu;
+pub use gpu::driver::types::{Handle, IndexType, UsageBits};
+
 #[cfg(feature = "dx12")]
 pub mod gpu_dx12;
 #[cfg(feature = "metal")]

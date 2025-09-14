@@ -1,3 +1,4 @@
+use core::fmt;
 use std::alloc::{alloc_zeroed, Layout};
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -22,12 +23,17 @@ use bytemuck::{Pod, Zeroable};
 /// // handle slot is now free for reuse
 /// ```
 #[repr(C)]
-#[derive(Debug)]
-pub struct Handle<T> {
+pub struct Handle<T: ?Sized> {
     /// Slot index within the pool.
     pub slot: u16,
     pub generation: u16,
     phantom: PhantomData<fn() -> T>,
+}
+
+impl<T> fmt::Debug for Handle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Handle").field("slot", &self.slot).field("generation", &self.generation).field("phantom", &self.phantom).finish()
+    }
 }
 
 impl<T> Handle<T> {

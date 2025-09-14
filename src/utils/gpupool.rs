@@ -1,4 +1,4 @@
-use crate::{Buffer, BufferCopy, BufferInfo, CommandList, Context, MemoryVisibility};
+use crate::{driver::command::CopyBuffer, cmd::{Initial, Pending}, Buffer, BufferInfo, CommandList, CommandStream, Context, MemoryVisibility};
 
 use super::{Handle, Pool};
 use crate::Result;
@@ -55,22 +55,28 @@ impl<T> GPUPool<T> {
     }
 
     pub fn sync_down(&mut self, list: &mut CommandList) -> Result<()> {
-        list.copy_buffer(BufferCopy {
+
+        let mut cmd = CommandStream::new().begin();
+        cmd.copy_buffers(&CopyBuffer {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
-        })?;
+        });
+
+        cmd.end().submit(list, &Default::default());
         Ok(())
     }
 
     pub fn sync_up(&mut self, list: &mut CommandList) -> Result<()> {
-        list.copy_buffer(BufferCopy {
+        let mut cmd = CommandStream::new().begin();
+        cmd.copy_buffers(&CopyBuffer {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
-        })?;
-        Ok(())
-    }
+        });
+
+        cmd.end().submit(list, &Default::default());
+        Ok(())    }
 
     pub fn get_empty(&self) -> &[u32] {
         &self.pool.get_empty()

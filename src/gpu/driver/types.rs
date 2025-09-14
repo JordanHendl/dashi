@@ -1,14 +1,6 @@
 use bitflags::bitflags;
+use bytemuck::{Pod, Zeroable};
 pub use crate::utils::handle::Handle;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Pipeline;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Image;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct BindTable;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Format {
@@ -29,6 +21,7 @@ pub enum IndexType {
 }
 
 bitflags! {
+    #[repr(C)]
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct UsageBits: u32 {
         const SAMPLED     = 0x1;
@@ -42,4 +35,7 @@ bitflags! {
         const DEPTH_WRITE = 0x100;
     }
 }
+
+unsafe impl Pod for UsageBits {}
+unsafe impl Zeroable for UsageBits {}
 
