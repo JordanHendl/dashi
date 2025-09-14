@@ -2,15 +2,16 @@
 
 use ash::vk;
 
-use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderTarget, VkImageView,
-};
+use super::{convert_rect2d_to_vulkan, ImageView};
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
+    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline,
+    Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup,
+    IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo,
+    SubmitInfo2, UsageBits, Viewport,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -235,43 +236,66 @@ impl CommandList {
 
 impl CommandSink for CommandList {
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
-        let rt = self
+        let pipe = self
             .ctx_ref()
-            .render_targets
-            .get_ref(cmd.target)
+            .gfx_pipelines
+            .get_ref(cmd.pipeline)
             .ok_or(GPUError::SlotError())
             .unwrap();
-        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
+        if self.curr_rp.map_or(false, |rp| rp == pipe.render_pass) {
             return;
         }
-        // end previous pass
         if self.curr_rp.is_some() {
-            unsafe {
-                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
-            }
+            unsafe { self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf) };
         }
-        self.curr_rp = Some(rt.render_pass);
+        self.curr_rp = Some(pipe.render_pass);
 
         unsafe {
             let rp_obj = self
                 .ctx_ref()
                 .render_passes
-                .get_ref(rt.render_pass)
+                .get_ref(pipe.render_pass)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
 
+            let mut vk_views: Vec<vk::ImageView> = Vec::new();
+            let mut all_views: Vec<ImageView> = Vec::new();
+            for att in cmd.color_attachments.iter().flatten() {
+                let h = self.ctx_ref().get_or_create_image_view(att).unwrap();
+                let view = self.ctx_ref().image_views.get_ref(h).unwrap();
+                vk_views.push(view.view);
+                all_views.push(*att);
+            }
+            if let Some(depth) = cmd.depth_attachment {
+                let h = self.ctx_ref().get_or_create_image_view(&depth).unwrap();
+                let view = self.ctx_ref().image_views.get_ref(h).unwrap();
+                vk_views.push(view.view);
+                all_views.push(depth);
+            }
+            assert_eq!(vk_views.len(), rp_obj.attachment_formats.len());
+            for (view, fmt) in all_views.iter().zip(rp_obj.attachment_formats.iter()) {
+                let image = self.ctx_ref().images.get_ref(view.img).unwrap();
+                assert_eq!(*fmt, image.format);
+            }
+
+            let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
+                .attachments(&vk_views)
+                .build();
+
             let clears: Vec<vk::ClearValue> = cmd
                 .clear_values
-                .iter() // Iterator<Item = &Option<ClearValue>>
-                .flatten() // Iterator<Item = &ClearValue> (drops Nones)
+                .iter()
+                .take(vk_views.len())
+                .flatten()
                 .map(clear_value_to_vk)
                 .collect();
 
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
+                    .push_next(&mut attachment_info)
                     .render_pass(rp_obj.raw)
-                    .framebuffer(rt.fb)
+                    .framebuffer(rp_obj.fb)
                     .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
                     .clear_values(&clears)
                     .build(),

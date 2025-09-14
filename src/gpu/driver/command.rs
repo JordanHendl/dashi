@@ -3,7 +3,7 @@ use core::convert::TryInto;
 
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, Rect2D, RenderTarget, SubmitInfo2, Viewport,
+    GraphicsPipeline, Image, ImageView, Rect2D, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -69,8 +69,9 @@ unsafe impl Pod for StoreOp {}
 pub struct BeginDrawing {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub target: Handle<RenderTarget>,
-    pub clear_values: [Option<ClearValue>; 4],
+    pub color_attachments: [Option<ImageView>; 4],
+    pub depth_attachment: Option<ImageView>,
+    pub clear_values: [Option<ClearValue>; 5],
 }
 
 #[repr(C)]
@@ -248,6 +249,8 @@ pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
     state: StateTracker,
+    curr_color: [Option<ImageView>; 4],
+    curr_depth: Option<ImageView>,
 }
 
 impl CommandEncoder {
@@ -258,6 +261,8 @@ impl CommandEncoder {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
             state: StateTracker::new(),
+            curr_color: [None; 4],
+            curr_depth: None,
         }
     }
 
@@ -266,6 +271,8 @@ impl CommandEncoder {
         self.data.clear();
         self.side.clear();
         self.state.reset();
+        self.curr_color = [None; 4];
+        self.curr_depth = None;
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
@@ -333,11 +340,58 @@ impl CommandEncoder {
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
+        for (slot, att) in desc.color_attachments.iter().enumerate() {
+            if let Some(view) = att {
+                if let Some(bar) = self.state.request_image_state(
+                    view.img,
+                    SubresourceRange::new(view.mip_level, 1, view.layer, 1),
+                    UsageBits::RT_WRITE,
+                    Layout::ColorAttachment,
+                ) {
+                    self.push(Op::ImageBarrier, &bar);
+                }
+            }
+            self.curr_color[slot] = *att;
+        }
+        self.curr_depth = desc.depth_attachment;
+        if let Some(view) = desc.depth_attachment {
+            if let Some(bar) = self.state.request_image_state(
+                view.img,
+                SubresourceRange::new(view.mip_level, 1, view.layer, 1),
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
         self.push(Op::BeginDrawing, desc);
     }
 
     /// End the current render pass.
     pub fn end_drawing(&mut self) {
+        let colors: Vec<ImageView> = self.curr_color.iter().flatten().copied().collect();
+        for att in colors {
+            if let Some(bar) = self.state.request_image_state(
+                att.img,
+                SubresourceRange::new(att.mip_level, 1, att.layer, 1),
+                UsageBits::SAMPLED,
+                Layout::ShaderReadOnly,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
+        if let Some(att) = self.curr_depth {
+            if let Some(bar) = self.state.request_image_state(
+                att.img,
+                SubresourceRange::new(att.mip_level, 1, att.layer, 1),
+                UsageBits::SAMPLED,
+                Layout::DepthStencilReadOnly,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
+        self.curr_color = [None; 4];
+        self.curr_depth = None;
         self.push(Op::EndDrawing, &EndDrawing::default());
     }
 
