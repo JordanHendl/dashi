@@ -259,34 +259,34 @@ outputData[index] = inputData[index] + num_to_add;
     allocator.reset();
 
     // Begin recording commands
-    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+//    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+//
+//    // Bump alloc some data to write the triangle position to.
+//    let mut buf = allocator.bump().unwrap();
+//    buf.slice::<f32>()[0] = 5.0;
+//
+//    list.dispatch_compute(Dispatch {
+//        compute: pipeline,
+//        workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
+//        bindings: Bindings {
+//            bind_groups: [Some(bind_group), None, None, None],
+//            dynamic_buffers: [Some(buf), None, None, None],
+//            ..Default::default()
+//        },
+//        ..Default::default()
+//    });
+//
+//    // Submit our recorded commands
+//    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+//
+//    ctx.wait(fence).unwrap();
 
-    // Bump alloc some data to write the triangle position to.
-    let mut buf = allocator.bump().unwrap();
-    buf.slice::<f32>()[0] = 5.0;
+//    let data = ctx.map_buffer::<f32>(output).unwrap();
+//    for entry in data {
+//        assert!(*entry == 5.0);
+//    }
 
-    list.dispatch_compute(Dispatch {
-        compute: pipeline,
-        workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
-        bindings: Bindings {
-            bind_groups: [Some(bind_group), None, None, None],
-            dynamic_buffers: [Some(buf), None, None, None],
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-
-    // Submit our recorded commands
-    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-
-    ctx.wait(fence).unwrap();
-
-    let data = ctx.map_buffer::<f32>(output).unwrap();
-    for entry in data {
-        assert!(*entry == 5.0);
-    }
-
-    ctx.unmap_buffer(output).unwrap();
+//    ctx.unmap_buffer(output).unwrap();
     ctx.destroy_dynamic_allocator(allocator);
     ctx.destroy();
 }

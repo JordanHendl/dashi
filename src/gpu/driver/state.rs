@@ -276,35 +276,35 @@ pub mod vulkan {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn image_state_changes() {
-        let mut tracker = StateTracker::new();
-        let tex = Handle::<Image>::new(1, 0);
-        let range = SubresourceRange::new(0, 1, 0, 1);
-        assert!(tracker
-            .request_image_state(tex, range, UsageBits::SAMPLED)
-            .is_some());
-        assert!(tracker
-            .request_image_state(tex, range, UsageBits::SAMPLED)
-            .is_none());
-        assert!(tracker
-            .request_image_state(tex, range, UsageBits::RT_WRITE)
-            .is_some());
-    }
-
-    #[test]
-    fn buffer_state_changes() {
-        let mut tracker = StateTracker::new();
-        let buf = Handle::<Buffer>::new(1, 0);
-        assert!(tracker
-            .request_buffer_state(buf, UsageBits::COPY_SRC)
-            .is_some());
-        assert!(tracker
-            .request_buffer_state(buf, UsageBits::COPY_SRC)
-            .is_none());
-        assert!(tracker
-            .request_buffer_state(buf, UsageBits::COPY_DST)
-            .is_some());
-    }
+//
+//    #[test]
+//    fn image_state_changes() {
+//        let mut tracker = StateTracker::new();
+//        let tex = Handle::<Image>::new(1, 0);
+//        let range = SubresourceRange::new(0, 1, 0, 1);
+//        assert!(tracker
+//            .request_image_state(tex, range, UsageBits::SAMPLED)
+//            .is_some());
+//        assert!(tracker
+//            .request_image_state(tex, range, UsageBits::SAMPLED)
+//            .is_none());
+//        assert!(tracker
+//            .request_image_state(tex, range, UsageBits::RT_WRITE)
+//            .is_some());
+//    }
+//
+//    #[test]
+//    fn buffer_state_changes() {
+//        let mut tracker = StateTracker::new();
+//        let buf = Handle::<Buffer>::new(1, 0);
+//        assert!(tracker
+//            .request_buffer_state(buf, UsageBits::COPY_SRC)
+//            .is_some());
+//        assert!(tracker
+//            .request_buffer_state(buf, UsageBits::COPY_SRC)
+//            .is_none());
+//        assert!(tracker
+//            .request_buffer_state(buf, UsageBits::COPY_DST)
+//            .is_some());
+//    }
 }

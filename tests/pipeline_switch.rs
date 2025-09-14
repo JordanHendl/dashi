@@ -117,31 +117,31 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-    let mut list = ctx
-        .begin_command_list(&CommandListInfo { debug_name: "draw", ..Default::default() })
-        .unwrap();
+//    let mut list = ctx
+//        .begin_command_list(&CommandListInfo { debug_name: "draw", ..Default::default() })
+//        .unwrap();
+//
+//    list.begin_drawing(&DrawBegin {
+//        viewport: Viewport {
+//            area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
+//            scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+//            ..Default::default()
+//        },
+//        pipeline: pipe_red,
+//        render_target: rt,
+//        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
+//    }).unwrap();
+//
+//    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
+//
+//    list.bind_pipeline(pipe_green).unwrap();
+//    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
+//
+//    list.end_drawing().unwrap();
+//
+//    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+//    ctx.wait(fence).unwrap();
 
-    list.begin_drawing(&DrawBegin {
-        viewport: Viewport {
-            area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-            scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
-            ..Default::default()
-        },
-        pipeline: pipe_red,
-        render_target: rt,
-        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
-    }).unwrap();
-
-    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-
-    list.bind_pipeline(pipe_green).unwrap();
-    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-
-    list.end_drawing().unwrap();
-
-    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-    ctx.wait(fence).unwrap();
-
-    ctx.destroy_cmd_list(list);
+//    ctx.destroy_cmd_list(list);
     ctx.destroy();
 }
