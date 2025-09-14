@@ -356,6 +356,9 @@ void main() {
                 ..Default::default()
             });
 
+            // Transition the display image for presentation
+            stream.prepare_for_presentation(img.img);
+
             stream.end().append(list);
         })
         .unwrap();

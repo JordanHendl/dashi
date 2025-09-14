@@ -471,6 +471,17 @@ impl CommandEncoder {
         self.push(Op::BlitImage, cmd);
     }
 
+    /// Transition an image to presentation layout.
+    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        let range = SubresourceRange::default();
+        if let Some(bar) =
+            self.state
+                .request_image_state(image, range, UsageBits::PRESENT, Layout::Present)
+        {
+            self.push(Op::ImageBarrier, &bar);
+        }
+    }
+
     /// Begin a debug marker region.
     pub fn begin_debug_marker(&mut self) {
         self.push(Op::DebugMarkerBegin, &DebugMarkerBegin {});

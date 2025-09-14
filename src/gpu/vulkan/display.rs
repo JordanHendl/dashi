@@ -450,89 +450,20 @@ impl Context {
         dsp: &Display,
         wait_sems: &[Handle<Semaphore>],
     ) -> Result<(), GPUError> {
-        let mut raw_wait_sems: Vec<vk::Semaphore> = Vec::with_capacity(32);
-        for sem in wait_sems {
-            raw_wait_sems.push(self.semaphores.get_ref(sem.clone()).unwrap().raw);
-        }
-
-        // Transition the swapchain image to PRESENT_SRC_KHR before presenting.
-        let img = self.images.get_ref(dsp.images[dsp.frame_idx as usize]).unwrap();
-        let cmd_buf = unsafe {
-            self.device
-                .allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::builder()
-                        .command_pool(self.gfx_pool)
-                        .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_buffer_count(1)
-                        .build(),
-                )?
-                [0]
-        };
+        let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
+            .iter()
+            .map(|sem| self.semaphores.get_ref(sem.clone()).unwrap().raw)
+            .collect();
 
         unsafe {
-            self.device.begin_command_buffer(
-                cmd_buf,
-                &vk::CommandBufferBeginInfo::builder()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-                    .build(),
-            )?;
-
-            let sub = vk::ImageSubresourceRange::builder()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .level_count(1)
-                .layer_count(1)
-                .build();
-            let barrier = vk::ImageMemoryBarrier::builder()
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                .image(img.img)
-                .subresource_range(sub)
-                .build();
-
-            self.device.cmd_pipeline_barrier(
-                cmd_buf,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            );
-
-            self.device.end_command_buffer(cmd_buf)?;
-        }
-
-        let present_sem = unsafe {
-            self.device
-                .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)?
-        };
-
-        let stage_masks = vec![vk::PipelineStageFlags::TRANSFER; raw_wait_sems.len()];
-        unsafe {
-            self.device.queue_submit(
-                self.gfx_queue.queue,
-                &[vk::SubmitInfo::builder()
-                    .command_buffers(&[cmd_buf])
-                    .wait_semaphores(&raw_wait_sems)
-                    .wait_dst_stage_mask(&stage_masks)
-                    .signal_semaphores(&[present_sem])
-                    .build()],
-                vk::Fence::null(),
-            )?;
-
-            self.device.free_command_buffers(self.gfx_pool, &[cmd_buf]);
-
             dsp.sc_loader.queue_present(
                 self.gfx_queue.queue,
                 &vk::PresentInfoKHR::builder()
                     .image_indices(&[dsp.frame_idx])
                     .swapchains(&[dsp.swapchain])
-                    .wait_semaphores(&[present_sem])
+                    .wait_semaphores(&raw_wait_sems)
                     .build(),
             )?;
-
-            self.device.destroy_semaphore(present_sem, None);
         }
 
         Ok(())
