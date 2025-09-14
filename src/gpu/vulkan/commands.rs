@@ -3,7 +3,7 @@
 use ash::vk;
 
 use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderTarget, VkImageView,
+    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, VkImageView,
 };
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
@@ -235,13 +235,15 @@ impl CommandList {
 
 impl CommandSink for CommandList {
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
-        let rt = self
+        let pipe = self
             .ctx_ref()
-            .render_targets
-            .get_ref(cmd.target)
+            .gfx_pipelines
+            .get_ref(cmd.pipeline)
             .ok_or(GPUError::SlotError())
             .unwrap();
-        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
+        let rp_handle = pipe.render_pass;
+
+        if self.curr_rp.map_or(false, |rp| rp == rp_handle) {
             return;
         }
         // end previous pass
@@ -250,30 +252,46 @@ impl CommandSink for CommandList {
                 self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
             }
         }
-        self.curr_rp = Some(rt.render_pass);
+        self.curr_rp = Some(rp_handle);
 
         unsafe {
             let rp_obj = self
                 .ctx_ref()
                 .render_passes
-                .get_ref(rt.render_pass)
+                .get_ref(rp_handle)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
 
+            let mut views: Vec<vk::ImageView> = Vec::new();
+            for att in cmd.color_attachments.iter().flatten() {
+                let h = self.ctx_ref().get_or_create_image_view(att).unwrap();
+                let view = self.ctx_ref().image_views.get_ref(h).unwrap().view;
+                views.push(view);
+            }
+            if let Some(att) = cmd.depth_attachment.as_ref() {
+                let h = self.ctx_ref().get_or_create_image_view(att).unwrap();
+                let view = self.ctx_ref().image_views.get_ref(h).unwrap().view;
+                views.push(view);
+            }
+
             let clears: Vec<vk::ClearValue> = cmd
                 .clear_values
-                .iter() // Iterator<Item = &Option<ClearValue>>
-                .flatten() // Iterator<Item = &ClearValue> (drops Nones)
+                .iter()
+                .flatten()
                 .map(clear_value_to_vk)
                 .collect();
+
+            let mut attach_begin =
+                vk::RenderPassAttachmentBeginInfo::builder().attachments(&views);
 
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp_obj.raw)
-                    .framebuffer(rt.fb)
+                    .framebuffer(rp_obj.fb)
                     .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
                     .clear_values(&clears)
+                    .push_next(&mut attach_begin)
                     .build(),
                 vk::SubpassContents::INLINE,
             );

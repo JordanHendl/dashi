@@ -71,7 +71,7 @@ the full mip chain after the initial data upload.
 Switching graphics pipelines without ending the render pass:
 
 ```rust
-list.begin_drawing(&DrawBegin { pipeline: first, viewport, render_target, clear_values })?;
+list.begin_drawing(&BeginDrawing { pipeline: first, viewport, color_attachments, depth_attachment, clear_values })?;
 list.append(Command::Draw(my_draw));
 list.bind_pipeline(second)?; // change pipelines mid-pass
 list.append(Command::Draw(other_draw));

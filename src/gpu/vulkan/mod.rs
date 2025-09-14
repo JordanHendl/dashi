@@ -71,14 +71,9 @@ unsafe extern "system" fn vulkan_debug_callback(
 #[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
+    pub(super) fb: vk::Framebuffer,
     pub(super) viewport: Viewport,
     pub(super) attachment_formats: Vec<Format>,
-}
-
-#[derive(Clone, Default)]
-pub struct RenderTarget {
-    pub(super) fb: vk::Framebuffer,
-    pub(super) render_pass: Handle<RenderPass>,
 }
 
 #[derive(Clone)]
@@ -154,7 +149,6 @@ pub struct Context {
     pub(super) transfer_queue: Option<Queue>,
     pub(super) buffers: Pool<Buffer>,
     pub(super) render_passes: Pool<RenderPass>,
-    pub(super) render_targets: Pool<RenderTarget>,
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
@@ -345,9 +339,15 @@ impl Context {
             .shader_clip_distance(true)
             .build();
 
+        let mut imageless_fb =
+            vk::PhysicalDeviceImagelessFramebufferFeatures::builder()
+                .imageless_framebuffer(true)
+                .build();
+
         let mut features2 = vk::PhysicalDeviceFeatures2::builder()
             .features(features)
             .push_next(&mut descriptor_indexing)
+            .push_next(&mut imageless_fb)
             .build();
 
         unsafe { instance.get_physical_device_features2(pdevice, &mut features2) };
@@ -548,7 +548,6 @@ impl Context {
 
             buffers: Default::default(),
             render_passes: Default::default(),
-            render_targets: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
@@ -654,7 +653,6 @@ impl Context {
 
             buffers: Default::default(),
             render_passes: Default::default(),
-            render_targets: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
@@ -1585,14 +1583,12 @@ impl Context {
             }
         });
 
-        // Render targets
-        self.render_targets.for_each_occupied_mut(|rt| {
-            unsafe { self.device.destroy_framebuffer(rt.fb, None) };
-        });
-
-        // Render passes
+        // Render passes and associated framebuffers
         self.render_passes.for_each_occupied_mut(|rp| {
-            unsafe { self.device.destroy_render_pass(rp.raw, None) };
+            unsafe {
+                self.device.destroy_framebuffer(rp.fb, None);
+                self.device.destroy_render_pass(rp.raw, None);
+            }
         });
 
         // Graphics pipeline layouts
@@ -1757,15 +1753,6 @@ impl Context {
 
     /// Destroys a render target and its framebuffer.
     ///
-    /// # Prerequisites
-    /// - Ensure no GPU work is using the render target.
-    /// - The context must still be alive.
-    pub fn destroy_render_target(&mut self, handle: Handle<RenderTarget>) {
-        let rt = self.render_targets.get_ref(handle).unwrap();
-        unsafe { self.device.destroy_framebuffer(rt.fb, None) };
-        self.render_targets.release(handle);
-    }
-
     /// Destroys a command list and its associated fence.
     ///
     /// # Prerequisites
@@ -2648,74 +2635,49 @@ impl Context {
 
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
+        // Create imageless framebuffer for this render pass
+        let mut fb_infos = Vec::with_capacity(attachment_formats.len());
+        for fmt in &attachment_formats {
+            let usage = if *fmt == Format::D24S8 {
+                vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+            } else {
+                vk::ImageUsageFlags::COLOR_ATTACHMENT
+            };
+            fb_infos.push(
+                vk::FramebufferAttachmentImageInfo::builder()
+                    .usage(usage)
+                    .width(info.viewport.scissor.w)
+                    .height(info.viewport.scissor.h)
+                    .layer_count(1)
+                    .view_formats(&[lib_to_vk_image_format(fmt)])
+                    .build(),
+            );
+        }
+
+        let mut fb_attachments =
+            vk::FramebufferAttachmentsCreateInfo::builder().attachment_image_infos(&fb_infos);
+
+        let fb_info = vk::FramebufferCreateInfo::builder()
+            .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
+            .render_pass(render_pass)
+            .attachment_count(fb_infos.len() as u32)
+            .width(info.viewport.scissor.w)
+            .height(info.viewport.scissor.h)
+            .layers(1)
+            .push_next(&mut fb_attachments);
+
+        let fb = unsafe { self.device.create_framebuffer(&fb_info, None)? };
+        self.set_name(fb, info.debug_name, vk::ObjectType::FRAMEBUFFER);
+
         return Ok(self
             .render_passes
             .insert(RenderPass {
                 raw: render_pass,
+                fb,
                 viewport: info.viewport,
                 attachment_formats,
             })
             .unwrap());
-    }
-
-    /// Create a render target from a set of image views and a render pass.
-    pub fn make_render_target(
-        &mut self,
-        info: &RenderTargetInfo,
-    ) -> Result<Handle<RenderTarget>, GPUError> {
-        let (attachment_formats, raw_rp) = {
-            let rp = self.render_passes.get_ref(info.render_pass).unwrap();
-            (rp.attachment_formats.clone(), rp.raw)
-        };
-
-        if attachment_formats.len() != info.attachments.len() {
-            return Err(GPUError::LibraryError());
-        }
-
-        let mut views = Vec::with_capacity(info.attachments.len());
-        let mut width = u32::MAX;
-        let mut height = u32::MAX;
-
-        for (img_view, fmt) in info.attachments.iter().zip(attachment_formats.iter()) {
-            let handle = self.get_or_create_image_view(img_view)?;
-            let (image_format, image_dim, vk_view) = {
-                let view = self.image_views.get_ref(handle).unwrap();
-                let image = self.images.get_ref(view.img).unwrap();
-                (image.format, image.dim, view.view)
-            };
-            if image_format != *fmt {
-                return Err(GPUError::LibraryError());
-            }
-            let is_depth = matches!(fmt, Format::D24S8);
-            let layout = if is_depth {
-                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            } else {
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-            };
-            self.oneshot_transition_image(*img_view, layout);
-            width = width.min(image_dim[0]);
-            height = height.min(image_dim[1]);
-            views.push(vk_view);
-        }
-
-        let fb_info = vk::FramebufferCreateInfo {
-            render_pass: raw_rp,
-            attachment_count: views.len() as u32,
-            p_attachments: views.as_ptr(),
-            width,
-            height,
-            layers: 1,
-            ..Default::default()
-        };
-        let fb = unsafe { self.device.create_framebuffer(&fb_info, None)? };
-        self.set_name(fb, info.debug_name, vk::ObjectType::FRAMEBUFFER);
-        Ok(self
-            .render_targets
-            .insert(RenderTarget {
-                fb,
-                render_pass: info.render_pass,
-            })
-            .unwrap())
     }
 
     /// Creates a compute pipeline layout from shader and bind group layouts.

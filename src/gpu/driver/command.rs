@@ -3,7 +3,7 @@ use core::convert::TryInto;
 
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, Rect2D, RenderTarget, SubmitInfo2, Viewport,
+    GraphicsPipeline, Image, ImageView, Rect2D, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -69,8 +69,9 @@ unsafe impl Pod for StoreOp {}
 pub struct BeginDrawing {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub target: Handle<RenderTarget>,
-    pub clear_values: [Option<ClearValue>; 4],
+    pub color_attachments: [Option<ImageView>; 4],
+    pub depth_attachment: Option<ImageView>,
+    pub clear_values: [Option<ClearValue>; 5],
 }
 
 #[repr(C)]
@@ -248,6 +249,7 @@ pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
     state: StateTracker,
+    attachments: Vec<(Handle<Image>, SubresourceRange)>,
 }
 
 impl CommandEncoder {
@@ -258,6 +260,7 @@ impl CommandEncoder {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
             state: StateTracker::new(),
+            attachments: Vec::with_capacity(5),
         }
     }
 
@@ -266,6 +269,7 @@ impl CommandEncoder {
         self.data.clear();
         self.side.clear();
         self.state.reset();
+        self.attachments.clear();
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
@@ -333,12 +337,52 @@ impl CommandEncoder {
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
+        self.attachments.clear();
+
+        for att in desc.color_attachments.iter().flatten() {
+            let range = SubresourceRange::new(att.mip_level, 1, att.layer, 1);
+            if let Some(bar) = self.state.request_image_state(
+                att.img,
+                range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+            self.attachments.push((att.img, range));
+        }
+
+        if let Some(att) = desc.depth_attachment {
+            let range = SubresourceRange::new(att.mip_level, 1, att.layer, 1);
+            if let Some(bar) = self.state.request_image_state(
+                att.img,
+                range,
+                UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+            self.attachments.push((att.img, range));
+        }
+
         self.push(Op::BeginDrawing, desc);
     }
 
     /// End the current render pass.
     pub fn end_drawing(&mut self) {
         self.push(Op::EndDrawing, &EndDrawing::default());
+
+        let attachments = std::mem::take(&mut self.attachments);
+        for (img, range) in attachments {
+            if let Some(bar) = self.state.request_image_state(
+                img,
+                range,
+                UsageBits::empty(),
+                Layout::General,
+            ) {
+                self.push(Op::ImageBarrier, &bar);
+            }
+        }
     }
 
     /// Bind a graphics or compute pipeline.
