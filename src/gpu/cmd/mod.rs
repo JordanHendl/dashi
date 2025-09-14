@@ -64,6 +64,10 @@ impl CommandStream<Recording> {
         self.enc.blit_image(cmd);
     }
 
+    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        self.enc.prepare_for_presentation(image);
+    }
+
     pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> CommandStream<Graphics> {
         self.enc.begin_drawing(cmd);
         CommandStream {
@@ -96,6 +100,10 @@ impl CommandStream<Compute> {
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
         self.enc.blit_image(cmd);
+    }
+
+    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        self.enc.prepare_for_presentation(image);
     }
 
     pub fn dispatch(&mut self, cmd: &Dispatch) {
@@ -138,6 +146,10 @@ impl CommandStream<Graphics> {
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
         self.enc.blit_image(cmd);
+    }
+
+    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        self.enc.prepare_for_presentation(image);
     }
 
     pub fn draw(&mut self, cmd: &Draw) {

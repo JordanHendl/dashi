@@ -450,10 +450,10 @@ impl Context {
         dsp: &Display,
         wait_sems: &[Handle<Semaphore>],
     ) -> Result<(), GPUError> {
-        let mut raw_wait_sems: Vec<vk::Semaphore> = Vec::with_capacity(32);
-        for sem in wait_sems {
-            raw_wait_sems.push(self.semaphores.get_ref(sem.clone()).unwrap().raw);
-        }
+        let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
+            .iter()
+            .map(|sem| self.semaphores.get_ref(sem.clone()).unwrap().raw)
+            .collect();
 
         unsafe {
             dsp.sc_loader.queue_present(
@@ -463,8 +463,8 @@ impl Context {
                     .swapchains(&[dsp.swapchain])
                     .wait_semaphores(&raw_wait_sems)
                     .build(),
-            )
-        }?;
+            )?;
+        }
 
         Ok(())
     }

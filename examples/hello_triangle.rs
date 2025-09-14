@@ -225,14 +225,6 @@ void main() {
         })
         .unwrap();
 
-    let render_target = ctx
-        .make_render_target(&RenderTargetInfo {
-            debug_name: "rt",
-            render_pass,
-            attachments: &[fb_view],
-        })
-        .unwrap();
-
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
@@ -327,7 +319,8 @@ void main() {
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                target: render_target,
+                color_attachments: [Some(fb_view), None, None, None],
+                depth_attachment: None,
                 clear_values: [
                     Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
                     None,
@@ -362,6 +355,9 @@ void main() {
                 filter: Filter::Nearest,
                 ..Default::default()
             });
+
+            // Transition the display image for presentation
+            stream.prepare_for_presentation(img.img);
 
             stream.end().append(list);
         })

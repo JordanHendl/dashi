@@ -3,7 +3,7 @@ use core::convert::TryInto;
 
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, Rect2D, RenderTarget, SubmitInfo2, Viewport,
+    GraphicsPipeline, Image, ImageView, Rect2D, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -69,7 +69,8 @@ unsafe impl Pod for StoreOp {}
 pub struct BeginDrawing {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub target: Handle<RenderTarget>,
+    pub color_attachments: [Option<ImageView>; 4],
+    pub depth_attachment: Option<ImageView>,
     pub clear_values: [Option<ClearValue>; 4],
 }
 
@@ -333,6 +334,21 @@ impl CommandEncoder {
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
+        for view in desc.color_attachments.iter().flatten() {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let _ = self
+                .state
+                .request_image_state(view.img, range, UsageBits::RT_WRITE, Layout::ColorAttachment);
+        }
+        if let Some(view) = desc.depth_attachment {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let _ = self.state.request_image_state(
+                view.img,
+                range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            );
+        }
         self.push(Op::BeginDrawing, desc);
     }
 
@@ -453,6 +469,17 @@ impl CommandEncoder {
             self.push(Op::ImageBarrier, &bar);
         }
         self.push(Op::BlitImage, cmd);
+    }
+
+    /// Transition an image to presentation layout.
+    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        let range = SubresourceRange::default();
+        if let Some(bar) =
+            self.state
+                .request_image_state(image, range, UsageBits::PRESENT, Layout::Present)
+        {
+            self.push(Op::ImageBarrier, &bar);
+        }
     }
 
     /// Begin a debug marker region.

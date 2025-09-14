@@ -3,7 +3,7 @@
 use ash::vk;
 
 use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, RenderTarget, VkImageView,
+    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, VkImageView,
 };
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
@@ -235,45 +235,107 @@ impl CommandList {
 
 impl CommandSink for CommandList {
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
-        let rt = self
-            .ctx_ref()
-            .render_targets
-            .get_ref(cmd.target)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
-        if self.curr_rp.map_or(false, |rp| rp == rt.render_pass) {
+        let pipeline_rp = {
+            let gfx = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(cmd.pipeline)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            gfx.render_pass
+        };
+
+        if self.curr_rp.map_or(false, |rp| rp == pipeline_rp) {
             return;
         }
+
         // end previous pass
         if self.curr_rp.is_some() {
             unsafe {
                 self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
             }
+            // finalize CPU layouts for previous attachments
+            let attachments_prev = std::mem::take(&mut self.curr_attachments);
+            for (view, layout) in attachments_prev {
+                let ctx = self.ctx_ref();
+                let v = ctx.image_views.get_ref(view).unwrap();
+                let img = ctx.images.get_mut_ref(v.img).unwrap();
+                let base = v.range.base_mip_level as usize;
+                let count = v.range.level_count as usize;
+                for i in base..base + count {
+                    if let Some(l) = img.layouts.get_mut(i) {
+                        *l = layout;
+                    }
+                }
+            }
         }
-        self.curr_rp = Some(rt.render_pass);
+
+        self.curr_rp = Some(pipeline_rp);
+
+        let rp_obj = self
+            .ctx_ref()
+            .render_passes
+            .get_ref(pipeline_rp)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
+        self.curr_attachments.clear();
+
+        for view in cmd.color_attachments.iter().flatten() {
+            let handle = self.ctx_ref().get_or_create_image_view(view).unwrap();
+            let vk_view = {
+                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                v.view
+            };
+            attachments_vk.push(vk_view);
+            self.curr_attachments
+                .push((handle, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL));
+        }
+
+        if let Some(depth) = cmd.depth_attachment {
+            let handle = self.ctx_ref().get_or_create_image_view(&depth).unwrap();
+            let vk_view = {
+                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                v.view
+            };
+            attachments_vk.push(vk_view);
+            self.curr_attachments
+                .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
+        }
+
+        for (view_handle, layout) in &self.curr_attachments {
+            let ctx = self.ctx_ref();
+            let v = ctx.image_views.get_ref(*view_handle).unwrap();
+            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let base = v.range.base_mip_level as usize;
+            let count = v.range.level_count as usize;
+            for i in base..base + count {
+                if let Some(l) = img.layouts.get_mut(i) {
+                    *l = *layout;
+                }
+            }
+        }
+
+        let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
+            .attachments(&attachments_vk);
+
+        let clears: Vec<vk::ClearValue> = cmd
+            .clear_values
+            .iter()
+            .flatten()
+            .map(clear_value_to_vk)
+            .collect();
 
         unsafe {
-            let rp_obj = self
-                .ctx_ref()
-                .render_passes
-                .get_ref(rt.render_pass)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
-
-            let clears: Vec<vk::ClearValue> = cmd
-                .clear_values
-                .iter() // Iterator<Item = &Option<ClearValue>>
-                .flatten() // Iterator<Item = &ClearValue> (drops Nones)
-                .map(clear_value_to_vk)
-                .collect();
-
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp_obj.raw)
-                    .framebuffer(rt.fb)
+                    .framebuffer(rp_obj.fb)
                     .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
                     .clear_values(&clears)
+                    .push_next(&mut attachment_info)
                     .build(),
                 vk::SubpassContents::INLINE,
             );
@@ -287,6 +349,21 @@ impl CommandSink for CommandList {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+
+        let attachments = std::mem::take(&mut self.curr_attachments);
+        for (view, layout) in attachments {
+            let ctx = self.ctx_ref();
+            let v = ctx.image_views.get_ref(view).unwrap();
+            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let base = v.range.base_mip_level as usize;
+            let count = v.range.level_count as usize;
+            for i in base..base + count {
+                if let Some(l) = img.layouts.get_mut(i) {
+                    *l = layout;
+                }
+            }
+        }
+
         self.curr_rp = None;
         self.curr_pipeline = None;
     }
@@ -696,6 +773,15 @@ impl CommandSink for CommandList {
                 &[barrier],
             )
         };
+        self.update_last_access(dst_stage, dst_access);
+
+        let img = self.ctx_ref().images.get_mut_ref(cmd.image).unwrap();
+        for level in 0..cmd.range.level_count {
+            let mip = (cmd.range.base_mip + level) as usize;
+            if let Some(l) = img.layouts.get_mut(mip) {
+                *l = layout_to_vk(cmd.new_layout);
+            }
+        }
     }
 
     fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
