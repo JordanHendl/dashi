@@ -773,6 +773,15 @@ impl CommandSink for CommandList {
                 &[barrier],
             )
         };
+        self.update_last_access(dst_stage, dst_access);
+
+        let img = self.ctx_ref().images.get_mut_ref(cmd.image).unwrap();
+        for level in 0..cmd.range.level_count {
+            let mip = (cmd.range.base_mip + level) as usize;
+            if let Some(l) = img.layouts.get_mut(mip) {
+                *l = layout_to_vk(cmd.new_layout);
+            }
+        }
     }
 
     fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {

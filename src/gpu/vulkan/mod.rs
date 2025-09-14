@@ -2643,27 +2643,33 @@ impl Context {
         let width = info.viewport.scissor.w;
         let height = info.viewport.scissor.h;
 
-        let attachment_image_infos: Vec<vk::FramebufferAttachmentImageInfo> = attachment_formats
-            .iter()
-            .map(|fmt| {
-                let usage = if matches!(fmt, Format::D24S8) {
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                } else {
-                    vk::ImageUsageFlags::COLOR_ATTACHMENT
-                };
-                let vk_fmt = lib_to_vk_image_format(fmt);
-                vk::FramebufferAttachmentImageInfo::builder()
-                    .usage(usage)
-                    .width(width)
-                    .height(height)
-                    .layer_count(1)
-                    .view_formats(std::slice::from_ref(&vk_fmt))
-                    .build()
-            })
-            .collect();
+        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
+        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
+        for fmt in &attachment_formats {
+            let mut usage = vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::SAMPLED;
 
-        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
-            .attachment_image_infos(&attachment_image_infos);
+            if matches!(fmt, Format::D24S8) {
+                usage |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+            } else {
+                usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            }
+
+            let vk_fmt = lib_to_vk_image_format(fmt);
+            view_formats_vk.push(vk_fmt);
+            let info = vk::FramebufferAttachmentImageInfo::builder()
+                .usage(usage)
+                .width(width)
+                .height(height)
+                .layer_count(1)
+                .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
+                .build();
+            attachment_image_infos.push(info);
+        }
+
+        let mut attachments_info =
+            vk::FramebufferAttachmentsCreateInfo::builder().attachment_image_infos(&attachment_image_infos);
 
         let fb_info = vk::FramebufferCreateInfo::builder()
             .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
