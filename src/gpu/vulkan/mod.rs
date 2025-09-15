@@ -46,6 +46,9 @@ pub use descriptor_sets::*;
 mod pipelines;
 pub use pipelines::*;
 
+pub mod command_pool;
+pub use command_pool::*;
+
 
 /// Names of debugging layers that should be enabled when validation is requested.
 /// Only includes the standard Vulkan validation layer to avoid enabling any extra layers.
@@ -106,12 +109,14 @@ pub struct CommandQueue {
     fence: Handle<Fence>,
     dirty: bool,
     ctx: *mut Context,
+    pool: *mut CommandPool,
     curr_rp: Option<Handle<RenderPass>>,
     curr_pipeline: Option<Handle<GraphicsPipeline>>,
     last_op_access: vk::AccessFlags,
     last_op_stage: vk::PipelineStageFlags,
     curr_attachments: Vec<(Handle<VkImageView>, vk::ImageLayout)>,
     queue_type: QueueType,
+    is_secondary: bool,
 }
 
 impl Default for CommandQueue {
@@ -121,12 +126,14 @@ impl Default for CommandQueue {
             fence: Default::default(),
             dirty: false,
             ctx: std::ptr::null_mut(),
+            pool: std::ptr::null_mut(),
             curr_rp: None,
             curr_pipeline: None,
             last_op_access: vk::AccessFlags::TRANSFER_READ,
             last_op_stage: vk::PipelineStageFlags::ALL_COMMANDS,
             curr_attachments: Vec::new(),
             queue_type: QueueType::Graphics,
+            is_secondary: false,
         }
     }
 }
@@ -144,9 +151,9 @@ pub struct Context {
     pub(super) pdevice: vk::PhysicalDevice,
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
-    pub(super) gfx_pool: vk::CommandPool,
-    pub(super) compute_pool: Option<vk::CommandPool>,
-    pub(super) transfer_pool: Option<vk::CommandPool>,
+    pub(super) gfx_pool: CommandPool,
+    pub(super) compute_pool: Option<CommandPool>,
+    pub(super) transfer_pool: Option<CommandPool>,
     pub(super) allocator: ManuallyDrop<vk_mem::Allocator>,
     pub(super) gfx_queue: Queue,
     pub(super) compute_queue: Option<Queue>,
@@ -212,9 +219,9 @@ impl Context {
             vk::PhysicalDevice,
             ash::Device,
             ash::vk::PhysicalDeviceProperties,
-            vk::CommandPool,
-            Option<vk::CommandPool>,
-            Option<vk::CommandPool>,
+            CommandPool,
+            Option<CommandPool>,
+            Option<CommandPool>,
             vk_mem::Allocator,
             Queue,
             Option<Queue>,
@@ -437,38 +444,14 @@ impl Context {
             &instance, &device, pdevice,
         ))?;
 
-        let gfx_pool = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::builder()
-                    .queue_family_index(gfx_family)
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                    .build(),
-                None,
-            )
-        }?;
+        let gfx_pool = CommandPool::new(device.clone(), gfx_family)?;
         let compute_pool = if compute_family != gfx_family {
-            Some(unsafe {
-                device.create_command_pool(
-                    &vk::CommandPoolCreateInfo::builder()
-                        .queue_family_index(compute_family)
-                        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                        .build(),
-                    None,
-                )
-            }?)
+            Some(CommandPool::new(device.clone(), compute_family)?)
         } else {
             None
         };
         let transfer_pool = if transfer_family != compute_family && transfer_family != gfx_family {
-            Some(unsafe {
-                device.create_command_pool(
-                    &vk::CommandPoolCreateInfo::builder()
-                        .queue_family_index(transfer_family)
-                        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                        .build(),
-                    None,
-                )
-            }?)
+            Some(CommandPool::new(device.clone(), transfer_family)?)
         } else {
             None
         };
@@ -773,31 +756,28 @@ impl Context {
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
     pub fn make_command_queue(&mut self, info: &CommandQueueInfo2) -> Result<CommandQueue> {
-        let pool = match info.queue_type {
-            QueueType::Graphics => self.gfx_pool,
-            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+        let pool_ptr: *mut CommandPool = match info.queue_type {
+            QueueType::Graphics => &mut self.gfx_pool as *mut _,
+            QueueType::Compute => self
+                .compute_pool
+                .as_mut()
+                .unwrap_or(&mut self.gfx_pool) as *mut _,
             QueueType::Transfer => self
                 .transfer_pool
-                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
+                .as_mut()
+                .unwrap_or(self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool))
+                as *mut _,
         };
 
-        let level = if info.parent.is_none() {
-            vk::CommandBufferLevel::PRIMARY
-        } else {
-            vk::CommandBufferLevel::SECONDARY
+        let cmd_buf = unsafe {
+            if info.parent.is_none() {
+                (*pool_ptr).alloc_primary()?
+            } else {
+                (*pool_ptr).alloc_secondary()?
+            }
         };
 
-        let cmd = unsafe {
-            self.device.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(pool)
-                    .command_buffer_count(1)
-                    .level(level)
-                    .build(),
-            )
-        }?;
-
-        self.set_name(cmd[0], info.debug_name, vk::ObjectType::COMMAND_BUFFER);
+        self.set_name(cmd_buf, info.debug_name, vk::ObjectType::COMMAND_BUFFER);
 
         let f = unsafe {
             self.device.create_fence(
@@ -816,15 +796,17 @@ impl Context {
 
         unsafe {
             self.device
-                .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
+                .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?
         };
 
         return Ok(CommandQueue {
-            cmd_buf: cmd[0],
+            cmd_buf: cmd_buf,
             fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
+            pool: pool_ptr,
             queue_type: info.queue_type,
+            is_secondary: info.parent.is_some(),
             ..Default::default()
         });
     }
@@ -835,25 +817,22 @@ impl Context {
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
     pub fn begin_command_queue(&mut self, info: &CommandQueueInfo) -> Result<CommandQueue> {
-        let pool = match info.queue_type {
-            QueueType::Graphics => self.gfx_pool,
-            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+        let pool_ptr: *mut CommandPool = match info.queue_type {
+            QueueType::Graphics => &mut self.gfx_pool as *mut _,
+            QueueType::Compute => self
+                .compute_pool
+                .as_mut()
+                .unwrap_or(&mut self.gfx_pool) as *mut _,
             QueueType::Transfer => self
                 .transfer_pool
-                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
+                .as_mut()
+                .unwrap_or(self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool))
+                as *mut _,
         };
 
-        let cmd = unsafe {
-            self.device.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(pool)
-                    .command_buffer_count(1)
-                    .level(vk::CommandBufferLevel::PRIMARY)
-                    .build(),
-            )
-        }?;
+        let cmd_buf = unsafe { (*pool_ptr).alloc_primary()? };
 
-        self.set_name(cmd[0], info.debug_name, vk::ObjectType::COMMAND_BUFFER);
+        self.set_name(cmd_buf, info.debug_name, vk::ObjectType::COMMAND_BUFFER);
 
         let f = unsafe {
             self.device.create_fence(
@@ -872,15 +851,17 @@ impl Context {
 
         unsafe {
             self.device
-                .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
+                .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?
         };
 
         return Ok(CommandQueue {
-            cmd_buf: cmd[0],
+            cmd_buf: cmd_buf,
             fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
+            pool: pool_ptr,
             queue_type: info.queue_type,
+            is_secondary: false,
             ..Default::default()
         });
     }
@@ -1640,15 +1621,13 @@ impl Context {
             unsafe { timer.destroy(&self.device) };
         }
 
-        // Command pool
-        unsafe {
-            self.device.destroy_command_pool(self.gfx_pool, None);
-            if let Some(pool) = self.compute_pool {
-                self.device.destroy_command_pool(pool, None);
-            }
-            if let Some(pool) = self.transfer_pool {
-                self.device.destroy_command_pool(pool, None);
-            }
+        // Command pools
+        self.gfx_pool.destroy();
+        if let Some(pool) = self.compute_pool.as_mut() {
+            pool.destroy();
+        }
+        if let Some(pool) = self.transfer_pool.as_mut() {
+            pool.destroy();
         }
 
         // Destroy allocator before tearing down device and instance
@@ -1779,16 +1758,13 @@ impl Context {
     ///   executing the list.
     /// - The context must still be alive.
     pub fn destroy_cmd_queue(&mut self, list: CommandQueue) {
-        let pool = match list.queue_type {
-            QueueType::Graphics => self.gfx_pool,
-            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
-            QueueType::Transfer => self
-                .transfer_pool
-                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
-        };
         unsafe {
-            self.device.free_command_buffers(pool, &[list.cmd_buf])
-        };
+            if list.is_secondary {
+                (*list.pool).recycle_secondary(list.cmd_buf);
+            } else {
+                (*list.pool).recycle_primary(list.cmd_buf);
+            }
+        }
         self.destroy_fence(list.fence);
     }
 

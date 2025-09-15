@@ -100,9 +100,7 @@ impl CommandQueue {
     /// - Transitions must be handled via appropriate barriers.
     pub fn reset(&mut self) -> Result<()> {
         unsafe {
-            (*self.ctx)
-                .device
-                .reset_command_buffer(self.cmd_buf, vk::CommandBufferResetFlags::empty())?;
+            (*self.pool).reset_cmd(self.cmd_buf)?;
 
             (*self.ctx).device.begin_command_buffer(
                 self.cmd_buf,
@@ -114,6 +112,16 @@ impl CommandQueue {
         self.curr_rp = None;
         self.curr_pipeline = None;
         Ok(())
+    }
+
+    /// Allocate a secondary command buffer from the same pool.
+    pub fn allocate_secondary(&mut self) -> Result<vk::CommandBuffer> {
+        unsafe { (*self.pool).alloc_secondary() }
+    }
+
+    /// Recycle a secondary command buffer back into the pool.
+    pub fn recycle_secondary(&mut self, buf: vk::CommandBuffer) {
+        unsafe { (*self.pool).recycle_secondary(buf) }
     }
     pub fn submit(
         &mut self,
