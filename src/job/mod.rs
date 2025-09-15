@@ -1,4 +1,5 @@
-use rayon::{ThreadPool, ThreadPoolBuilder};
+mod executor;
+pub use executor::*;
 
 /// Context provided to jobs running on worker threads.
 #[derive(Default)]
@@ -27,19 +28,15 @@ pub struct JobDispatchStats {
 
 /// Dispatcher responsible for executing jobs across frames and threads.
 pub struct JobDispatch {
-    executor: ThreadPool,
+    executor: Box<dyn Executor + Send + Sync>,
     frames: Vec<FrameCtx>,
     curr_frame: usize,
     stats: JobDispatchStats,
 }
 
 impl JobDispatch {
-    /// Create a new dispatcher with the given number of worker threads and frames in flight.
-    pub fn new(num_threads: usize, num_frames: usize) -> Self {
-        let executor = ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .build()
-            .expect("failed to build thread pool");
+    /// Create a new dispatcher with the given executor and number of frames in flight.
+    pub fn new(executor: Box<dyn Executor + Send + Sync>, num_frames: usize) -> Self {
         let frames = (0..num_frames).map(|_| FrameCtx::new()).collect();
         Self {
             executor,
@@ -67,10 +64,10 @@ impl JobDispatch {
         let jobs = std::mem::take(&mut self.frames[self.curr_frame].jobs);
         for job in jobs {
             self.stats.jobs_submitted += 1;
-            self.executor.spawn(move || {
+            self.executor.run_boxed(Box::new(move || {
                 let mut ctx = ThreadCtx::default();
                 job(&mut ctx);
-            });
+            }));
         }
     }
 
