@@ -1,9 +1,12 @@
 mod error;
 use crate::{
-    cmd::{CommandStream, Executable}, driver::{
-        command::{CopyBuffer, CopyBufferImage, CopyImageBuffer},
+    cmd::{CommandStream, Executable},
+    driver::{
+        command::{CopyBuffer, CopyBufferImage},
         state::SubresourceRange,
-    }, utils::{Handle, Pool}, CommandRing
+    },
+    utils::{Handle, Pool},
+    CommandRing,
 };
 use ash::*;
 pub use error::*;
@@ -46,8 +49,8 @@ pub use descriptor_sets::*;
 mod pipelines;
 pub use pipelines::*;
 
-pub mod command_pool;
-pub use command_pool::*;
+mod command_pool;
+use command_pool::CommandPool;
 
 
 /// Names of debugging layers that should be enabled when validation is requested.
