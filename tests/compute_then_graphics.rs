@@ -162,7 +162,7 @@
 //    });
 //    let compute = graph.add_node(Node::new(compute_decl, move || {
 //        let ctx = unsafe { &mut *(ctx_ptr as *mut Context) };
-//        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+//        let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
 //        list.dispatch_compute(Dispatch {
 //            compute: comp_pipe,
 //            workgroup_size: [1,1,1],
@@ -174,7 +174,7 @@
 //        });
 //        let fence = ctx.submit(&mut list, &Default::default()).unwrap();
 //        ctx.wait(fence).unwrap();
-//        ctx.destroy_cmd_list(list);
+//        ctx.destroy_cmd_queue(list);
 //    }));
 //
 //    let mut graphics_decl = PassDecl::new();
@@ -199,7 +199,7 @@
 //
 //    let graphics = graph.add_node(Node::new(graphics_decl, move || {
 //        let ctx = unsafe { &mut *(ctx_ptr as *mut Context) };
-//        let mut list = ctx.begin_command_list(&CommandListInfo { debug_name: "draw", ..Default::default() }).unwrap();
+//        let mut list = ctx.begin_command_queue(&CommandQueueInfo { debug_name: "draw", ..Default::default() }).unwrap();
 //        list.begin_drawing(&DrawBegin {
 //            viewport: Viewport {
 //                area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
@@ -222,7 +222,7 @@
 //        list.end_drawing().unwrap();
 //        let fence = ctx.submit(&mut list, &Default::default()).unwrap();
 //        ctx.wait(fence).unwrap();
-//        ctx.destroy_cmd_list(list);
+//        ctx.destroy_cmd_queue(list);
 //    }));
 //
 //    graph.add_dependency(graphics, compute);
@@ -234,7 +234,7 @@
 ////    let readback = ctx
 ////        .make_buffer(&BufferInfo { debug_name: "readback", byte_size: (WIDTH*HEIGHT*4) as u32, visibility: MemoryVisibility::CpuAndGpu, ..Default::default() })
 ////        .unwrap();
-////    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+////    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
 ////    list.copy_image_to_buffer(ImageBufferCopy { src: view, dst: readback, dst_offset: 0 });
 ////    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
 ////    ctx.wait(fence).unwrap();
@@ -243,7 +243,7 @@
 ////    fs::create_dir_all("tests/output").unwrap();
 ////    save_buffer("tests/output/compute_then_graphics.png", &data, WIDTH, HEIGHT, ColorType::Rgba8).unwrap();
 //
-//    ctx.destroy_cmd_list(list);
+//    ctx.destroy_cmd_queue(list);
 //    ctx.destroy_buffer(readback);
 //    ctx.destroy_buffer(color_buf);
 //    ctx.destroy_buffer(vb);

@@ -272,7 +272,8 @@ void main() {
     let mut timer = Timer::new();
 
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 3).unwrap();
+    let mut framed_list =
+        FramedCommandQueue::new(&mut ctx, "Default", 3, QueueType::Graphics).unwrap();
     let sems = ctx.make_semaphores(2).unwrap();
     'running: while display.minifb_window().is_open() {
         // Reset the allocator

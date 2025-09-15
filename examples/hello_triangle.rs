@@ -258,7 +258,7 @@ void main() {
 
     timer.start();
     let mut ring = ctx
-        .make_command_ring(&CommandListInfo2 {
+        .make_command_ring(&CommandQueueInfo2 {
             debug_name: "cmd",
             ..Default::default()
         })

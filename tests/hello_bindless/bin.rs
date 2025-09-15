@@ -82,7 +82,7 @@ fn main() {
     .unwrap();
 
     // Bind the table in a command list and dispatch.
-    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
     let buf = allocator.bump().unwrap();
     list.dispatch_compute(Dispatch {
         compute: pipeline,

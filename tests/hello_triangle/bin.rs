@@ -262,7 +262,7 @@ void main() {
 
     timer.start();
     let mut ring = ctx
-        .make_command_ring(&CommandListInfo2 { debug_name: "cmd" })
+        .make_command_ring(&CommandQueueInfo2 { debug_name: "cmd" })
         .unwrap();
 
     let sems = ctx.make_semaphores(2).unwrap();

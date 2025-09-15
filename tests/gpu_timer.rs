@@ -16,7 +16,7 @@ fn gpu_timer() {
     ctx.init_gpu_timers(1).unwrap();
 
     let mut list = ctx
-        .begin_command_list(&CommandListInfo { debug_name: "timer", ..Default::default() })
+        .begin_command_queue(&CommandQueueInfo { debug_name: "timer", ..Default::default() })
         .unwrap();
     // Begin and end must bracket commands on the same list.
     ctx.gpu_timer_begin(&mut list, 0);
@@ -29,6 +29,6 @@ fn gpu_timer() {
     let elapsed = ctx.get_elapsed_gpu_time_ms(0).unwrap();
     assert!(elapsed >= 0.0);
 
-    ctx.destroy_cmd_list(list);
+    ctx.destroy_cmd_queue(list);
     ctx.destroy();
 }

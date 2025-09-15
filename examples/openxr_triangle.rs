@@ -192,7 +192,8 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
 
     let mut timer = Timer::new();
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx, "Default", 2).unwrap();
+    let mut framed_list =
+        FramedCommandQueue::new(&mut ctx, "Default", 2, QueueType::Graphics).unwrap();
 
     for _ in 0..100 {
         allocator.reset();

@@ -115,7 +115,8 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
     let bind_group = ctx.make_bind_group(&BindGroupInfo{debug_name:"OpenXR Triangle",layout:bg_layout,bindings:&[BindingInfo{resource:ShaderResource::Dynamic(&allocator),binding:0}],..Default::default()}).unwrap();
     let mut timer = Timer::new();
     timer.start();
-    let mut framed_list = FramedCommandList::new(&mut ctx,"Default",2).unwrap();
+    let mut framed_list =
+        FramedCommandQueue::new(&mut ctx, "Default", 2, QueueType::Graphics).unwrap();
     allocator.reset();
     let (_idx,state) = ctx.acquire_xr_image(&mut display).unwrap();
     framed_list.record(|list|{
