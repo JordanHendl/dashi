@@ -1,4 +1,14 @@
-use crate::{driver::command::CopyBuffer, cmd::{Initial, Pending}, Buffer, BufferInfo, CommandQueue, CommandStream, Context, MemoryVisibility};
+use crate::{
+    driver::command::CopyBuffer,
+    Buffer,
+    BufferInfo,
+    CommandQueue,
+    CommandStream,
+    Context,
+    MemoryVisibility,
+};
+#[cfg(test)]
+use crate::QueueType;
 
 use super::{Handle, Pool};
 use crate::Result;
@@ -161,7 +171,8 @@ mod tests {
         }
         assert!(pool.len() == TEST_AMT);
 
-        let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
+        let ctx_ptr = &mut ctx as *mut _;
+        let mut list = ctx.pool_mut(QueueType::Graphics).begin(ctx_ptr, "", false).unwrap();
         pool.sync_up(&mut list).unwrap();
         ctx.submit(&mut list, &Default::default())
             .expect("ASSERT: Should be able to sync data up");
