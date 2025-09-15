@@ -1,4 +1,4 @@
-//! Refactored command helpers for Dashi CommandList
+//! Refactored command helpers for Dashi CommandQueue
 
 use ash::vk;
 
@@ -10,7 +10,7 @@ use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandList, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
+    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -74,7 +74,7 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     }
 }
 
-impl CommandList {
+impl CommandQueue {
     /// Reset the command buffer and begin recording again.
     ///
     /// # Vulkan prerequisites
@@ -135,7 +135,7 @@ impl CommandList {
 
             let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
 
-            let queue = (*self.ctx).gfx_queue.queue;
+            let queue = (*self.ctx).queue(self.queue_type);
             (*self.ctx).device.queue_submit(
                 queue,
                 &[vk::SubmitInfo::builder()
@@ -233,7 +233,7 @@ impl CommandList {
     }
 }
 
-impl CommandSink for CommandList {
+impl CommandSink for CommandQueue {
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
         let pipeline_rp = {
             let gfx = self

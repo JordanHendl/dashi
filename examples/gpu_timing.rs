@@ -5,7 +5,7 @@ fn main() {
     // GPU timers must be initialized before use.
     ctx.init_gpu_timers(1).unwrap();
 
-    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
     // Begin and end must bracket commands on the same list.
     ctx.gpu_timer_begin(&mut list, 0);
     // no-op workload

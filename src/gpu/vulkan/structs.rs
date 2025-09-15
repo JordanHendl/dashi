@@ -2,7 +2,7 @@ use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
-use crate::{utils::Handle, BindGroup, BindTable, CommandList, Semaphore};
+use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
 use std::hash::{Hash, Hasher};
 
 use bytemuck::{Pod, Zeroable};
@@ -334,23 +334,25 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
 }
 
 #[derive(Hash)]
-pub struct CommandListInfo<'a> {
+pub struct CommandQueueInfo<'a> {
     pub debug_name: &'a str,
     pub should_cleanup: bool,
-}
-
-#[derive(Default)]
-pub struct CommandListInfo2<'a> {
-    pub debug_name: &'a str,
-    pub parent: Option<&'a CommandList>,
     pub queue_type: QueueType,
 }
 
-impl<'a> Default for CommandListInfo<'a> {
+#[derive(Default)]
+pub struct CommandQueueInfo2<'a> {
+    pub debug_name: &'a str,
+    pub parent: Option<&'a CommandQueue>,
+    pub queue_type: QueueType,
+}
+
+impl<'a> Default for CommandQueueInfo<'a> {
     fn default() -> Self {
         Self {
             debug_name: "",
             should_cleanup: true,
+            queue_type: QueueType::Graphics,
         }
     }
 }

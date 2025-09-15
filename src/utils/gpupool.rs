@@ -1,4 +1,4 @@
-use crate::{driver::command::CopyBuffer, cmd::{Initial, Pending}, Buffer, BufferInfo, CommandList, CommandStream, Context, MemoryVisibility};
+use crate::{driver::command::CopyBuffer, cmd::{Initial, Pending}, Buffer, BufferInfo, CommandQueue, CommandStream, Context, MemoryVisibility};
 
 use super::{Handle, Pool};
 use crate::Result;
@@ -54,7 +54,7 @@ impl<T> GPUPool<T> {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandList) -> Result<()> {
+    pub fn sync_down(&mut self, list: &mut CommandQueue) -> Result<()> {
 
         let mut cmd = CommandStream::new().begin();
         cmd.copy_buffers(&CopyBuffer {
@@ -67,7 +67,7 @@ impl<T> GPUPool<T> {
         Ok(())
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandList) -> Result<()> {
+    pub fn sync_up(&mut self, list: &mut CommandQueue) -> Result<()> {
         let mut cmd = CommandStream::new().begin();
         cmd.copy_buffers(&CopyBuffer {
             src: self.staging,
@@ -161,7 +161,7 @@ mod tests {
         }
         assert!(pool.len() == TEST_AMT);
 
-        let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+        let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
         pool.sync_up(&mut list).unwrap();
         ctx.submit(&mut list, &Default::default())
             .expect("ASSERT: Should be able to sync data up");

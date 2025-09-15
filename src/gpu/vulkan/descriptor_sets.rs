@@ -37,7 +37,7 @@ pub struct IndexedBindGroup {
     pub(super) set_id: u32,
 }
 
-impl CommandList {
+impl CommandQueue {
     pub(crate) fn bind_descriptor_set(
         &mut self,
         bind_point: vk::PipelineBindPoint,

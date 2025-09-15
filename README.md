@@ -55,7 +55,10 @@ Dashi can record commands directly or via the heap-free `CommandEncoder`. The
 encoder or a closure that records onto the provided command list:
 
 ```rust
-let mut list = ctx.begin_command_list(&CommandListInfo::default())?;
+let mut list = ctx.begin_command_queue(&CommandQueueInfo {
+    queue_type: QueueType::Graphics,
+    ..Default::default()
+})?;
 let encoder = CommandEncoder::new();
 ctx.submit_with(&mut list, &encoder, &SubmitInfo::default())?;
 

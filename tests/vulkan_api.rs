@@ -259,7 +259,7 @@ outputData[index] = inputData[index] + num_to_add;
     allocator.reset();
 
     // Begin recording commands
-//    let mut list = ctx.begin_command_list(&Default::default()).unwrap();
+//    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
 //
 //    // Bump alloc some data to write the triangle position to.
 //    let mut buf = allocator.bump().unwrap();

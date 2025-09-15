@@ -35,7 +35,7 @@ fn framebuffer_compare() {
         .unwrap();
 
 //    let mut list = ctx
-//        .begin_command_list(&CommandListInfo { debug_name: "copy", ..Default::default() })
+//        .begin_command_queue(&CommandQueueInfo { debug_name: "copy", ..Default::default() })
 //        .unwrap();
 //    list.copy_image_to_buffer(ImageBufferCopy { src: view, dst: buffer, dst_offset: 0 });
 //    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
@@ -46,7 +46,7 @@ fn framebuffer_compare() {
 //
 //    assert!(compare_rgba(&actual, &expected, width, height, 0));
 
-//    ctx.destroy_cmd_list(list);
+//    ctx.destroy_cmd_queue(list);
     ctx.destroy_buffer(buffer);
     ctx.destroy_image(image);
     ctx.destroy();

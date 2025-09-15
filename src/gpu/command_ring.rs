@@ -1,16 +1,17 @@
 use crate::{
     utils::Handle,
-    CommandList,
-    CommandListInfo,
+    CommandQueue,
+    CommandQueueInfo,
     Context,
     Fence,
+    QueueType,
     SubmitInfo,
     Result,
 };
 use std::ptr::NonNull;
 
 pub struct CommandRing {
-    cmds: Vec<CommandList>,
+    cmds: Vec<CommandQueue>,
     fences: Vec<Option<Handle<Fence>>>,
     ctx: NonNull<Context>,
     curr: u16,
@@ -21,12 +22,14 @@ impl CommandRing {
         ctx: &mut Context,
         name: &str,
         frame_count: usize,
+        queue_type: QueueType,
     ) -> Result<Self> {
         let mut cmds = Vec::new();
         for _i in 0..frame_count {
-            cmds.push(ctx.begin_command_list(&CommandListInfo {
+            cmds.push(ctx.begin_command_queue(&CommandQueueInfo {
                 debug_name: name,
                 should_cleanup: false,
+                queue_type,
             })?);
         }
 
@@ -42,7 +45,7 @@ impl CommandRing {
 
     pub fn append<T>(&mut self, mut record_func: T) -> Result<()>
     where
-        T: FnMut(&mut CommandList),
+        T: FnMut(&mut CommandQueue),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
@@ -57,7 +60,7 @@ impl CommandRing {
 
     pub fn record_enumerated<T>(&mut self, mut record_func: T) -> Result<()>
     where
-        T: FnMut(&mut CommandList, u16),
+        T: FnMut(&mut CommandQueue, u16),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
@@ -73,7 +76,7 @@ impl CommandRing {
 
     pub fn record<T>(&mut self, mut record_func: T) -> Result<()>
     where
-        T: FnMut(&mut CommandList),
+        T: FnMut(&mut CommandQueue),
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
@@ -114,10 +117,10 @@ impl CommandRing {
         Ok(())
     }
 
-    /// Record on every frame without advancing, running the closure on each CommandList
+    /// Record on every frame without advancing, running the closure on each CommandQueue
     pub fn record_all<T>(&mut self, mut record_func: T) -> Result<()>
     where
-        T: FnMut(&mut CommandList),
+        T: FnMut(&mut CommandQueue),
     {
         let count = self.cmds.len();
         for idx in 0..count {
@@ -132,10 +135,10 @@ impl CommandRing {
         Ok(())
     }
 
-    /// Record on every frame with index, running the closure on each CommandList and its index
+    /// Record on every frame with index, running the closure on each CommandQueue and its index
     pub fn record_all_enumerated<T>(&mut self, mut record_func: T) -> Result<()>
     where
-        T: FnMut(&mut CommandList, u16),
+        T: FnMut(&mut CommandQueue, u16),
     {
         let count = self.cmds.len() as u16;
         for idx in 0..count {
@@ -159,7 +162,7 @@ impl CommandRing {
         unsafe {
             let ctx = self.ctx.as_mut();
             for cmd in self.cmds.drain(..) {
-                ctx.destroy_cmd_list(cmd);
+                ctx.destroy_cmd_queue(cmd);
             }
         }
     }
@@ -186,7 +189,7 @@ mod tests {
         // create a headless context
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // 3 frames
-        let mut fcl = CommandRing::new(&mut ctx, "basic", 3).unwrap();
+        let mut fcl = CommandRing::new(&mut ctx, "basic", 3, QueueType::Graphics).unwrap();
 
         // do 10 cycles of append + submit
         for _ in 0..10 {
@@ -207,14 +210,14 @@ mod tests {
         ctx.destroy();
     }
 
-    /// Test that record() resets the CommandList and that record_enumerated()
+    /// Test that record() resets the CommandQueue and that record_enumerated()
     /// passes the current frame index correctly into the closure.
     #[test]
     #[serial]
     fn record_and_record_enumerated_indices() {
         let mut ctx = Context::headless(&ContextInfo::default()).expect("headless context");
         // choose 3 frames so we see at least two distinct indices
-        let mut fcl = CommandRing::new(&mut ctx, "enum", 3).unwrap();
+        let mut fcl = CommandRing::new(&mut ctx, "enum", 3, QueueType::Graphics).unwrap();
 
         let mut seen_plain = Vec::new();
         let mut seen_enum = Vec::new();

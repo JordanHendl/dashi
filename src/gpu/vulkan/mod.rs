@@ -101,7 +101,7 @@ pub struct Semaphore {
 }
 
 #[derive(Clone)]
-pub struct CommandList {
+pub struct CommandQueue {
     cmd_buf: vk::CommandBuffer,
     fence: Handle<Fence>,
     dirty: bool,
@@ -111,9 +111,10 @@ pub struct CommandList {
     last_op_access: vk::AccessFlags,
     last_op_stage: vk::PipelineStageFlags,
     curr_attachments: Vec<(Handle<VkImageView>, vk::ImageLayout)>,
+    queue_type: QueueType,
 }
 
-impl Default for CommandList {
+impl Default for CommandQueue {
     fn default() -> Self {
         Self {
             cmd_buf: Default::default(),
@@ -125,6 +126,7 @@ impl Default for CommandList {
             last_op_access: vk::AccessFlags::TRANSFER_READ,
             last_op_stage: vk::PipelineStageFlags::ALL_COMMANDS,
             curr_attachments: Vec::new(),
+            queue_type: QueueType::Graphics,
         }
     }
 }
@@ -754,23 +756,23 @@ impl Context {
     pub fn record(
         &mut self,
         stream: CommandStream<Executable>,
-        info: &CommandListInfo,
-    ) -> Result<CommandList> {
+        info: &CommandQueueInfo,
+    ) -> Result<CommandQueue> {
         todo!()
     }
 
 
-    /// Creates a ringbuffer of CommandLists
-    pub fn make_command_ring(&mut self, info: &CommandListInfo2) -> Result<CommandRing> {
-        Ok(CommandRing::new(self, info.debug_name, 3)?) 
+    /// Creates a ringbuffer of CommandQueues
+    pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
+        Ok(CommandRing::new(self, info.debug_name, 3, info.queue_type)?)
     }
 
     /// Allocate and begin recording a new command list.
     ///
-    /// The returned [`CommandList`] starts in the recording state and may be
+    /// The returned [`CommandQueue`] starts in the recording state and may be
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
-    pub fn make_command_list(&mut self, info: &CommandListInfo2) -> Result<CommandList> {
+    pub fn make_command_queue(&mut self, info: &CommandQueueInfo2) -> Result<CommandQueue> {
         let pool = match info.queue_type {
             QueueType::Graphics => self.gfx_pool,
             QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
@@ -817,25 +819,34 @@ impl Context {
                 .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
         };
 
-        return Ok(CommandList {
+        return Ok(CommandQueue {
             cmd_buf: cmd[0],
             fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
+            queue_type: info.queue_type,
             ..Default::default()
         });
     }
 
     /// Allocate and begin recording a new command list.
     ///
-    /// The returned [`CommandList`] starts in the recording state and may be
+    /// The returned [`CommandQueue`] starts in the recording state and may be
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
-    pub fn begin_command_list(&mut self, info: &CommandListInfo) -> Result<CommandList> {
+    pub fn begin_command_queue(&mut self, info: &CommandQueueInfo) -> Result<CommandQueue> {
+        let pool = match info.queue_type {
+            QueueType::Graphics => self.gfx_pool,
+            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
+        };
+
         let cmd = unsafe {
             self.device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
-                    .command_pool(self.gfx_pool)
+                    .command_pool(pool)
                     .command_buffer_count(1)
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .build(),
@@ -864,18 +875,19 @@ impl Context {
                 .begin_command_buffer(cmd[0], &vk::CommandBufferBeginInfo::builder().build())?
         };
 
-        return Ok(CommandList {
+        return Ok(CommandQueue {
             cmd_buf: cmd[0],
             fence: self.fences.insert(Fence::new(f)).unwrap(),
             dirty: true,
             ctx: self,
+            queue_type: info.queue_type,
             ..Default::default()
         });
     }
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
         let mut list = self
-            .begin_command_list(&CommandListInfo {
+            .begin_command_queue(&CommandQueueInfo {
                 debug_name: "",
                 ..Default::default()
             })
@@ -883,7 +895,7 @@ impl Context {
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
-        self.destroy_cmd_list(list);
+        self.destroy_cmd_queue(list);
     }
 
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
@@ -896,7 +908,7 @@ impl Context {
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
         let mut list = self
-            .begin_command_list(&CommandListInfo {
+            .begin_command_queue(&CommandQueueInfo {
                 debug_name: "oneshot_transition",
                 ..Default::default()
             })
@@ -904,7 +916,7 @@ impl Context {
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
-        self.destroy_cmd_list(list);
+        self.destroy_cmd_queue(list);
     }
 
     fn transition_image_stages(
@@ -1044,7 +1056,7 @@ impl Context {
     ///   [`Self::wait`] or [`Self::release_list_on_next_submit`] is called.
     pub fn submit(
         &mut self,
-        cmd: &mut CommandList,
+        cmd: &mut CommandQueue,
         info: &SubmitInfo,
     ) -> Result<Handle<Fence>, GPUError> {
         if cmd.dirty {
@@ -1065,9 +1077,10 @@ impl Context {
             .collect();
 
         let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+        let queue = self.queue(cmd.queue_type);
         unsafe {
             self.device.queue_submit(
-                self.gfx_queue.queue,
+                queue,
                 &[vk::SubmitInfo::builder()
                     .command_buffers(&[cmd.cmd_buf])
                     .signal_semaphores(&raw_signal_sems)
@@ -1285,7 +1298,7 @@ impl Context {
 
                 let staging = self.make_buffer(&new_info)?;
 
-                let mut list = self.begin_command_list(&Default::default())?;
+                let mut list = self.begin_command_queue(&Default::default())?;
                 let mut stream = CommandStream::new().begin();
                 stream.copy_buffers(&CopyBuffer {
                     src: staging,
@@ -1299,7 +1312,7 @@ impl Context {
 
                 let fence = self.submit(&mut list, &Default::default())?;
                 self.wait(fence.clone())?;
-                self.destroy_cmd_list(list);
+                self.destroy_cmd_queue(list);
                 self.destroy_buffer(staging);
             }
             MemoryVisibility::CpuAndGpu => {
@@ -1313,7 +1326,7 @@ impl Context {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
-        let mut list = self.begin_command_list(&Default::default())?;
+        let mut list = self.begin_command_queue(&Default::default())?;
         if info.initial_data.is_none() {
             return Ok(());
         }
@@ -1330,7 +1343,7 @@ impl Context {
             ..Default::default()
         })?;
 
-        let mut list = self.begin_command_list(&Default::default())?;
+        let mut list = self.begin_command_queue(&Default::default())?;
         let mut cmd = CommandStream::new().begin();
         cmd.copy_buffer_to_image(&CopyBufferImage {
             src: staging,
@@ -1363,7 +1376,7 @@ impl Context {
         cmd.end().append(&mut list);
         let fence = self.submit(&mut list, &Default::default())?;
         self.wait(fence)?;
-        self.destroy_cmd_list(list);
+        self.destroy_cmd_queue(list);
         self.destroy_buffer(staging);
         Ok(())
     }
@@ -1392,8 +1405,8 @@ impl Context {
     /// Begin timing for `frame` on the provided command list.
     ///
     /// [`init_gpu_timers`] must be called beforehand, and the matching
-    /// [`gpu_timer_end`] must be invoked on the **same** `CommandList`.
-    pub fn gpu_timer_begin(&mut self, list: &mut CommandList, frame: usize) {
+    /// [`gpu_timer_end`] must be invoked on the **same** `CommandQueue`.
+    pub fn gpu_timer_begin(&mut self, list: &mut CommandQueue, frame: usize) {
         if let Some(t) = self.gpu_timers.get(frame) {
             unsafe { t.begin(&self.device, list.cmd_buf) };
         }
@@ -1402,7 +1415,7 @@ impl Context {
     /// End timing for `frame` on the provided command list.
     ///
     /// Must pair with a preceding [`gpu_timer_begin`] call on the same list.
-    pub fn gpu_timer_end(&mut self, list: &mut CommandList, frame: usize) {
+    pub fn gpu_timer_end(&mut self, list: &mut CommandQueue, frame: usize) {
         if let Some(t) = self.gpu_timers.get(frame) {
             unsafe { t.end(&self.device, list.cmd_buf) };
         }
@@ -1765,10 +1778,16 @@ impl Context {
     /// - Wait for the command list's fence to signal, ensuring the GPU has finished
     ///   executing the list.
     /// - The context must still be alive.
-    pub fn destroy_cmd_list(&mut self, list: CommandList) {
+    pub fn destroy_cmd_queue(&mut self, list: CommandQueue) {
+        let pool = match list.queue_type {
+            QueueType::Graphics => self.gfx_pool,
+            QueueType::Compute => self.compute_pool.unwrap_or(self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .unwrap_or(self.compute_pool.unwrap_or(self.gfx_pool)),
+        };
         unsafe {
-            self.device
-                .free_command_buffers(self.gfx_pool, &[list.cmd_buf])
+            self.device.free_command_buffers(pool, &[list.cmd_buf])
         };
         self.destroy_fence(list.fence);
     }

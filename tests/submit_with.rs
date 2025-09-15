@@ -14,7 +14,7 @@
 //    };
 //
 //    let mut list = ctx
-//        .begin_command_list(&CommandListInfo { debug_name: "encoder", ..Default::default() })
+//        .begin_command_queue(&CommandQueueInfo { debug_name: "encoder", ..Default::default() })
 //        .unwrap();
 //
 //    let enc = CommandEncoder::new();
@@ -23,7 +23,7 @@
 //        .unwrap();
 //    ctx.wait(fence).unwrap();
 //
-//    ctx.destroy_cmd_list(list);
+//    ctx.destroy_cmd_queue(list);
 //    ctx.destroy();
 //}
 //
