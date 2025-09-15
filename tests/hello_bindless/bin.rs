@@ -82,7 +82,8 @@ fn main() {
     .unwrap();
 
     // Bind the table in a command list and dispatch.
-    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
+    let ctx_ptr = &mut ctx as *mut _;
+    let mut list = ctx.pool_mut(QueueType::Graphics).begin(ctx_ptr, "", false).unwrap();
     let buf = allocator.bump().unwrap();
     list.dispatch_compute(Dispatch {
         compute: pipeline,

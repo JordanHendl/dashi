@@ -120,7 +120,7 @@ impl CommandQueue {
     /// The returned queue is a secondary command buffer that can be recorded
     /// independently and later executed by this primary queue.
     pub fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
-        unsafe { (*self.pool).begin(debug_name, true) }
+        unsafe { (*self.pool).begin(self.ctx, debug_name, true) }
     }
     pub fn submit(
         &mut self,

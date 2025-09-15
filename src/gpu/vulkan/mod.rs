@@ -457,7 +457,7 @@ impl Context {
     /// rendering or compute-only workloads. For general usage requirements
     /// (device selection, fence lifetimes, and queue limitations) see
     /// [`Self::new`].
-    pub fn headless(info: &ContextInfo) -> Result<Box<Self>> {
+    pub fn headless(info: &ContextInfo) -> Result<Self> {
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
@@ -498,15 +498,35 @@ impl Context {
             (None, None)
         };
 
-        let mut ctx = Box::new(Context {
+        let gfx_pool = CommandPool::new(&device, gfx_queue.family, QueueType::Graphics)?;
+        let compute_pool = if compute_queue.is_some() {
+            Some(CommandPool::new(
+                &device,
+                compute_queue.as_ref().unwrap().family,
+                QueueType::Compute,
+            )?)
+        } else {
+            None
+        };
+        let transfer_pool = if transfer_queue.is_some() {
+            Some(CommandPool::new(
+                &device,
+                transfer_queue.as_ref().unwrap().family,
+                QueueType::Transfer,
+            )?)
+        } else {
+            None
+        };
+
+        let mut ctx = Context {
             entry,
             instance,
             pdevice,
             device,
             properties,
-            gfx_pool: CommandPool::default(),
-            compute_pool: None,
-            transfer_pool: None,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
             allocator: ManuallyDrop::new(allocator),
             gfx_queue,
             compute_queue,
@@ -538,15 +558,7 @@ impl Context {
             sdl_video: None,
             debug_utils,
             debug_messenger,
-        });
-        let ctx_ptr = &mut *ctx as *mut _;
-        ctx.gfx_pool = CommandPool::new(ctx_ptr, QueueType::Graphics)?;
-        if ctx.compute_queue.is_some() {
-            ctx.compute_pool = Some(CommandPool::new(ctx_ptr, QueueType::Compute)?);
-        }
-        if ctx.transfer_queue.is_some() {
-            ctx.transfer_pool = Some(CommandPool::new(ctx_ptr, QueueType::Transfer)?);
-        }
+        };
         ctx.init_gpu_timers(1)?;
         Ok(ctx)
     }
@@ -561,7 +573,7 @@ impl Context {
     ///   [`Self::wait`] or [`Self::release_list_on_next_submit`] is called.
     /// - Vulkan queues require command lists to be finished before submission;
     ///   [`Self::submit`] will end a still-recording list automatically.
-    pub fn new(info: &ContextInfo) -> Result<Box<Self>> {
+    pub fn new(info: &ContextInfo) -> Result<Self> {
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
@@ -607,15 +619,35 @@ impl Context {
         #[cfg(feature = "dashi-sdl2")]
         let sdl_video = sdl_context.video().unwrap();
 
-        let mut ctx = Box::new(Context {
+        let gfx_pool = CommandPool::new(&device, gfx_queue.family, QueueType::Graphics)?;
+        let compute_pool = if compute_queue.is_some() {
+            Some(CommandPool::new(
+                &device,
+                compute_queue.as_ref().unwrap().family,
+                QueueType::Compute,
+            )?)
+        } else {
+            None
+        };
+        let transfer_pool = if transfer_queue.is_some() {
+            Some(CommandPool::new(
+                &device,
+                transfer_queue.as_ref().unwrap().family,
+                QueueType::Transfer,
+            )?)
+        } else {
+            None
+        };
+
+        let mut ctx = Context {
             entry,
             instance,
             pdevice,
             device,
             properties,
-            gfx_pool: CommandPool::default(),
-            compute_pool: None,
-            transfer_pool: None,
+            gfx_pool,
+            compute_pool,
+            transfer_pool,
             allocator: ManuallyDrop::new(allocator),
             gfx_queue,
             compute_queue,
@@ -647,15 +679,7 @@ impl Context {
             sdl_video: Some(sdl_video),
             debug_utils,
             debug_messenger,
-        });
-        let ctx_ptr = &mut *ctx as *mut _;
-        ctx.gfx_pool = CommandPool::new(ctx_ptr, QueueType::Graphics)?;
-        if ctx.compute_queue.is_some() {
-            ctx.compute_pool = Some(CommandPool::new(ctx_ptr, QueueType::Compute)?);
-        }
-        if ctx.transfer_queue.is_some() {
-            ctx.transfer_pool = Some(CommandPool::new(ctx_ptr, QueueType::Transfer)?);
-        }
+        };
         ctx.init_gpu_timers(1)?;
         Ok(ctx)
     }
@@ -733,57 +757,43 @@ impl Context {
 
 
     /// Create a new command pool for the specified queue type.
-    pub fn make_command_pool(&mut self, ty: QueueType) -> Result<CommandPool> {
-        CommandPool::new(self as *mut _, ty)
+    pub fn make_command_pool(&self, ty: QueueType) -> Result<CommandPool> {
+        let family = match ty {
+            QueueType::Graphics => self.gfx_queue.family,
+            QueueType::Compute => self.compute_queue.as_ref().unwrap_or(&self.gfx_queue).family,
+            QueueType::Transfer => self
+                .transfer_queue
+                .as_ref()
+                .or(self.compute_queue.as_ref())
+                .unwrap_or(&self.gfx_queue)
+                .family,
+        };
+        CommandPool::new(&self.device, family, ty)
+    }
+
+    /// Retrieve a mutable reference to a queue's command pool.
+    pub fn pool_mut(&mut self, ty: QueueType) -> &mut CommandPool {
+        match ty {
+            QueueType::Graphics => &mut self.gfx_pool,
+            QueueType::Compute => self
+                .compute_pool
+                .as_mut()
+                .unwrap_or(&mut self.gfx_pool),
+            QueueType::Transfer => self
+                .transfer_pool
+                .as_mut()
+                .unwrap_or(self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool)),
+        }
     }
 
     /// Creates a ringbuffer of CommandQueues
     pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
         Ok(CommandRing::new(self, info.debug_name, 3, info.queue_type)?)
     }
-
-    /// Allocate and begin recording a new command list.
-    ///
-    /// The returned [`CommandQueue`] starts in the recording state and may be
-    /// submitted once. [`Self::submit`] will end the list automatically if it
-    /// is still recording.
-    pub fn make_command_queue(&mut self, info: &CommandQueueInfo2) -> Result<CommandQueue> {
-        let pool_ptr: *mut CommandPool = match info.queue_type {
-            QueueType::Graphics => &mut self.gfx_pool as *mut _,
-            QueueType::Compute => self
-                .compute_pool
-                .as_mut()
-                .unwrap_or(&mut self.gfx_pool) as *mut _,
-            QueueType::Transfer => self
-                .transfer_pool
-                .as_mut()
-                .unwrap_or(self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool))
-                as *mut _,
-        };
-
-        unsafe { (*pool_ptr).begin(info.debug_name, info.parent.is_some()) }
-    }
-
-    /// Allocate and begin recording a new command list.
-    ///
-    /// The returned [`CommandQueue`] starts in the recording state and may be
-    /// submitted once. [`Self::submit`] will end the list automatically if it
-    /// is still recording.
-    pub fn begin_command_queue(&mut self, info: &CommandQueueInfo) -> Result<CommandQueue> {
-        self.make_command_queue(&CommandQueueInfo2 {
-            debug_name: info.debug_name,
-            parent: None,
-            queue_type: info.queue_type,
-        })
-    }
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
-        let mut list = self
-            .begin_command_queue(&CommandQueueInfo {
-                debug_name: "",
-                ..Default::default()
-            })
-            .unwrap();
+        let ctx_ptr = self as *mut _;
+        let mut list = self.gfx_pool.begin(ctx_ptr, "", false).unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
@@ -799,11 +809,10 @@ impl Context {
         };
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
+        let ctx_ptr = self as *mut _;
         let mut list = self
-            .begin_command_queue(&CommandQueueInfo {
-                debug_name: "oneshot_transition",
-                ..Default::default()
-            })
+            .gfx_pool
+            .begin(ctx_ptr, "oneshot_transition", false)
             .unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
@@ -1190,7 +1199,8 @@ impl Context {
 
                 let staging = self.make_buffer(&new_info)?;
 
-                let mut list = self.begin_command_queue(&Default::default())?;
+                let ctx_ptr = self as *mut _;
+                let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
                 let mut stream = CommandStream::new().begin();
                 stream.copy_buffers(&CopyBuffer {
                     src: staging,
@@ -1218,7 +1228,6 @@ impl Context {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
-        let mut list = self.begin_command_queue(&Default::default())?;
         if info.initial_data.is_none() {
             return Ok(());
         }
@@ -1235,7 +1244,8 @@ impl Context {
             ..Default::default()
         })?;
 
-        let mut list = self.begin_command_queue(&Default::default())?;
+        let ctx_ptr = self as *mut _;
+        let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
         let mut cmd = CommandStream::new().begin();
         cmd.copy_buffer_to_image(&CopyBufferImage {
             src: staging,

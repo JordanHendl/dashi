@@ -1,7 +1,6 @@
 use crate::{
     utils::Handle,
     CommandQueue,
-    CommandQueueInfo,
     Context,
     Fence,
     QueueType,
@@ -25,12 +24,10 @@ impl CommandRing {
         queue_type: QueueType,
     ) -> Result<Self> {
         let mut cmds = Vec::new();
+        let ctx_ptr = ctx as *mut Context;
         for _i in 0..frame_count {
-            cmds.push(ctx.begin_command_queue(&CommandQueueInfo {
-                debug_name: name,
-                should_cleanup: false,
-                queue_type,
-            })?);
+            let cmd = ctx.pool_mut(queue_type).begin(ctx_ptr, name, false)?;
+            cmds.push(cmd);
         }
 
         let fences: Vec<Option<Handle<Fence>>> = vec![None; frame_count];

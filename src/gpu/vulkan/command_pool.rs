@@ -1,4 +1,4 @@
-use ash::vk;
+use ash::{vk, Device};
 use std::{cell::UnsafeCell, marker::PhantomData, thread::ThreadId};
 
 use crate::{utils::Handle, Result};
@@ -11,7 +11,7 @@ use super::{CommandQueue, Context, Fence, QueueType};
 /// enforces single-threaded ownership. The pool may be moved to another thread
 /// after creation but must not be shared across threads.
 pub struct CommandPool {
-    ctx: *mut Context,
+    device: Device,
     raw: vk::CommandPool,
     queue_type: QueueType,
     free_primary: Vec<vk::CommandBuffer>,
@@ -21,52 +21,19 @@ pub struct CommandPool {
     _not_sync: PhantomData<UnsafeCell<()>>,
 }
 
-impl Default for CommandPool {
-    fn default() -> Self {
-        Self {
-            ctx: std::ptr::null_mut(),
-            raw: vk::CommandPool::null(),
-            queue_type: QueueType::Graphics,
-            free_primary: Vec::new(),
-            free_secondary: Vec::new(),
-            owner: std::thread::current().id(),
-            _not_sync: PhantomData,
-        }
-    }
-}
-
 unsafe impl Send for CommandPool {}
 
 impl CommandPool {
     /// Create a new command pool for the specified queue type.
-    pub(super) fn new(ctx: *mut Context, queue_type: QueueType) -> Result<Self> {
-        let family = match queue_type {
-            QueueType::Graphics => unsafe { (*ctx).gfx_queue.family },
-            QueueType::Compute => unsafe {
-                (*ctx)
-                    .compute_queue
-                    .as_ref()
-                    .unwrap_or(&(*ctx).gfx_queue)
-                    .family
-            },
-            QueueType::Transfer => unsafe {
-                (*ctx)
-                    .transfer_queue
-                    .as_ref()
-                    .or((*ctx).compute_queue.as_ref())
-                    .unwrap_or(&(*ctx).gfx_queue)
-                    .family
-            },
-        };
-
+    pub(super) fn new(device: &Device, family: u32, queue_type: QueueType) -> Result<Self> {
         let ci = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .build();
-        let raw = unsafe { (*ctx).device.create_command_pool(&ci, None)? };
+        let raw = unsafe { device.create_command_pool(&ci, None)? };
 
         Ok(Self {
-            ctx,
+            device: device.clone(),
             raw,
             queue_type,
             free_primary: Vec::new(),
@@ -93,15 +60,13 @@ impl CommandPool {
         };
         if let Some(buf) = list.pop() {
             unsafe {
-                (*self.ctx).device.reset_command_buffer(
-                    buf,
-                    vk::CommandBufferResetFlags::empty(),
-                )?;
+                self.device
+                    .reset_command_buffer(buf, vk::CommandBufferResetFlags::empty())?;
             }
             Ok(buf)
         } else {
             let cmd = unsafe {
-                (*self.ctx).device.allocate_command_buffers(
+                self.device.allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
                         .command_pool(self.raw)
                         .level(level)
@@ -114,7 +79,12 @@ impl CommandPool {
     }
 
     /// Begin recording a command queue from this pool.
-    pub fn begin(&mut self, debug_name: &str, is_secondary: bool) -> Result<CommandQueue> {
+    pub fn begin(
+        &mut self,
+        ctx: *mut Context,
+        debug_name: &str,
+        is_secondary: bool,
+    ) -> Result<CommandQueue> {
         let level = if is_secondary {
             vk::CommandBufferLevel::SECONDARY
         } else {
@@ -123,30 +93,25 @@ impl CommandPool {
         let cmd_buf = self.alloc(level)?;
 
         unsafe {
-            (*self.ctx).set_name(cmd_buf, debug_name, vk::ObjectType::COMMAND_BUFFER);
+            (*ctx).set_name(cmd_buf, debug_name, vk::ObjectType::COMMAND_BUFFER);
 
-            let f = (*self.ctx).device.create_fence(
-                &vk::FenceCreateInfo::builder()
-                    .flags(vk::FenceCreateFlags::empty())
-                    .build(),
-                None,
-            )?;
-            (*self.ctx).set_name(
+            let f = self
+                .device
+                .create_fence(&vk::FenceCreateInfo::builder().build(), None)?;
+            (*ctx).set_name(
                 f,
                 format!("{}.fence", debug_name).as_str(),
                 vk::ObjectType::FENCE,
             );
 
-            (*self.ctx).device.begin_command_buffer(
-                cmd_buf,
-                &vk::CommandBufferBeginInfo::builder().build(),
-            )?;
+            self.device
+                .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?;
 
             Ok(CommandQueue {
                 cmd_buf,
-                fence: (*self.ctx).fences.insert(Fence::new(f)).unwrap(),
+                fence: (*ctx).fences.insert(Fence::new(f)).unwrap(),
                 dirty: true,
-                ctx: self.ctx,
+                ctx,
                 pool: self,
                 queue_type: self.queue_type,
                 is_secondary,
@@ -171,8 +136,7 @@ impl CommandPool {
     pub fn reset(&self, queue: &CommandQueue) -> Result<()> {
         self.assert_owner();
         unsafe {
-            (*self.ctx)
-                .device
+            self.device
                 .reset_command_buffer(queue.cmd_buf, vk::CommandBufferResetFlags::empty())?;
         }
         Ok(())
@@ -183,7 +147,7 @@ impl CommandPool {
     pub fn destroy(&mut self) {
         self.assert_owner();
         unsafe {
-            (*self.ctx).device.destroy_command_pool(self.raw, None);
+            self.device.destroy_command_pool(self.raw, None);
         }
         self.raw = vk::CommandPool::null();
         self.free_primary.clear();
