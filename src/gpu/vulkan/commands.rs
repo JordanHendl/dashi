@@ -8,7 +8,8 @@ use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, QueueType, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
+    ClearValue, CommandQueue, CommandQueueInfo2, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline, QueueType,
+    Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -100,9 +101,7 @@ impl CommandQueue {
     /// - Transitions must be handled via appropriate barriers.
     pub fn reset(&mut self) -> Result<()> {
         unsafe {
-            (*self.ctx)
-                .device
-                .reset_command_buffer(self.cmd_buf, vk::CommandBufferResetFlags::empty())?;
+            (*self.pool).reset(self)?;
 
             (*self.ctx).device.begin_command_buffer(
                 self.cmd_buf,
@@ -114,6 +113,21 @@ impl CommandQueue {
         self.curr_rp = None;
         self.curr_pipeline = None;
         Ok(())
+    }
+
+    /// Begin recording a secondary command queue using the same pool.
+    ///
+    /// Convenience wrapper around [`Context::make_command_queue`]. The returned
+    /// queue is a secondary command buffer that can be recorded independently
+    /// and later executed by this primary queue.
+    pub fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
+        unsafe {
+            (*self.ctx).make_command_queue(&CommandQueueInfo2 {
+                debug_name,
+                parent: Some(self),
+                queue_type: self.queue_type,
+            })
+        }
     }
     pub fn submit(
         &mut self,
