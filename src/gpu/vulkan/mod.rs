@@ -50,7 +50,7 @@ mod pipelines;
 pub use pipelines::*;
 
 mod command_pool;
-use command_pool::CommandPool;
+pub use command_pool::CommandPool;
 
 
 /// Names of debugging layers that should be enabled when validation is requested.

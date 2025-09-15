@@ -1,9 +1,7 @@
 mod executor;
 pub use executor::*;
-
-/// Context provided to jobs running on worker threads.
-#[derive(Default)]
-pub struct ThreadCtx;
+mod thread_ctx;
+pub use thread_ctx::*;
 
 /// A job to be executed by the dispatcher.
 pub type Job = Box<dyn FnOnce(&mut ThreadCtx) + Send + 'static>;
