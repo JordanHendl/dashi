@@ -748,6 +748,11 @@ impl Context {
     }
 
 
+    /// Create a new command pool for the specified queue family.
+    pub fn make_command_pool(&self, family: u32) -> Result<CommandPool> {
+        CommandPool::new(self.device.clone(), family)
+    }
+
     /// Creates a ringbuffer of CommandQueues
     pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
         Ok(CommandRing::new(self, info.debug_name, 3, info.queue_type)?)
@@ -772,46 +777,7 @@ impl Context {
                 as *mut _,
         };
 
-        let cmd_buf = unsafe {
-            if info.parent.is_none() {
-                (*pool_ptr).alloc_primary()?
-            } else {
-                (*pool_ptr).alloc_secondary()?
-            }
-        };
-
-        self.set_name(cmd_buf, info.debug_name, vk::ObjectType::COMMAND_BUFFER);
-
-        let f = unsafe {
-            self.device.create_fence(
-                &vk::FenceCreateInfo::builder()
-                    .flags(vk::FenceCreateFlags::empty())
-                    .build(),
-                None,
-            )
-        }?;
-
-        self.set_name(
-            f,
-            format!("{}.fence", info.debug_name).as_str(),
-            vk::ObjectType::FENCE,
-        );
-
-        unsafe {
-            self.device
-                .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?
-        };
-
-        return Ok(CommandQueue {
-            cmd_buf: cmd_buf,
-            fence: self.fences.insert(Fence::new(f)).unwrap(),
-            dirty: true,
-            ctx: self,
-            pool: pool_ptr,
-            queue_type: info.queue_type,
-            is_secondary: info.parent.is_some(),
-            ..Default::default()
-        });
+        unsafe { (*pool_ptr).begin(self, info.debug_name, info.queue_type, info.parent.is_some()) }
     }
 
     /// Allocate and begin recording a new command list.
@@ -820,53 +786,11 @@ impl Context {
     /// submitted once. [`Self::submit`] will end the list automatically if it
     /// is still recording.
     pub fn begin_command_queue(&mut self, info: &CommandQueueInfo) -> Result<CommandQueue> {
-        let pool_ptr: *mut CommandPool = match info.queue_type {
-            QueueType::Graphics => &mut self.gfx_pool as *mut _,
-            QueueType::Compute => self
-                .compute_pool
-                .as_mut()
-                .unwrap_or(&mut self.gfx_pool) as *mut _,
-            QueueType::Transfer => self
-                .transfer_pool
-                .as_mut()
-                .unwrap_or(self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool))
-                as *mut _,
-        };
-
-        let cmd_buf = unsafe { (*pool_ptr).alloc_primary()? };
-
-        self.set_name(cmd_buf, info.debug_name, vk::ObjectType::COMMAND_BUFFER);
-
-        let f = unsafe {
-            self.device.create_fence(
-                &vk::FenceCreateInfo::builder()
-                    .flags(vk::FenceCreateFlags::empty())
-                    .build(),
-                None,
-            )
-        }?;
-
-        self.set_name(
-            f,
-            format!("{}.fence", info.debug_name).as_str(),
-            vk::ObjectType::FENCE,
-        );
-
-        unsafe {
-            self.device
-                .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?
-        };
-
-        return Ok(CommandQueue {
-            cmd_buf: cmd_buf,
-            fence: self.fences.insert(Fence::new(f)).unwrap(),
-            dirty: true,
-            ctx: self,
-            pool: pool_ptr,
+        self.make_command_queue(&CommandQueueInfo2 {
+            debug_name: info.debug_name,
+            parent: None,
             queue_type: info.queue_type,
-            is_secondary: false,
-            ..Default::default()
-        });
+        })
     }
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
@@ -1761,14 +1685,8 @@ impl Context {
     ///   executing the list.
     /// - The context must still be alive.
     pub fn destroy_cmd_queue(&mut self, list: CommandQueue) {
-        unsafe {
-            if list.is_secondary {
-                (*list.pool).recycle_secondary(list.cmd_buf);
-            } else {
-                (*list.pool).recycle_primary(list.cmd_buf);
-            }
-        }
-        self.destroy_fence(list.fence);
+        let fence = unsafe { (*list.pool).recycle(list) };
+        self.destroy_fence(fence);
     }
 
     /// Creates a bind table layout used for bind table resources.

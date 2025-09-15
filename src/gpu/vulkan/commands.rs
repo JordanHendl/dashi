@@ -101,7 +101,7 @@ impl CommandQueue {
     /// - Transitions must be handled via appropriate barriers.
     pub fn reset(&mut self) -> Result<()> {
         unsafe {
-            (*self.pool).reset_cmd(self.cmd_buf)?;
+            (*self.pool).reset(self)?;
 
             (*self.ctx).device.begin_command_buffer(
                 self.cmd_buf,

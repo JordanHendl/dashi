@@ -1,7 +1,9 @@
 use ash::{vk, Device};
 use std::{cell::UnsafeCell, marker::PhantomData, thread::ThreadId};
 
-use crate::Result;
+use crate::{utils::Handle, Result};
+
+use super::{CommandQueue, Context, Fence, QueueType};
 
 /// Thin wrapper around a Vulkan command pool.
 ///
@@ -22,7 +24,7 @@ unsafe impl Send for CommandPool {}
 
 impl CommandPool {
     /// Create a new command pool for the given queue family.
-    pub fn new(device: Device, family: u32) -> Result<Self> {
+    pub(super) fn new(device: Device, family: u32) -> Result<Self> {
         let ci = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
@@ -42,10 +44,14 @@ impl CommandPool {
         debug_assert_eq!(self.owner, std::thread::current().id(), "CommandPool used from wrong thread");
     }
 
-    /// Allocate a primary command buffer, reusing one if available.
-    pub fn alloc_primary(&mut self) -> Result<vk::CommandBuffer> {
+    fn alloc(&mut self, level: vk::CommandBufferLevel) -> Result<vk::CommandBuffer> {
         self.assert_owner();
-        if let Some(buf) = self.free_primary.pop() {
+        let list = match level {
+            vk::CommandBufferLevel::PRIMARY => &mut self.free_primary,
+            vk::CommandBufferLevel::SECONDARY => &mut self.free_secondary,
+            _ => unreachable!(),
+        };
+        if let Some(buf) = list.pop() {
             unsafe {
                 self.device
                     .reset_command_buffer(buf, vk::CommandBufferResetFlags::empty())?;
@@ -56,7 +62,7 @@ impl CommandPool {
                 self.device.allocate_command_buffers(
                     &vk::CommandBufferAllocateInfo::builder()
                         .command_pool(self.raw)
-                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .level(level)
                         .command_buffer_count(1)
                         .build(),
                 )?
@@ -65,47 +71,70 @@ impl CommandPool {
         }
     }
 
-    /// Allocate a secondary command buffer, reusing one if available.
-    pub fn alloc_secondary(&mut self) -> Result<vk::CommandBuffer> {
-        self.assert_owner();
-        if let Some(buf) = self.free_secondary.pop() {
-            unsafe {
-                self.device
-                    .reset_command_buffer(buf, vk::CommandBufferResetFlags::empty())?;
-            }
-            Ok(buf)
+    /// Begin recording a command queue from this pool.
+    pub unsafe fn begin(
+        &mut self,
+        ctx: *mut Context,
+        debug_name: &str,
+        queue_type: QueueType,
+        is_secondary: bool,
+    ) -> Result<CommandQueue> {
+        let level = if is_secondary {
+            vk::CommandBufferLevel::SECONDARY
         } else {
-            let cmd = unsafe {
-                self.device.allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::builder()
-                        .command_pool(self.raw)
-                        .level(vk::CommandBufferLevel::SECONDARY)
-                        .command_buffer_count(1)
-                        .build(),
-                )?
-            };
-            Ok(cmd[0])
+            vk::CommandBufferLevel::PRIMARY
+        };
+        let cmd_buf = self.alloc(level)?;
+
+        (*ctx).set_name(cmd_buf, debug_name, vk::ObjectType::COMMAND_BUFFER);
+
+        let f = (*ctx)
+            .device
+            .create_fence(
+                &vk::FenceCreateInfo::builder()
+                    .flags(vk::FenceCreateFlags::empty())
+                    .build(),
+                None,
+            )?;
+        (*ctx).set_name(
+            f,
+            format!("{}.fence", debug_name).as_str(),
+            vk::ObjectType::FENCE,
+        );
+
+        (*ctx)
+            .device
+            .begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::builder().build())?;
+
+        Ok(CommandQueue {
+            cmd_buf,
+            fence: (*ctx).fences.insert(Fence::new(f)).unwrap(),
+            dirty: true,
+            ctx,
+            pool: self,
+            queue_type,
+            is_secondary,
+            ..Default::default()
+        })
+    }
+
+    /// Recycle a command queue after GPU completion, returning its fence handle.
+    pub fn recycle(&mut self, list: CommandQueue) -> Handle<Fence> {
+        self.assert_owner();
+        let buf = list.cmd_buf;
+        if list.is_secondary {
+            self.free_secondary.push(buf);
+        } else {
+            self.free_primary.push(buf);
         }
+        list.fence
     }
 
-    /// Recycle a primary command buffer after GPU completion.
-    pub fn recycle_primary(&mut self, buf: vk::CommandBuffer) {
-        self.assert_owner();
-        self.free_primary.push(buf);
-    }
-
-    /// Recycle a secondary command buffer after GPU completion.
-    pub fn recycle_secondary(&mut self, buf: vk::CommandBuffer) {
-        self.assert_owner();
-        self.free_secondary.push(buf);
-    }
-
-    /// Reset a specific command buffer for reuse.
-    pub fn reset_cmd(&self, buf: vk::CommandBuffer) -> Result<()> {
+    /// Reset a specific command queue for reuse.
+    pub fn reset(&self, queue: &CommandQueue) -> Result<()> {
         self.assert_owner();
         unsafe {
-            self.device
-                .reset_command_buffer(buf, vk::CommandBufferResetFlags::empty())?;
+            self.device.reset_command_buffer(queue.cmd_buf, vk::CommandBufferResetFlags::empty())?;
         }
         Ok(())
     }
