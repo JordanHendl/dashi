@@ -1,12 +1,11 @@
 use std::marker::PhantomData;
 
 use crate::driver::command::{BeginDrawing, BlitImage, Dispatch, Draw, DrawIndexed};
-use crate::driver::state::SubresourceRange;
 use crate::driver::types::Handle;
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
-use crate::{BindTable, Buffer, ComputePipeline, Fence, GraphicsPipeline, Image, SubmitInfo2};
+use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
@@ -24,8 +23,13 @@ pub struct Compute;
 impl CommandStream<Initial> {
     /// Create a new command buffer in the initial state.
     pub fn new() -> Self {
+        Self::new_with_queue(QueueType::Graphics)
+    }
+
+    /// Create a new command buffer targeting a specific queue type.
+    pub fn new_with_queue(queue: QueueType) -> Self {
         Self {
-            enc: CommandEncoder::new(),
+            enc: CommandEncoder::new(queue),
             _state: PhantomData,
         }
     }

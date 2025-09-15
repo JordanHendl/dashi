@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{Buffer, Image};
+use crate::{Buffer, Image, QueueType};
 
 use super::{
-    command::{BufferBarrier, ImageBarrier},
+    command::BufferBarrier,
     types::{Handle, UsageBits},
 };
 
@@ -31,6 +31,8 @@ pub struct LayoutTransition {
     pub new_usage: UsageBits,
     pub old_layout: Layout,
     pub new_layout: Layout,
+    pub old_queue: QueueType,
+    pub new_queue: QueueType,
 }
 
 #[inline]
@@ -100,6 +102,8 @@ pub struct StateTracker {
     images: HashMap<(Handle<Image>, SubresourceRange), UsageBits>,
     buffers: HashMap<Handle<Buffer>, UsageBits>,
     image_layouts: HashMap<(Handle<Image>, SubresourceRange), Layout>,
+    image_queues: HashMap<(Handle<Image>, SubresourceRange), QueueType>,
+    buffer_queues: HashMap<Handle<Buffer>, QueueType>,
 }
 
 impl StateTracker {
@@ -108,6 +112,8 @@ impl StateTracker {
             images: HashMap::new(),
             image_layouts: HashMap::new(),
             buffers: HashMap::new(),
+            image_queues: HashMap::new(),
+            buffer_queues: HashMap::new(),
         }
     }
 
@@ -115,6 +121,8 @@ impl StateTracker {
         self.images.clear();
         self.buffers.clear();
         self.image_layouts.clear();
+        self.image_queues.clear();
+        self.buffer_queues.clear();
     }
 
     /// Returns (usage barrier if usage changed, layout transition if usage or layout changed).
@@ -125,6 +133,7 @@ impl StateTracker {
         range: SubresourceRange,
         mut new_usage: UsageBits,
         mut new_layout: Layout,
+        queue: QueueType,
     ) -> Option<LayoutTransition> {
         let key = (image, range);
 
@@ -138,25 +147,30 @@ impl StateTracker {
             .unwrap_or(Layout::Undefined);
         let layout_changed = old_layout != new_layout;
 
+        let old_queue = self.image_queues.get(&key).copied().unwrap_or(queue);
+        let queue_changed = old_queue != queue;
+
         // Persist tracker state.
         if usage_changed {
             self.images.insert(key, new_usage);
         } else {
-            // Ensure reported transition has matching usages when there is no usage change.
             new_usage = old_usage;
         }
         if layout_changed {
             self.image_layouts.insert(key, new_layout);
         } else {
-            // Ensure reported transition has matching layouts when there is no layout change.
             new_layout = old_layout;
-            // If this is the first touch, still record the derived layout for stability.
             if old_layout == Layout::Undefined {
                 self.image_layouts.insert(key, new_layout);
             }
         }
+        if queue_changed {
+            self.image_queues.insert(key, queue);
+        } else {
+            self.image_queues.entry(key).or_insert(queue);
+        }
 
-        if usage_changed || layout_changed {
+        if usage_changed || layout_changed || queue_changed {
             Some(LayoutTransition {
                 image,
                 range,
@@ -164,6 +178,8 @@ impl StateTracker {
                 new_usage,
                 old_layout,
                 new_layout,
+                old_queue,
+                new_queue: queue,
             })
         } else {
             None
@@ -173,12 +189,33 @@ impl StateTracker {
     pub fn request_buffer_state(
         &mut self,
         buffer: Handle<Buffer>,
-        usage: UsageBits,
+        mut usage: UsageBits,
+        queue: QueueType,
     ) -> Option<BufferBarrier> {
         let current = self.buffers.get(&buffer).copied().unwrap_or_default();
-        if current != usage {
+        let usage_changed = current != usage;
+        let old_queue = self.buffer_queues.get(&buffer).copied().unwrap_or(queue);
+        let queue_changed = old_queue != queue;
+
+        if usage_changed {
             self.buffers.insert(buffer, usage);
-            Some(BufferBarrier { buffer, usage })
+        } else {
+            usage = current;
+        }
+
+        if queue_changed {
+            self.buffer_queues.insert(buffer, queue);
+        } else {
+            self.buffer_queues.entry(buffer).or_insert(queue);
+        }
+
+        if usage_changed || queue_changed {
+            Some(BufferBarrier {
+                buffer,
+                usage,
+                old_queue,
+                new_queue: queue,
+            })
         } else {
             None
         }
@@ -275,7 +312,6 @@ pub mod vulkan {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 //
 //    #[test]
 //    fn image_state_changes() {

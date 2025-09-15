@@ -2,15 +2,13 @@
 
 use ash::vk;
 
-use super::{
-    convert_barrier_point_vk, convert_rect2d_to_vulkan, ImageView, VkImageView,
-};
+use super::convert_rect2d_to_vulkan;
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
+    BarrierPoint, BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, DynamicBuffer, Fence, Filter, GPUError, GraphicsPipeline, IndexedBindGroup, IndexedIndirectCommand, IndirectCommand, QueueType, Rect2D, Result, Semaphore, SubmitInfo, SubmitInfo2, UsageBits, Viewport
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -53,6 +51,24 @@ pub fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
         }
     }
     flags
+}
+
+#[inline]
+fn queue_family_index(ctx: &Context, ty: QueueType) -> u32 {
+    match ty {
+        QueueType::Graphics => ctx.gfx_queue.family,
+        QueueType::Compute => ctx
+            .compute_queue
+            .as_ref()
+            .unwrap_or(&ctx.gfx_queue)
+            .family,
+        QueueType::Transfer => ctx
+            .transfer_queue
+            .as_ref()
+            .or(ctx.compute_queue.as_ref())
+            .unwrap_or(&ctx.gfx_queue)
+            .family,
+    }
 }
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     match cv {
@@ -722,8 +738,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn image_barrier(&mut self, cmd: &LayoutTransition) {
-        let img_data = self
-            .ctx_ref()
+        let ctx = self.ctx_ref();
+        let img_data = ctx
             .images
             .get_ref(cmd.image)
             .ok_or(GPUError::SlotError())
@@ -751,19 +767,28 @@ impl CommandSink for CommandQueue {
         let src_access = usage_to_access(cmd.old_usage);
         let dst_access = usage_to_access(cmd.new_usage);
 
+        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
+            (
+                queue_family_index(&ctx, cmd.old_queue),
+                queue_family_index(&ctx, cmd.new_queue),
+            )
+        } else {
+            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+        };
+
         let barrier = vk::ImageMemoryBarrier::builder()
             .src_access_mask(src_access)
             .dst_access_mask(dst_access)
             .old_layout(layout_to_vk(cmd.old_layout))
             .new_layout(layout_to_vk(cmd.new_layout))
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .src_queue_family_index(src_family)
+            .dst_queue_family_index(dst_family)
             .image(img_data.img)
             .subresource_range(sub)
             .build();
 
         unsafe {
-            self.ctx_ref().device.cmd_pipeline_barrier(
+            ctx.device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 self.last_op_stage,
                 dst_stage,
@@ -774,8 +799,7 @@ impl CommandSink for CommandQueue {
             )
         };
         self.update_last_access(dst_stage, dst_access);
-
-        let img = self.ctx_ref().images.get_mut_ref(cmd.image).unwrap();
+        let img = ctx.images.get_mut_ref(cmd.image).unwrap();
         for level in 0..cmd.range.level_count {
             let mip = (cmd.range.base_mip + level) as usize;
             if let Some(l) = img.layouts.get_mut(mip) {
@@ -785,8 +809,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
-        let buffer = self
-            .ctx_ref()
+        let ctx = self.ctx_ref();
+        let buffer = ctx
             .buffers
             .get_ref(cmd.buffer)
             .ok_or(GPUError::SlotError())
@@ -799,18 +823,27 @@ impl CommandSink for CommandQueue {
         let dst_stage = usage_to_stages(cmd.usage);
         let dst_access = usage_to_access(cmd.usage);
 
+        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
+            (
+                queue_family_index(&ctx, cmd.old_queue),
+                queue_family_index(&ctx, cmd.new_queue),
+            )
+        } else {
+            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+        };
+
         let barrier = vk::BufferMemoryBarrier::builder()
             .src_access_mask(src_access)
             .dst_access_mask(dst_access)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .src_queue_family_index(src_family)
+            .dst_queue_family_index(dst_family)
             .buffer(buffer.buf)
             .offset(buffer.offset as u64)
             .size(buffer.size as u64)
             .build();
 
         unsafe {
-            self.ctx_ref().device.cmd_pipeline_barrier(
+            ctx.device.cmd_pipeline_barrier(
                 self.cmd_buf,
                 src_stage,
                 dst_stage,

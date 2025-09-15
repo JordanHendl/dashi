@@ -1,9 +1,9 @@
-use bytemuck::{bytes_of, from_bytes, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, Rect2D, SubmitInfo2, Viewport,
+    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -214,10 +214,12 @@ pub struct ImageBarrier {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferBarrier {
     pub buffer: Handle<Buffer>,
     pub usage: UsageBits,
+    pub old_queue: QueueType,
+    pub new_queue: QueueType,
 }
 
 #[repr(C)]
@@ -249,16 +251,18 @@ pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
     state: StateTracker,
+    queue: QueueType,
 }
 
 impl CommandEncoder {
     /// Create a new empty encoder. Some initial capacity is reserved to avoid
     /// frequent reallocations when recording many commands.
-    pub fn new() -> Self {
+    pub fn new(queue: QueueType) -> Self {
         Self {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
             state: StateTracker::new(),
+            queue,
         }
     }
 
@@ -338,7 +342,13 @@ impl CommandEncoder {
             let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
             let _ = self
                 .state
-                .request_image_state(view.img, range, UsageBits::RT_WRITE, Layout::ColorAttachment);
+                .request_image_state(
+                    view.img,
+                    range,
+                    UsageBits::RT_WRITE,
+                    Layout::ColorAttachment,
+                    self.queue,
+                );
         }
         if let Some(view) = desc.depth_attachment {
             let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
@@ -347,6 +357,7 @@ impl CommandEncoder {
                 range,
                 UsageBits::DEPTH_WRITE,
                 Layout::DepthStencilAttachment,
+                self.queue,
             );
         }
         self.push(Op::BeginDrawing, desc);
@@ -381,13 +392,13 @@ impl CommandEncoder {
     pub fn copy_buffer(&mut self, cmd: &CopyBuffer) {
         if let Some(bar) = self
             .state
-            .request_buffer_state(cmd.src, UsageBits::COPY_SRC)
+            .request_buffer_state(cmd.src, UsageBits::COPY_SRC, self.queue)
         {
             self.push(Op::BufferBarrier, &bar);
         }
         if let Some(bar) = self
             .state
-            .request_buffer_state(cmd.dst, UsageBits::COPY_DST)
+            .request_buffer_state(cmd.dst, UsageBits::COPY_DST, self.queue)
         {
             self.push(Op::BufferBarrier, &bar);
         }
@@ -398,7 +409,7 @@ impl CommandEncoder {
     pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
         if let Some(bar) = self
             .state
-            .request_buffer_state(cmd.src, UsageBits::COPY_SRC)
+            .request_buffer_state(cmd.src, UsageBits::COPY_SRC, self.queue)
         {
             self.push(Op::BufferBarrier, &bar);
         }
@@ -407,6 +418,7 @@ impl CommandEncoder {
             cmd.range,
             UsageBits::COPY_DST,
             Layout::TransferDst,
+            self.queue,
         ) {
             self.push(Op::ImageBarrier, &bar);
         }
@@ -420,12 +432,13 @@ impl CommandEncoder {
             cmd.range,
             UsageBits::COPY_SRC,
             Layout::TransferSrc,
+            self.queue,
         ) {
             self.push(Op::BufferBarrier, &bar);
         }
         if let Some(bar) = self
             .state
-            .request_buffer_state(cmd.dst, UsageBits::COPY_DST)
+            .request_buffer_state(cmd.dst, UsageBits::COPY_DST, self.queue)
         {
             self.push(Op::ImageBarrier, &bar);
         }
@@ -434,16 +447,22 @@ impl CommandEncoder {
 
     /// Copy data between images, emitting required barriers.
     pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, range: SubresourceRange) {
-        if let Some(bar) =
-            self.state
-                .request_image_state(src, range, UsageBits::COPY_SRC, Layout::TransferSrc)
-        {
+        if let Some(bar) = self.state.request_image_state(
+            src,
+            range,
+            UsageBits::COPY_SRC,
+            Layout::TransferSrc,
+            self.queue,
+        ) {
             self.push(Op::ImageBarrier, &bar);
         }
-        if let Some(bar) =
-            self.state
-                .request_image_state(dst, range, UsageBits::COPY_DST, Layout::TransferDst)
-        {
+        if let Some(bar) = self.state.request_image_state(
+            dst,
+            range,
+            UsageBits::COPY_DST,
+            Layout::TransferDst,
+            self.queue,
+        ) {
             self.push(Op::ImageBarrier, &bar);
         }
         let payload = CopyImage { src, dst };
@@ -457,6 +476,7 @@ impl CommandEncoder {
             cmd.src_range,
             UsageBits::COPY_SRC,
             Layout::TransferSrc,
+            self.queue,
         ) {
             self.push(Op::ImageBarrier, &bar);
         }
@@ -465,6 +485,7 @@ impl CommandEncoder {
             cmd.dst_range,
             UsageBits::COPY_DST,
             Layout::TransferDst,
+            self.queue,
         ) {
             self.push(Op::ImageBarrier, &bar);
         }
@@ -474,10 +495,13 @@ impl CommandEncoder {
     /// Transition an image to presentation layout.
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         let range = SubresourceRange::default();
-        if let Some(bar) =
-            self.state
-                .request_image_state(image, range, UsageBits::PRESENT, Layout::Present)
-        {
+        if let Some(bar) = self.state.request_image_state(
+            image,
+            range,
+            UsageBits::PRESENT,
+            Layout::Present,
+            self.queue,
+        ) {
             self.push(Op::ImageBarrier, &bar);
         }
     }
@@ -545,7 +569,7 @@ impl CommandEncoder {
 
 impl Default for CommandEncoder {
     fn default() -> Self {
-        Self::new()
+        Self::new(QueueType::Graphics)
     }
 }
 
