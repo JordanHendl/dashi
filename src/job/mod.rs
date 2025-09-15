@@ -2,20 +2,11 @@ mod executor;
 pub use executor::*;
 mod thread_ctx;
 pub use thread_ctx::*;
+mod frame_ctx;
+pub use frame_ctx::*;
 
 /// A job to be executed by the dispatcher.
 pub type Job = Box<dyn FnOnce(&mut ThreadCtx) + Send + 'static>;
-
-/// Per-frame queue of jobs.
-pub struct FrameCtx {
-    jobs: Vec<Job>,
-}
-
-impl FrameCtx {
-    fn new() -> Self {
-        Self { jobs: Vec::new() }
-    }
-}
 
 /// Statistics about dispatched jobs.
 #[derive(Default)]
