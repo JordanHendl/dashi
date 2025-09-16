@@ -8,8 +8,8 @@ use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline, QueueType, Result, Semaphore,
-    SubmitInfo2, UsageBits,
+    ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
+    QueueType, Result, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -58,17 +58,14 @@ pub fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
 fn queue_family_index(ctx: &Context, ty: QueueType) -> u32 {
     match ty {
         QueueType::Graphics => ctx.gfx_queue.family,
-        QueueType::Compute => ctx
-            .compute_queue
-            .as_ref()
-            .unwrap_or(&ctx.gfx_queue)
-            .family,
-        QueueType::Transfer => ctx
-            .transfer_queue
-            .as_ref()
-            .or(ctx.compute_queue.as_ref())
-            .unwrap_or(&ctx.gfx_queue)
-            .family,
+        QueueType::Compute => ctx.compute_queue.as_ref().unwrap_or(&ctx.gfx_queue).family,
+        QueueType::Transfer => {
+            ctx.transfer_queue
+                .as_ref()
+                .or(ctx.compute_queue.as_ref())
+                .unwrap_or(&ctx.gfx_queue)
+                .family
+        }
     }
 }
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
@@ -122,56 +119,97 @@ impl CommandQueue {
     pub fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
         unsafe { (*self.pool).begin(self.ctx, debug_name, true) }
     }
-    pub fn submit(
-        &mut self,
-        info: &SubmitInfo2,
-    ) -> Result<Handle<Fence>, GPUError> {
+    pub fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {
             unsafe { (*self.ctx).device.end_command_buffer(self.cmd_buf)? };
             self.dirty = false;
         }
 
         unsafe {
-            let wait_sems: Vec<Handle<Semaphore>> = info
+            let wait_infos: Vec<vk::SemaphoreSubmitInfo> = info
                 .wait_sems
                 .iter()
-                .copied()
-                .filter(|h| h.valid())
+                .zip(info.wait_values.iter())
+                .filter_map(|(sem, value)| {
+                    if !sem.valid() {
+                        return None;
+                    }
+                    let raw = (*self.ctx)
+                        .semaphores
+                        .get_ref(*sem)
+                        .expect("invalid wait semaphore")
+                        .raw;
+                    Some(
+                        vk::SemaphoreSubmitInfo::builder()
+                            .semaphore(raw)
+                            .value(*value)
+                            .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+                            .device_index(0)
+                            .build(),
+                    )
+                })
                 .collect();
 
-            let signal_sems: Vec<Handle<Semaphore>> = info
+            let signal_infos: Vec<vk::SemaphoreSubmitInfo> = info
                 .signal_sems
                 .iter()
-                .copied()
-                .filter(|h| h.valid())
+                .zip(info.signal_values.iter())
+                .filter_map(|(sem, value)| {
+                    if !sem.valid() {
+                        return None;
+                    }
+                    let raw = (*self.ctx)
+                        .semaphores
+                        .get_ref(*sem)
+                        .expect("invalid signal semaphore")
+                        .raw;
+                    Some(
+                        vk::SemaphoreSubmitInfo::builder()
+                            .semaphore(raw)
+                            .value(*value)
+                            .stage_mask(vk::PipelineStageFlags2::ALL_COMMANDS)
+                            .device_index(0)
+                            .build(),
+                    )
+                })
                 .collect();
 
-            let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
-                .into_iter()
-                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
-                .collect();
+            let cmd_buf_info = vk::CommandBufferSubmitInfo::builder()
+                .command_buffer(self.cmd_buf)
+                .device_mask(0)
+                .build();
+            let cmd_buf_infos = [cmd_buf_info];
 
-            let raw_signal_sems: Vec<vk::Semaphore> = signal_sems
-                .into_iter()
-                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
-                .collect();
-
-            let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+            let submit_info = vk::SubmitInfo2::builder()
+                .wait_semaphore_infos(&wait_infos)
+                .signal_semaphore_infos(&signal_infos)
+                .command_buffer_infos(&cmd_buf_infos)
+                .build();
 
             let queue = (*self.ctx).queue(self.queue_type);
-            (*self.ctx).device.queue_submit(
+            (*self.ctx).device.queue_submit2(
                 queue,
-                &[vk::SubmitInfo::builder()
-                    .command_buffers(&[self.cmd_buf])
-                    .signal_semaphores(&raw_signal_sems)
-                    .wait_dst_stage_mask(&stage_masks)
-                    .wait_semaphores(&raw_wait_sems)
-                    .build()],
-                (*self.ctx).fences.get_ref(self.fence).unwrap().raw.clone(),
+                &[submit_info],
+                (*self.ctx).fences.get_ref(self.fence).unwrap().raw,
             )?;
 
             return Ok(self.fence.clone());
         }
+    }
+
+    pub(crate) fn raw_cmd_buffer(&self) -> vk::CommandBuffer {
+        self.cmd_buf
+    }
+
+    pub(crate) fn execute_secondary(&mut self, buffers: &[vk::CommandBuffer]) {
+        if buffers.is_empty() {
+            return;
+        }
+        unsafe {
+            let ctx = self.ctx_ref();
+            ctx.device.cmd_execute_commands(self.cmd_buf, buffers);
+        }
+        self.dirty = true;
     }
 
     pub fn bind_compute_pipeline(&mut self, pipeline: Handle<ComputePipeline>) -> Result<()> {
@@ -340,8 +378,8 @@ impl CommandSink for CommandQueue {
             }
         }
 
-        let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
-            .attachments(&attachments_vk);
+        let mut attachment_info =
+            vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
         let clears: Vec<vk::ClearValue> = cmd
             .clear_values

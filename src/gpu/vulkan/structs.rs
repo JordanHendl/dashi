@@ -376,8 +376,9 @@ impl<'a> Default for SubmitInfo<'a> {
 pub struct SubmitInfo2 {
     pub wait_sems: [Handle<Semaphore>; 4],
     pub signal_sems: [Handle<Semaphore>; 4],
+    pub wait_values: [u64; 4],
+    pub signal_values: [u64; 4],
 }
-
 
 #[derive(Clone, Copy, Debug)]
 pub struct AttachmentDescription {
@@ -770,7 +771,7 @@ pub enum ClearValue {
     DepthStencil { depth: f32, stencil: u32 },
 }
 
-unsafe impl Pod for ClearValue{}
+unsafe impl Pod for ClearValue {}
 
 impl Hash for ClearValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
