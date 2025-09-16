@@ -7,6 +7,8 @@ pub use frame_ctx::*;
 mod collector;
 pub use collector::*;
 
+use ash::vk;
+
 /// A job to be executed by the dispatcher.
 pub type Job = Box<dyn FnOnce(&mut ThreadCtx) + Send + 'static>;
 
@@ -64,6 +66,37 @@ impl JobDispatch {
 
         // Sort and merge recorded primaries for submission.
         collect(frame);
+
+        let primary_buf = frame.primary.raw_cmd_buffer();
+        if primary_buf == vk::CommandBuffer::null() {
+            return;
+        }
+
+        {
+            let secondary_buffers: Vec<vk::CommandBuffer> = frame
+                .merged
+                .iter()
+                .flat_map(|m| m.queues.iter().map(|queue| queue.raw_cmd_buffer()))
+                .collect();
+
+            if !secondary_buffers.is_empty() {
+                frame.primary.execute_secondary(&secondary_buffers);
+            }
+        }
+
+        let mut submit_info = crate::SubmitInfo2::default();
+        let next_timeline = frame.timeline.wrapping_add(1);
+        submit_info.signal_values[0] = next_timeline;
+
+        match frame.primary.submit(&submit_info) {
+            Ok(fence) => {
+                frame.fence = Some(fence);
+                frame.timeline = next_timeline;
+            }
+            Err(_) => {
+                frame.fence = None;
+            }
+        }
     }
 
     /// Recycle resources associated with the specified frame.
@@ -80,4 +113,3 @@ impl JobDispatch {
         &self.stats
     }
 }
-
