@@ -4,6 +4,8 @@ mod thread_ctx;
 pub use thread_ctx::*;
 mod frame_ctx;
 pub use frame_ctx::*;
+mod collector;
+pub use collector::*;
 
 /// A job to be executed by the dispatcher.
 pub type Job = Box<dyn FnOnce(&mut ThreadCtx) + Send + 'static>;
@@ -50,20 +52,27 @@ impl JobDispatch {
 
     /// Submit all queued jobs for the current frame to the executor.
     pub fn submit(&mut self) {
-        let jobs = std::mem::take(&mut self.frames[self.curr_frame].jobs);
+        let frame = &mut self.frames[self.curr_frame];
+        let jobs = std::mem::take(&mut frame.jobs);
         for job in jobs {
             self.stats.jobs_submitted += 1;
-            self.executor.run_boxed(Box::new(move || {
-                let mut ctx = ThreadCtx::default();
-                job(&mut ctx);
-            }));
+            let mut ctx = ThreadCtx::default();
+            job(&mut ctx);
+            frame.primaries.append(&mut ctx.primaries);
+            frame.push_completed(ctx);
         }
+
+        // Sort and merge recorded primaries for submission.
+        collect(frame);
     }
 
     /// Recycle resources associated with the specified frame.
     pub fn recycle(&mut self, frame_idx: usize) {
         let idx = frame_idx % self.frames.len();
-        self.frames[idx].jobs.clear();
+        let frame = &mut self.frames[idx];
+        frame.jobs.clear();
+        frame.primaries.clear();
+        frame.merged.clear();
     }
 
     /// Access statistics about dispatched jobs.
