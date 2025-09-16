@@ -7,7 +7,7 @@ use crate::{
     Result,
 };
 
-use super::{Job, ThreadCtx};
+use super::{collector::{MergedPrimaries, PrimaryCmd}, Job, ThreadCtx};
 
 /// Per-frame context holding jobs and GPU resources.
 pub struct FrameCtx {
@@ -19,6 +19,10 @@ pub struct FrameCtx {
     pub timeline: u64,
     /// Completed thread contexts awaiting reset.
     pub completed: Vec<ThreadCtx>,
+    /// Primaries recorded by all jobs in this frame.
+    pub primaries: Vec<PrimaryCmd>,
+    /// Merged primaries sorted by pass/bucket.
+    pub merged: Vec<MergedPrimaries>,
     /// Fence signaled when GPU work for this frame completes.
     pub fence: Option<Handle<Fence>>,
 }
@@ -31,6 +35,8 @@ impl FrameCtx {
             primary: CommandQueue::default(),
             timeline: 0,
             completed: Vec::new(),
+            primaries: Vec::new(),
+            merged: Vec::new(),
             fence: None,
         }
     }
@@ -68,6 +74,8 @@ impl FrameRing {
                 primary,
                 timeline: 0,
                 completed: Vec::new(),
+                primaries: Vec::new(),
+                merged: Vec::new(),
                 fence: None,
             });
         }
@@ -91,6 +99,8 @@ impl FrameRing {
             frame.primary.reset()?;
             frame.completed.clear();
             frame.jobs.clear();
+            frame.primaries.clear();
+            frame.merged.clear();
         }
 
         frame.timeline = timeline;
@@ -108,6 +118,14 @@ impl Drop for FrameRing {
                     let _ = ctx.wait(fence);
                 }
                 ctx.destroy_cmd_queue(frame.primary);
+                for m in frame.merged.drain(..) {
+                    for q in m.queues {
+                        ctx.destroy_cmd_queue(q);
+                    }
+                }
+                for p in frame.primaries.drain(..) {
+                    ctx.destroy_cmd_queue(p.queue);
+                }
             }
         }
     }

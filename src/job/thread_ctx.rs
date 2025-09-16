@@ -3,6 +3,8 @@ use std::thread::ThreadId;
 use crate::gpu::vulkan::{CommandPool, CommandQueue, Context};
 use crate::Result;
 
+use super::collector::PrimaryCmd;
+
 /// Per-thread context for job execution.
 ///
 /// Holds a Vulkan command pool and reusable scratch allocations owned by the
@@ -15,6 +17,8 @@ pub struct ThreadCtx {
     thread: ThreadId,
     /// Scratch allocations that can be reused between jobs.
     scratch: Vec<Vec<u8>>,
+    /// Primary command buffers recorded by this thread.
+    pub(crate) primaries: Vec<PrimaryCmd>,
 }
 
 impl ThreadCtx {
@@ -24,6 +28,7 @@ impl ThreadCtx {
             pool: Some(pool),
             thread: std::thread::current().id(),
             scratch: Vec::new(),
+            primaries: Vec::new(),
         }
     }
 
@@ -58,6 +63,23 @@ impl ThreadCtx {
             .expect("CommandPool not initialized")
             .reset(queue)
     }
+
+    /// Record a primary command queue along with sorting metadata.
+    pub fn emit_primary(
+        &mut self,
+        queue: CommandQueue,
+        pass: u16,
+        bucket: u16,
+        order: u32,
+    ) {
+        self.primaries.push(PrimaryCmd {
+            pass,
+            bucket,
+            order,
+            thread: self.thread,
+            queue,
+        });
+    }
 }
 
 impl Default for ThreadCtx {
@@ -66,6 +88,7 @@ impl Default for ThreadCtx {
             pool: None,
             thread: std::thread::current().id(),
             scratch: Vec::new(),
+            primaries: Vec::new(),
         }
     }
 }
