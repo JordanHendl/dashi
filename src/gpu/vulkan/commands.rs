@@ -257,6 +257,117 @@ impl CommandQueue {
 }
 
 impl CommandSink for CommandQueue {
+    fn begin_drawing_dispatch(&mut self, cmd: &crate::driver::command::BeginDrawing) {
+        let pipeline_rp = {
+            let gfx = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(cmd.pipeline)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            gfx.render_pass
+        };
+
+        if self.curr_rp.map_or(false, |rp| rp == pipeline_rp) {
+            return;
+        }
+
+        // end previous pass
+        if self.curr_rp.is_some() {
+            unsafe {
+                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
+            }
+            // finalize CPU layouts for previous attachments
+            let attachments_prev = std::mem::take(&mut self.curr_attachments);
+            for (view, layout) in attachments_prev {
+                let ctx = self.ctx_ref();
+                let v = ctx.image_views.get_ref(view).unwrap();
+                let img = ctx.images.get_mut_ref(v.img).unwrap();
+                let base = v.range.base_mip_level as usize;
+                let count = v.range.level_count as usize;
+                for i in base..base + count {
+                    if let Some(l) = img.layouts.get_mut(i) {
+                        *l = layout;
+                    }
+                }
+            }
+        }
+
+        self.curr_rp = Some(pipeline_rp);
+
+        let rp_obj = self
+            .ctx_ref()
+            .render_passes
+            .get_ref(pipeline_rp)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
+        self.curr_attachments.clear();
+
+        for view in cmd.color_attachments.iter().flatten() {
+            let handle = self.ctx_ref().get_or_create_image_view(view).unwrap();
+            let vk_view = {
+                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                v.view
+            };
+            attachments_vk.push(vk_view);
+            self.curr_attachments
+                .push((handle, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL));
+        }
+
+        if let Some(depth) = cmd.depth_attachment {
+            let handle = self.ctx_ref().get_or_create_image_view(&depth).unwrap();
+            let vk_view = {
+                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                v.view
+            };
+            attachments_vk.push(vk_view);
+            self.curr_attachments
+                .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
+        }
+
+        for (view_handle, layout) in &self.curr_attachments {
+            let ctx = self.ctx_ref();
+            let v = ctx.image_views.get_ref(*view_handle).unwrap();
+            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let base = v.range.base_mip_level as usize;
+            let count = v.range.level_count as usize;
+            for i in base..base + count {
+                if let Some(l) = img.layouts.get_mut(i) {
+                    *l = *layout;
+                }
+            }
+        }
+
+        let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
+            .attachments(&attachments_vk);
+
+        let clears: Vec<vk::ClearValue> = cmd
+            .clear_values
+            .iter()
+            .flatten()
+            .map(clear_value_to_vk)
+            .collect();
+
+        unsafe {
+            self.ctx_ref().device.cmd_begin_render_pass(
+                self.cmd_buf,
+                &vk::RenderPassBeginInfo::builder()
+                    .render_pass(rp_obj.raw)
+                    .framebuffer(rp_obj.fb)
+                    .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
+                    .clear_values(&clears)
+                    .push_next(&mut attachment_info)
+                    .build(),
+                vk::SubpassContents::INLINE,
+            );
+
+            let _ = self.bind_graphics_pipeline(cmd.pipeline);
+            self.update_last_access(vk::PipelineStageFlags::NONE, vk::AccessFlags::empty());
+        }
+    }
+
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
         let pipeline_rp = {
             let gfx = self

@@ -6,7 +6,7 @@ use crate::{
         state::SubresourceRange,
     },
     utils::{Handle, Pool},
-    CommandRing,
+    CommandRing, Renderer,
 };
 use ash::*;
 pub use error::*;
@@ -51,7 +51,6 @@ pub use pipelines::*;
 
 mod command_pool;
 use command_pool::CommandPool;
-
 
 /// Names of debugging layers that should be enabled when validation is requested.
 /// Only includes the standard Vulkan validation layer to avoid enabling any extra layers.
@@ -755,18 +754,23 @@ impl Context {
         todo!()
     }
 
-
     /// Create a new command pool for the specified queue type.
     pub fn make_command_pool(&self, ty: QueueType) -> Result<CommandPool> {
         let family = match ty {
             QueueType::Graphics => self.gfx_queue.family,
-            QueueType::Compute => self.compute_queue.as_ref().unwrap_or(&self.gfx_queue).family,
-            QueueType::Transfer => self
-                .transfer_queue
-                .as_ref()
-                .or(self.compute_queue.as_ref())
-                .unwrap_or(&self.gfx_queue)
-                .family,
+            QueueType::Compute => {
+                self.compute_queue
+                    .as_ref()
+                    .unwrap_or(&self.gfx_queue)
+                    .family
+            }
+            QueueType::Transfer => {
+                self.transfer_queue
+                    .as_ref()
+                    .or(self.compute_queue.as_ref())
+                    .unwrap_or(&self.gfx_queue)
+                    .family
+            }
         };
         CommandPool::new(&self.device, family, ty)
     }
@@ -775,10 +779,7 @@ impl Context {
     pub fn pool_mut(&mut self, ty: QueueType) -> &mut CommandPool {
         match ty {
             QueueType::Graphics => &mut self.gfx_pool,
-            QueueType::Compute => self
-                .compute_pool
-                .as_mut()
-                .unwrap_or(&mut self.gfx_pool),
+            QueueType::Compute => self.compute_pool.as_mut().unwrap_or(&mut self.gfx_pool),
             QueueType::Transfer => self
                 .transfer_pool
                 .as_mut()
@@ -786,6 +787,9 @@ impl Context {
         }
     }
 
+    pub fn make_renderer(&mut self, info: &RendererInfo) -> Result<Renderer> {
+        todo!()
+    }
     /// Creates a ringbuffer of CommandQueues
     pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
         Ok(CommandRing::new(self, info.debug_name, 3, info.queue_type)?)
@@ -2578,8 +2582,8 @@ impl Context {
             attachment_image_infos.push(info);
         }
 
-        let mut attachments_info =
-            vk::FramebufferAttachmentsCreateInfo::builder().attachment_image_infos(&attachment_image_infos);
+        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
+            .attachment_image_infos(&attachment_image_infos);
 
         let fb_info = vk::FramebufferCreateInfo::builder()
             .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
