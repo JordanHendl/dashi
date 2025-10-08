@@ -7,12 +7,12 @@
 
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::{
-    ptr::{self, NonNull},
+    ptr::NonNull,
     sync::Arc,
 };
 
 use crate::{
-    cmd::{Executable, Graphics}, driver::command::BeginDrawing, CommandQueueInfo2, CommandRing, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo, SubmitInfo2
+    cmd::Graphics, driver::command::BeginDrawing, CommandQueueInfo2, CommandRing, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo
 };
 
 pub struct RendererDispatch<'a> {
@@ -32,7 +32,7 @@ pub struct SubpassCtx {
 /// Signature for subpass render callbacks.
 /// Return a `CommandStream` for this (subpass, thread) slice.
 pub type RenderCallback =
-    Arc<dyn Fn(SubpassCtx) -> CommandStream<Graphics> + Send + Sync + 'static>;
+    Box<dyn Fn(SubpassCtx, CommandStream<Graphics>) -> CommandStream<Graphics> + Send + Sync>;
 
 /// Holds the render pass, registry of callbacks per subpass, and a fixed-size Rayon pool.
 pub struct Renderer {
@@ -105,17 +105,22 @@ impl Renderer {
     }
 
     /// Register a callback for a specific subpass (multiple allowed).
-    pub fn on_subpass(&mut self, subpass_index: u32, cb: RenderCallback) {
+    pub fn on_subpass<F>(&mut self, subpass_index: u32, cb: F) 
+    where  F: Fn(SubpassCtx, CommandStream<Graphics>) -> CommandStream<Graphics> + Send + Sync + 'static,
+    {
         let i = subpass_index as usize;
         assert!(i < self.subpasses.len(), "subpass_index out of range");
-        self.subpasses[i].push(cb);
+        self.subpasses[i].push(Box::new(cb));
     }
 
     /// Register the same callback over [start, end) subpasses.
-    pub fn on_subpass_range_arc(&mut self, start: u32, end_exclusive: u32, cb: RenderCallback) {
+    pub fn on_subpass_range_arc<F>(&mut self, start: u32, end_exclusive: u32, cb: F)
+    where  F: Fn(SubpassCtx, CommandStream<Graphics>) -> CommandStream<Graphics> + Send + Sync + 'static,
+    {
         assert!(start <= end_exclusive);
         for sp in start..end_exclusive {
-            self.on_subpass(sp, cb.clone());
+            todo!();
+//            self.on_subpass(sp, factory(cb);
         }
     }
 
@@ -146,8 +151,9 @@ impl Renderer {
                                 thread_count: threads,
                             };
                             for cb in callbacks {
-                                let mut s = (cb)(ctx);
-                                stream.append(s);
+                                let s = CommandStream::<Graphics>::new_gfx();
+                                let s2 = (cb)(ctx, s);
+                                stream.append(s2);
                             }
                         }
                         return stream;
@@ -164,41 +170,10 @@ impl Renderer {
             // End drawing.
             stream = draw.stop_drawing();
             stream.end().append(cmd);
-        });
+        }).expect("Unable to record command stream");
+
         // Submit our recorded commands
         self.ring.submit(&info.submit)
         .unwrap();
     }
 }
-
-///// Main-thread helper: record each per-thread stream into a secondary CB.
-/////
-///// Pass a closure that takes a mutable stream and records it into a secondary CB
-///// with the inheritance you need (render pass, framebuffer, subpass, etc.).
-//pub fn fold_to_secondary_per_thread<F>(
-//    mut record_secondary: F,
-//    mut per_thread_streams: Vec<CommandStream>,
-//) -> Vec<CommandStream>
-//where
-//    F: FnMut(&mut CommandStream) -> (),
-//{
-//    for s in per_thread_streams.iter_mut() {
-//        record_secondary(s);
-//    }
-//    per_thread_streams
-//}
-//
-//// --- Minimal glue so this compiles against your existing API shape -----------
-//// If your `CommandStream` already has an extend/append method, delete this trait
-//// and call your real method at the two call sites above.
-//
-//trait CommandStreamExt {
-//    fn append_from(&mut self, other: &mut CommandStream);
-//}
-//
-//impl CommandStreamExt for CommandStream {
-//    fn append_from(&mut self, _other: &mut CommandStream) {
-//        // Replace with your efficient splice/extend:
-//        // e.g., self.extend(other.drain_all());
-//    }
-//}

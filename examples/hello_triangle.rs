@@ -257,6 +257,17 @@ void main() {
     let mut timer = Timer::new();
 
     timer.start();
+
+    let mut renderer = ctx
+        .make_renderer(&RendererInfo {
+            debug_name: "default",
+            render_pass,
+        })
+        .unwrap();
+    
+    renderer.on_subpass(0, |sub, s| {
+        return s;
+    });
     let mut ring = ctx
         .make_command_ring(&CommandQueueInfo2 {
             debug_name: "cmd",
@@ -299,7 +310,6 @@ void main() {
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
-
             // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 
