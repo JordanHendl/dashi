@@ -491,7 +491,7 @@ impl CommandEncoder {
         }
         self.push(Op::BlitImage, cmd);
     }
-    
+
     /// Transition an image to presentation layout.
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         let range = SubresourceRange::default();
@@ -514,14 +514,6 @@ impl CommandEncoder {
     /// End a debug marker region.
     pub fn end_debug_marker(&mut self) {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
-    }
-    
-    pub fn combine(
-        &mut self,
-        other: &CommandEncoder,
-    ) {
-        self.data.extend_from_slice(&other.data);
-        self.side.extend_from_slice(&other.side);
     }
 
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
@@ -715,7 +707,6 @@ impl Op {
 
 pub trait CommandSink {
     fn begin_drawing(&mut self, pass: &BeginDrawing);
-    fn begin_drawing_dispatch(&mut self, pass: &BeginDrawing);
     fn end_drawing(&mut self, pass: &EndDrawing);
     fn bind_graphics_pipeline(&mut self, cmd: &BindGraphicsPipeline);
     fn blit_image(&mut self, cmd: &BlitImage);

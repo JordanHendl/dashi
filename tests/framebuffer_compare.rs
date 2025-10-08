@@ -1,6 +1,6 @@
 use std::path::Path;
 use dashi::*;
-use image_utils::load_png;
+use image_utils::{load_png, compare_rgba};
 
 #[test]
 fn framebuffer_compare() {

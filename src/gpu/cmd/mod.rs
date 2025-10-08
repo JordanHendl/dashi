@@ -119,6 +119,10 @@ impl CommandStream<Compute> {
         self
     }
 
+    pub fn next_subpass(mut self) -> Self {
+        todo!()
+    }
+
     pub fn end(self) -> CommandStream<Executable> {
         CommandStream {
             enc: self.enc,
@@ -128,12 +132,6 @@ impl CommandStream<Compute> {
 }
 
 impl CommandStream<Graphics> {
-    pub(crate) fn new_gfx() -> Self {
-        Self {
-            enc: CommandEncoder::new(QueueType::Graphics),
-            _state: PhantomData,
-        }
-    }
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
         self.enc.copy_buffer(cmd);
     }
@@ -174,10 +172,6 @@ impl CommandStream<Graphics> {
         }
     }
 
-    pub fn append(&mut self, other: CommandStream<Graphics>) {
-        self.enc.combine(&other.enc);
-    }
-
     pub fn end(self) -> CommandStream<Executable> {
         CommandStream {
             enc: self.enc,
@@ -204,7 +198,7 @@ impl CommandStream<Executable> {
     }
 
     /// Submit the recorded commands to a sink and transition to pending.
-    pub fn append<S: CommandSink>(self, sink: &mut S) -> CommandStream<Executable> {
+    pub fn append<S: CommandSink>(self, sink: &mut S) -> CommandStream<Pending> {
         self.enc.append(sink);
         CommandStream {
             enc: self.enc,

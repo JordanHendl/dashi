@@ -332,12 +332,6 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
         }
     }
 }
-    
-pub struct RendererInfo<'a> {
-    pub debug_name: &'a str,
-    pub render_pass: Handle<RenderPass>,
-
-}
 
 #[derive(Hash)]
 pub struct CommandQueueInfo<'a> {
