@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
-use crate::driver::command::{BeginDrawing, BlitImage, Dispatch, Draw, DrawIndexed};
+use crate::driver::command::{
+    BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
+};
 use crate::driver::types::Handle;
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
 use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2};
-
-use super::driver::command::BeginRenderPass;
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
@@ -20,8 +20,14 @@ pub struct Recording;
 pub struct Executable;
 pub struct Pending;
 pub struct Graphics;
-pub struct GraphicsPending;
+pub struct PendingGraphics;
 pub struct Compute;
+
+impl<T> CommandStream<T> {
+    pub fn combine<G>(&mut self, sink: CommandStream<G>) {
+        self.enc.combine(&sink.enc);
+    }
+}
 
 impl CommandStream<Initial> {
     /// Create a new command buffer in the initial state.
@@ -75,7 +81,7 @@ impl CommandStream<Recording> {
         self.enc.prepare_for_presentation(image);
     }
 
-    pub fn begin_render_pass(mut self, cmd: &BeginRenderPass) -> CommandStream<GraphicsPending> {
+    pub fn begin_render_pass(mut self, cmd: &BeginRenderPass) -> CommandStream<PendingGraphics> {
         self.enc.begin_render_pass(cmd);
         CommandStream {
             enc: self.enc,
@@ -125,9 +131,12 @@ impl CommandStream<Compute> {
         self.enc.dispatch(cmd);
     }
 
-    pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> Self {
+    pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> CommandStream<Graphics> {
         self.enc.begin_drawing(cmd);
-        self
+        CommandStream {
+            enc: self.enc,
+            _state: PhantomData,
+        }
     }
 
     pub fn end(self) -> CommandStream<Executable> {
@@ -138,7 +147,14 @@ impl CommandStream<Compute> {
     }
 }
 
-impl CommandStream<GraphicsPending> {
+impl CommandStream<PendingGraphics> {
+    pub(crate) fn new_pending_graphics() -> Self {
+        Self {
+            enc: CommandEncoder::new(QueueType::Graphics),
+            _state: PhantomData,
+        }
+    }
+
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
         self.enc.copy_buffer(cmd);
     }
@@ -150,12 +166,12 @@ impl CommandStream<GraphicsPending> {
     pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
         self.enc.copy_image_to_buffer(cmd);
     }
+
     pub fn bind_graphics_pipeline(
         mut self,
         pipeline: Handle<GraphicsPipeline>,
     ) -> CommandStream<Graphics> {
         self.enc.bind_graphics_pipeline(pipeline);
-
         CommandStream {
             enc: self.enc,
             _state: PhantomData,
@@ -168,17 +184,6 @@ impl CommandStream<GraphicsPending> {
 
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {
         self.enc.end_drawing();
-        CommandStream {
-            enc: self.enc,
-            _state: PhantomData,
-        }
-    }
-    
-    pub fn append<T>(&mut self, other: CommandStream<T>) {
-        self.enc.combine(&other.enc);
-    }
-
-    pub fn end(self) -> CommandStream<Executable> {
         CommandStream {
             enc: self.enc,
             _state: PhantomData,
@@ -198,9 +203,16 @@ impl CommandStream<Graphics> {
     pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
         self.enc.copy_image_to_buffer(cmd);
     }
-    pub fn bind_graphics_pipeline(mut self, pipeline: Handle<GraphicsPipeline>) -> Self {
+
+    pub fn bind_graphics_pipeline(mut self, pipeline: Handle<GraphicsPipeline>) {
         self.enc.bind_graphics_pipeline(pipeline);
-        self
+    }
+
+    pub fn unbind_graphics_pipeline(self) -> CommandStream<PendingGraphics> {
+        CommandStream {
+            enc: self.enc,
+            _state: PhantomData,
+        }
     }
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
@@ -228,13 +240,6 @@ impl CommandStream<Graphics> {
     }
 
     pub fn end(self) -> CommandStream<Executable> {
-        CommandStream {
-            enc: self.enc,
-            _state: PhantomData,
-        }
-    }
-
-    pub fn unbind_pipeline(self) -> CommandStream<GraphicsPending> {
         CommandStream {
             enc: self.enc,
             _state: PhantomData,

@@ -1896,6 +1896,18 @@ impl Context {
             })
             .unwrap());
     }
+    
+    pub fn layouts_compatible(&self, bg1: Handle<BindGroupLayout>, bg2: Handle<BindGroupLayout>) -> bool {
+        let bg1 = self.bind_group_layouts.get_ref(bg1).unwrap();
+        let bg2 = self.bind_group_layouts.get_ref(bg2).unwrap();
+        bg1.variables == bg2.variables
+    }
+
+    pub fn table_layouts_compatible(&self, bg1: Handle<BindTableLayout>, bg2: Handle<BindTableLayout>) -> bool {
+        let bg1 = self.bind_table_layouts.get_ref(bg1).unwrap();
+        let bg2 = self.bind_table_layouts.get_ref(bg2).unwrap();
+        bg1.variables == bg2.variables
+    }
 
     /// Updates an existing bind group with new resource bindings.
     ///

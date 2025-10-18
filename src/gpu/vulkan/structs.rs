@@ -431,7 +431,7 @@ pub enum ShaderType {
     All,
 }
 
-#[derive(Hash, Clone, Debug)]
+#[derive(Hash, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct BindGroupVariable {
     pub var_type: BindGroupVariableType,
