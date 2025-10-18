@@ -2,8 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, SubmitInfo2, Viewport,
+    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter, GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport
 };
 
 use super::{
@@ -36,6 +35,7 @@ pub enum Op {
     DebugMarkerBegin = 15,
     DebugMarkerEnd = 16,
     TransitionImage = 17,
+    BeginRenderPass = 18,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -63,6 +63,17 @@ pub enum StoreOp {
 
 unsafe impl Zeroable for StoreOp {}
 unsafe impl Pod for StoreOp {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct BeginRenderPass {
+    pub viewport: Viewport,
+    pub render_pass: Handle<RenderPass>,
+    pub color_attachments: [Option<ImageView>; 4],
+    pub depth_attachment: Option<ImageView>,
+    pub clear_values: [Option<ClearValue>; 4],
+}
+
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -337,6 +348,33 @@ impl CommandEncoder {
     }
 
     /// Begin a render pass with the provided attachments.
+    pub fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
+        for view in desc.color_attachments.iter().flatten() {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let _ = self
+                .state
+                .request_image_state(
+                    view.img,
+                    range,
+                    UsageBits::RT_WRITE,
+                    Layout::ColorAttachment,
+                    self.queue,
+                );
+        }
+        if let Some(view) = desc.depth_attachment {
+            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let _ = self.state.request_image_state(
+                view.img,
+                range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+                self.queue,
+            );
+        }
+        self.push(Op::BeginRenderPass, desc);
+    }
+
+    /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
         for view in desc.color_attachments.iter().flatten() {
             let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
@@ -515,7 +553,11 @@ impl CommandEncoder {
     pub fn end_debug_marker(&mut self) {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
-
+    
+    pub fn combine(&mut self, other: &CommandEncoder) {
+        self.data.extend_from_slice(&other.data);
+        self.side.extend_from_slice(&other.side);
+    }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
     pub fn append<S: CommandSink>(&self, sink: &mut S) -> usize {
         let mut cnt = 0;
@@ -540,6 +582,7 @@ impl CommandEncoder {
                 Op::DrawIndirect => todo!(),
                 Op::DispatchIndirect => todo!(),
                 Op::TransitionImage => todo!(),
+                Op::BeginRenderPass => sink.begin_render_pass(cmd.payload()),
             }
         }
         cnt
@@ -700,12 +743,14 @@ impl Op {
             x if x == Op::BufferBarrier as u16 => Some(Op::BufferBarrier),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
+            x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
             _ => None,
         }
     }
 }
 
 pub trait CommandSink {
+    fn begin_render_pass(&mut self, pass: &BeginRenderPass);
     fn begin_drawing(&mut self, pass: &BeginDrawing);
     fn end_drawing(&mut self, pass: &EndDrawing);
     fn bind_graphics_pipeline(&mut self, cmd: &BindGraphicsPipeline);

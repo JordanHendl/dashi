@@ -17,6 +17,8 @@ pub trait Backend {
 
 pub mod command_ring;
 pub use command_ring::*;
+pub mod renderer;
+pub use renderer::*;
 pub mod driver;
 pub mod cmd;
 pub use cmd::{
