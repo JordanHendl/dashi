@@ -1171,7 +1171,115 @@ pub mod cfg {
                     subpass_dependencies: &sp.subpass_dependencies,
                 });
             }
-            RenderPassBorrowed { cfg: self, subpasses }
+            RenderPassBorrowed {
+                cfg: self,
+                subpasses,
+            }
+        }
+    }
+
+    // ---------------- BindGroupLayout authoring ----------------
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ShaderInfoCfg {
+        pub stage: ShaderType,
+        #[serde(default)]
+        pub variables: Vec<BindGroupVariable>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct BindGroupLayoutCfg {
+        pub debug_name: String,
+        #[serde(default)]
+        pub shaders: Vec<ShaderInfoCfg>,
+    }
+
+    impl BindGroupLayoutCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+        pub fn vec_from_yaml(s: &str) -> Result<Vec<Self>, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+
+    pub struct BindGroupLayoutBorrowed<'a> {
+        cfg: &'a BindGroupLayoutCfg,
+        shaders: Vec<ShaderInfo<'a>>,
+    }
+
+    impl BindGroupLayoutBorrowed<'_> {
+        pub fn info(&self) -> BindGroupLayoutInfo<'_> {
+            BindGroupLayoutInfo {
+                debug_name: &self.cfg.debug_name,
+                shaders: &self.shaders,
+            }
+        }
+    }
+
+    impl BindGroupLayoutCfg {
+        pub fn borrow(&self) -> BindGroupLayoutBorrowed<'_> {
+            let shaders = self
+                .shaders
+                .iter()
+                .map(|shader| ShaderInfo {
+                    shader_type: shader.stage,
+                    variables: &shader.variables,
+                })
+                .collect();
+
+            BindGroupLayoutBorrowed { cfg: self, shaders }
+        }
+    }
+
+    // ---------------- BindTableLayout authoring ----------------
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct BindTableLayoutCfg {
+        pub debug_name: String,
+        #[serde(default)]
+        pub shaders: Vec<ShaderInfoCfg>,
+    }
+
+    impl BindTableLayoutCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+        pub fn vec_from_yaml(s: &str) -> Result<Vec<Self>, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+
+    pub struct BindTableLayoutBorrowed<'a> {
+        cfg: &'a BindTableLayoutCfg,
+        shaders: Vec<ShaderInfo<'a>>,
+    }
+
+    impl BindTableLayoutBorrowed<'_> {
+        pub fn info(&self) -> BindTableLayoutInfo<'_> {
+            BindTableLayoutInfo {
+                debug_name: &self.cfg.debug_name,
+                shaders: &self.shaders,
+            }
+        }
+    }
+
+    impl BindTableLayoutCfg {
+        pub fn borrow(&self) -> BindTableLayoutBorrowed<'_> {
+            let shaders = self
+                .shaders
+                .iter()
+                .map(|shader| ShaderInfo {
+                    shader_type: shader.stage,
+                    variables: &shader.variables,
+                })
+                .collect();
+
+            BindTableLayoutBorrowed { cfg: self, shaders }
         }
     }
 

@@ -2482,6 +2482,96 @@ impl Context {
         self.make_render_pass_from_yaml(&s)
     }
 
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_group_layout_from_yaml(
+        &mut self,
+        yaml_str: &str,
+    ) -> Result<Handle<BindGroupLayout>> {
+        let cfg = cfg::BindGroupLayoutCfg::from_yaml(yaml_str)?;
+        let borrowed = cfg.borrow();
+        let info = borrowed.info();
+        self.make_bind_group_layout(&info)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_group_layouts_from_yaml(
+        &mut self,
+        yaml_str: &str,
+    ) -> Result<Vec<Handle<BindGroupLayout>>> {
+        let cfgs = cfg::BindGroupLayoutCfg::vec_from_yaml(yaml_str)?;
+        cfgs
+            .iter()
+            .map(|cfg| {
+                let borrowed = cfg.borrow();
+                let info = borrowed.info();
+                self.make_bind_group_layout(&info)
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_group_layout_from_yaml_file(
+        &mut self,
+        path: &str,
+    ) -> Result<Handle<BindGroupLayout>> {
+        let s = cfg::load_text(path)?;
+        self.make_bind_group_layout_from_yaml(&s)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_group_layouts_from_yaml_file(
+        &mut self,
+        path: &str,
+    ) -> Result<Vec<Handle<BindGroupLayout>>> {
+        let s = cfg::load_text(path)?;
+        self.make_bind_group_layouts_from_yaml(&s)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_table_layout_from_yaml(
+        &mut self,
+        yaml_str: &str,
+    ) -> Result<Handle<BindTableLayout>> {
+        let cfg = cfg::BindTableLayoutCfg::from_yaml(yaml_str)?;
+        let borrowed = cfg.borrow();
+        let info = borrowed.info();
+        self.make_bind_table_layout(&info)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_table_layouts_from_yaml(
+        &mut self,
+        yaml_str: &str,
+    ) -> Result<Vec<Handle<BindTableLayout>>> {
+        let cfgs = cfg::BindTableLayoutCfg::vec_from_yaml(yaml_str)?;
+        cfgs
+            .iter()
+            .map(|cfg| {
+                let borrowed = cfg.borrow();
+                let info = borrowed.info();
+                self.make_bind_table_layout(&info)
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_table_layout_from_yaml_file(
+        &mut self,
+        path: &str,
+    ) -> Result<Handle<BindTableLayout>> {
+        let s = cfg::load_text(path)?;
+        self.make_bind_table_layout_from_yaml(&s)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_bind_table_layouts_from_yaml_file(
+        &mut self,
+        path: &str,
+    ) -> Result<Vec<Handle<BindTableLayout>>> {
+        let s = cfg::load_text(path)?;
+        self.make_bind_table_layouts_from_yaml(&s)
+    }
+
     /// Builds a render pass with the supplied subpass configuration.
     pub fn make_render_pass(
         &mut self,
