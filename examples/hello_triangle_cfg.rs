@@ -1,21 +1,33 @@
 // examples/hello_triangle_rpass_cfg.rs
 // (or src/bin/hello_triangle_rpass_cfg.rs)
 
+#[cfg(feature = "dashi-serde")]
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
+#[cfg(feature = "dashi-serde")]
 use dashi::*;
+#[cfg(feature = "dashi-serde")]
 use std::time::{Duration, Instant};
+#[cfg(feature = "dashi-serde")]
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+#[cfg(feature = "dashi-serde")]
 use winit::event_loop::ControlFlow;
+#[cfg(feature = "dashi-serde")]
 use winit::platform::run_return::EventLoopExtRunReturn;
 
+#[cfg(feature = "dashi-serde")]
 pub struct Timer {
     start_time: Option<Instant>,
     elapsed: Duration,
     is_paused: bool,
 }
+#[cfg(feature = "dashi-serde")]
 impl Timer {
     pub fn new() -> Self {
-        Self { start_time: None, elapsed: Duration::new(0, 0), is_paused: false }
+        Self {
+            start_time: None,
+            elapsed: Duration::new(0, 0),
+            is_paused: false,
+        }
     }
     pub fn start(&mut self) {
         if self.start_time.is_none() {
@@ -27,15 +39,20 @@ impl Timer {
     }
     pub fn elapsed_ms(&self) -> u128 {
         if let Some(t0) = self.start_time {
-            if self.is_paused { self.elapsed.as_millis() } else { t0.elapsed().as_millis() }
+            if self.is_paused {
+                self.elapsed.as_millis()
+            } else {
+                t0.elapsed().as_millis()
+            }
         } else {
             self.elapsed.as_millis()
         }
     }
 }
 
-// Minimal RenderPass YAML (only what we need here).
+// Minimal YAML snippets (only what we need here).
 // Swap this for `std::fs::read_to_string("configs/gbuffer.rpass.yaml")?` later.
+#[cfg(feature = "dashi-serde")]
 const RENDERPASS_YAML: &str = r#"
 debug_name: "gbuffer"
 viewport:
@@ -49,6 +66,17 @@ subpasses:
           stencil_load_op: DontCare, stencil_store_op: DontCare }
     depth_stencil_attachment: ~
     subpass_dependencies: []
+"#;
+
+#[cfg(feature = "dashi-serde")]
+const BIND_GROUP_LAYOUT_YAML: &str = r#"
+debug_name: "Hello Triangle"
+shaders:
+  - stage: Vertex
+    variables:
+      - var_type: DynamicUniform
+        binding: 0
+        count: 1
 "#;
 
 #[cfg(feature = "dashi-serde")]
@@ -110,19 +138,9 @@ fn main() {
         ..Default::default()
     };
 
-    // Make the bind group layout. This describes the bindings into a shader.
+    // Make the bind group layout from YAML. This describes the bindings into a shader.
     let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
-            shaders: &[ShaderInfo {
-                shader_type: ShaderType::Vertex,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
-                    binding: 0,
-                    ..Default::default()
-                }],
-            }],
-            debug_name: "Hello Triangle",
-        })
+        .make_bind_group_layout_from_yaml(BIND_GROUP_LAYOUT_YAML)
         .unwrap();
 
     // Make a pipeline layout. This describes a graphics pipeline's state.
@@ -180,7 +198,9 @@ void main() {
         .expect("Unable to create GFX Pipeline Layout!");
 
     // Make a render pass. This describes the targets we wish to draw to.
-    let render_pass = ctx.make_render_pass_from_yaml(RENDERPASS_YAML).expect("render_pass");
+    let render_pass = ctx
+        .make_render_pass_from_yaml(RENDERPASS_YAML)
+        .expect("render_pass");
 
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
@@ -256,7 +276,6 @@ void main() {
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
-
             // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 
@@ -334,7 +353,4 @@ void main() {
 }
 
 #[cfg(not(feature = "dashi-serde"))]
-fn main()
-{
-
-}
+fn main() {}
