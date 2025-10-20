@@ -5,6 +5,9 @@ use super::{
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
 use std::hash::{Hash, Hasher};
 
+use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeMap;
+
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
 use serde::{Deserialize, Serialize};
@@ -378,7 +381,7 @@ pub struct SubmitInfo2 {
     pub signal_sems: [Handle<Semaphore>; 4],
 }
 
-
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug)]
 pub struct AttachmentDescription {
     pub format: Format,
@@ -411,6 +414,8 @@ impl Default for AttachmentDescription {
         }
     }
 }
+
+#[repr(u8)]
 #[derive(Hash, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BindGroupVariableType {
@@ -448,6 +453,7 @@ impl Default for BindGroupVariable {
         }
     }
 }
+
 #[derive(Hash, Clone, Debug)]
 pub struct ShaderInfo<'a> {
     pub shader_type: ShaderType,
@@ -473,6 +479,66 @@ impl<'a> Default for BindTableLayoutInfo<'a> {
             shaders: &[],
         }
     }
+}
+
+#[inline]
+fn stage_bit(s: ShaderType) -> u8 {
+    match s {
+        ShaderType::Vertex => 1 << 0,
+        ShaderType::Fragment => 1 << 1,
+        ShaderType::Compute => 1 << 2,
+        ShaderType::All => 0xFF,
+    }
+}
+
+/// Internal normalized key so layout hashes are independent of declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct NormalizedBinding {
+    binding: u32,
+    var_ty: u8,
+    count: u32,
+    stages: u8, // aggregated bitmask across all shaders that reference this binding
+}
+
+fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
+    // Aggregate by (binding, var_ty, count)
+    let mut agg: BTreeMap<(u32, u8, u32), u8> = BTreeMap::new();
+
+    for sh in shaders {
+        let bit = stage_bit(sh.shader_type);
+        for v in sh.variables {
+            let k = (v.binding, v.var_type.clone() as u8, v.count);
+            agg.entry(k)
+                .and_modify(|stages| *stages |= bit)
+                .or_insert(bit);
+        }
+    }
+
+    // Normalize into a sorted vector (BTreeMap already sorted by key)
+    let norm: Vec<NormalizedBinding> = agg
+        .into_iter()
+        .map(|((binding, var_ty, count), stages)| NormalizedBinding {
+            binding,
+            var_ty,
+            count,
+            stages,
+        })
+        .collect();
+
+    // Hash the normalized list
+    let mut hasher = DefaultHasher::new();
+    norm.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Stable, order-independent hash for a BindGroupLayoutInfo (ignores `debug_name`).
+pub fn hash_bind_group_layout_info(info: &BindGroupLayoutInfo<'_>) -> u64 {
+    hash_from_shaders(info.shaders)
+}
+
+/// Stable, order-independent hash for a BindTableLayoutInfo (ignores `debug_name`).
+pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
+    hash_from_shaders(info.shaders)
 }
 
 pub struct BufferView {
@@ -749,6 +815,8 @@ pub enum VertexRate {
     Vertex,
 }
 
+#[derive(Hash, Clone, Copy, Debug)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct SubpassDependency {
     pub subpass_id: u32,
     pub attachment_id: u32,
@@ -770,7 +838,109 @@ pub enum ClearValue {
     DepthStencil { depth: f32, stencil: u32 },
 }
 
-unsafe impl Pod for ClearValue{}
+unsafe impl Pod for ClearValue {}
+
+#[cfg(feature = "dashi-serde")]
+impl Serialize for ClearValue {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        match self {
+            ClearValue::Color(v) => {
+                let mut st = s.serialize_struct("ClearValue", 2)?;
+                st.serialize_field("kind", "color")?;
+                st.serialize_field("value", v)?;
+                st.end()
+            }
+            ClearValue::IntColor(v) => {
+                let mut st = s.serialize_struct("ClearValue", 2)?;
+                st.serialize_field("kind", "int_color")?;
+                st.serialize_field("value", v)?;
+                st.end()
+            }
+            ClearValue::UintColor(v) => {
+                let mut st = s.serialize_struct("ClearValue", 2)?;
+                st.serialize_field("kind", "uint_color")?;
+                st.serialize_field("value", v)?;
+                st.end()
+            }
+            ClearValue::DepthStencil { depth, stencil } => {
+                let mut st = s.serialize_struct("ClearValue", 3)?;
+                st.serialize_field("kind", "depth_stencil")?;
+                st.serialize_field("depth", depth)?;
+                st.serialize_field("stencil", stencil)?;
+                st.end()
+            }
+        }
+    }
+}
+
+#[cfg(feature = "dashi-serde")]
+impl<'de> Deserialize<'de> for ClearValue {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::{
+            de::{Error, MapAccess, Visitor},
+            Deserialize,
+        };
+        use std::fmt;
+        #[derive(Deserialize)]
+        struct Tag {
+            kind: String,
+        }
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = ClearValue;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "ClearValue")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut kind: Option<String> = None;
+                let mut value_f: Option<[f32; 4]> = None;
+                let mut value_i: Option<[i32; 4]> = None;
+                let mut value_u: Option<[u32; 4]> = None;
+                let mut depth: Option<f32> = None;
+                let mut stencil: Option<u32> = None;
+                while let Some(k) = map.next_key::<String>()? {
+                    match k.as_str() {
+                        "kind" => kind = Some(map.next_value()?),
+                        "value_f" | "value" => {
+                            // allow "value" for color variants
+                            // we'll disambiguate by kind below
+                            // try f32, then i32, then u32
+                            // serde will backtrack appropriately
+                            value_f = map.next_value::<Option<[f32; 4]>>()?;
+                        }
+                        "depth" => depth = Some(map.next_value()?),
+                        "stencil" => stencil = Some(map.next_value()?),
+                        _ => {
+                            let _: serde_json::Value = map.next_value()?;
+                        }
+                    }
+                }
+                let k = kind.ok_or_else(|| Error::missing_field("kind"))?;
+                match k.as_str() {
+                    "color" => Ok(ClearValue::Color(
+                        value_f.ok_or_else(|| Error::missing_field("value"))?,
+                    )),
+                    "int_color" => {
+                        // YAML/JSON may coerce; re-deserialize as i32 array if needed
+                        Err(Error::custom(
+                            "int_color: please provide via Graphics config value_int",
+                        ))
+                    }
+                    "uint_color" => Err(Error::custom(
+                        "uint_color: please provide via Graphics config value_uint",
+                    )),
+                    "depth_stencil" => Ok(ClearValue::DepthStencil {
+                        depth: depth.ok_or_else(|| Error::missing_field("depth"))?,
+                        stencil: stencil.ok_or_else(|| Error::missing_field("stencil"))?,
+                    }),
+                    _ => Err(Error::custom("unknown ClearValue.kind")),
+                }
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
 
 impl Hash for ClearValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -934,3 +1104,206 @@ impl Default for DisplayInfo {
 #[cfg(feature = "dashi-openxr")]
 #[derive(Default)]
 pub struct XrDisplayInfo;
+
+// -----------------------------------------------------------------------------
+// JSON/YAML Config types and borrowed views (feature-gated)
+// -----------------------------------------------------------------------------
+#[cfg(feature = "dashi-serde")]
+pub mod cfg {
+    use std::fs;
+
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    // ---------------- RenderPass (authoring) ----------------
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SubpassDescriptionCfg {
+        pub color_attachments: Vec<AttachmentDescription>,
+        pub depth_stencil_attachment: Option<AttachmentDescription>,
+        pub subpass_dependencies: Vec<SubpassDependency>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RenderPassCfg {
+        pub debug_name: String,
+        pub viewport: Viewport,
+        pub subpasses: Vec<SubpassDescriptionCfg>,
+    }
+
+    impl RenderPassCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+
+    /// Holds the temporary `Vec<SubpassDescription<'a>>` so we can build a
+    /// borrowed `RenderPassInfo<'a>` view when needed (without self-references).
+    pub struct RenderPassBorrowed<'a> {
+        cfg: &'a RenderPassCfg,
+        subpasses: Vec<SubpassDescription<'a>>,
+    }
+
+    impl RenderPassBorrowed<'_> {
+        /// Build a borrowed `RenderPassInfo` view. The returned value borrows
+        /// from `self`, so keep this wrapper alive until the API call that
+        /// consumes the info.
+        pub fn info(&self) -> RenderPassInfo<'_> {
+            RenderPassInfo {
+                debug_name: &self.cfg.debug_name,
+                viewport: self.cfg.viewport,
+                subpasses: &self.subpasses,
+            }
+        }
+    }
+
+    impl RenderPassCfg {
+        /// Prepare a wrapper that owns the `Vec<SubpassDescription<'_>>`.
+        pub fn borrow(&self) -> RenderPassBorrowed<'_> {
+            let mut subpasses: Vec<SubpassDescription<'_>> =
+                Vec::with_capacity(self.subpasses.len());
+            for sp in &self.subpasses {
+                subpasses.push(SubpassDescription {
+                    color_attachments: &sp.color_attachments,
+                    depth_stencil_attachment: sp.depth_stencil_attachment.as_ref(),
+                    subpass_dependencies: &sp.subpass_dependencies,
+                });
+            }
+            RenderPassBorrowed { cfg: self, subpasses }
+        }
+    }
+
+    // ---------------- Pipeline Layout/Shader authoring ----------------
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct SpecializationCfg {
+        pub slot: usize,
+        /// Usually authored as a byte array in YAML or base64 string in JSON.
+        pub data: Vec<u8>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct PipelineShaderCfg {
+        pub stage: ShaderType,
+        /// Optional path to a `.spv` file. If absent, `spirv` words are used.
+        #[serde(default)]
+        pub spirv_path: Option<String>,
+        #[serde(default)]
+        pub spirv: Vec<u32>,
+        #[serde(default)]
+        pub specialization: Vec<SpecializationCfg>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct VertexDescriptionCfg {
+        pub entries: Vec<VertexEntryInfo>,
+        pub stride: usize,
+        pub rate: VertexRate,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+    pub struct PipelineLayoutsRef {
+        /// Names for BG/BT layouts you resolve to Handles at build time.
+        pub bg_layouts: [Option<String>; 4],
+        pub bt_layouts: [Option<String>; 4],
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct GraphicsPipelineLayoutCfg {
+        pub debug_name: String,
+        pub vertex_info: VertexDescriptionCfg,
+        #[serde(default)]
+        pub layouts: PipelineLayoutsRef,
+        pub shaders: Vec<PipelineShaderCfg>,
+        #[serde(default)]
+        pub details: GraphicsPipelineDetails,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ComputePipelineLayoutCfg {
+        #[serde(default)]
+        pub debug_name: Option<String>,
+        #[serde(default)]
+        pub layouts: PipelineLayoutsRef,
+        pub shader: PipelineShaderCfg,
+    }
+
+    // ---------------- Pipeline authoring ----------------
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct GraphicsPipelineCfg {
+        pub debug_name: String,
+        /// Name key for a previously created layout.
+        pub layout: String,
+        /// Name key for a previously created render pass.
+        pub render_pass: String,
+        pub subpass_id: u8,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ComputePipelineCfg {
+        pub debug_name: String,
+        /// Name key for a previously created layout.
+        pub layout: String,
+    }
+
+    impl GraphicsPipelineLayoutCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+    impl ComputePipelineLayoutCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+    impl GraphicsPipelineCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+    impl ComputePipelineCfg {
+        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+            serde_json::from_str(s)
+        }
+        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
+            serde_yaml::from_str(s)
+        }
+    }
+
+    // ---------------- Cfg → Runtime borrowed conversions ----------------
+    impl GraphicsPipelineCfg {
+        /// Resolve string keys to handles and return a borrowed `GraphicsPipelineInfo`.
+        pub fn to_info<'a>(
+            &'a self,
+            layouts: &std::collections::HashMap<String, Handle<GraphicsPipelineLayout>>,
+            render_passes: &std::collections::HashMap<String, Handle<RenderPass>>,
+        ) -> Result<GraphicsPipelineInfo<'a>, String> {
+            let layout = *layouts
+                .get(&self.layout)
+                .ok_or_else(|| format!("Unknown GraphicsPipelineLayout key: {}", self.layout))?;
+            let render_pass = *render_passes
+                .get(&self.render_pass)
+                .ok_or_else(|| format!("Unknown RenderPass key: {}", self.render_pass))?;
+            Ok(GraphicsPipelineInfo {
+                debug_name: &self.debug_name,
+                layout,
+                render_pass,
+                subpass_id: self.subpass_id,
+            })
+        }
+    }
+
+    pub(crate) fn load_text(path: &str) -> anyhow::Result<String> {
+        Ok(std::fs::read_to_string(path)?)
+    }
+}

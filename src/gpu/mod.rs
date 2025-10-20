@@ -15,10 +15,7 @@ pub trait Backend {
     type Context;
 }
 
-pub mod command_ring;
-pub use command_ring::*;
-pub mod renderer;
-pub use renderer::*;
+pub mod execution;
 pub mod driver;
 pub mod cmd;
 pub use cmd::{

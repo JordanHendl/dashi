@@ -12,8 +12,10 @@ use std::{
 };
 
 use crate::{
-    cmd::{Graphics, PendingGraphics}, driver::command::{BeginDrawing, BeginRenderPass}, CommandQueueInfo2, CommandRing, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo
+    cmd::PendingGraphics, driver::command::BeginRenderPass, CommandQueueInfo2, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo
 };
+
+use super::CommandRing;
 
 pub struct RendererDispatch<'a> {
     pub begin: &'a BeginRenderPass,

@@ -10,7 +10,7 @@ dashi-winit = ["dep:winit"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]
 dashi-openxr = ["dep:openxr"]
-dashi-serde = ["dep:serde"]
+dashi-serde = ["dep:serde", "dep:serde_json", "dep:serde_yaml"]
 debug_offset_alloc = []
 use_16_bit_node_indices = []
 vulkan = ["dep:ash", "dep:vk-mem", "dep:ash-window"]
@@ -28,6 +28,9 @@ offset-allocator = { git = "https://github.com/JordanHendl/offsetallocator-rs" }
 openxr = { version = "0.19", optional = true }
 raw-window-handle = "0.4"
 serde = {version = "1.0.210", features = ["derive"], optional = true}
+serde_json = {version = "1.0.145",  optional = true}
+anyhow = "1.0.100"
+serde_yaml = {version = "0.9.34", optional = true}
 windows = { version = "0.52.0", optional = true, features = ["Win32_Graphics_Direct3D12"] }
 metal = { version = "0.32.0", optional = true }
 bitflags = "2.6"
