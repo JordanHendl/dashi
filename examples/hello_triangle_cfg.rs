@@ -8,9 +8,6 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::platform::run_return::EventLoopExtRunReturn;
 
-// Only using the RenderPass config for now:
-use dashi::gpu::vulkan::structs::config as cfg;
-
 pub struct Timer {
     start_time: Option<Instant>,
     elapsed: Duration,
@@ -55,18 +52,26 @@ subpasses:
 "#;
 
 fn main() {
-    // GPU context
     let device = SelectedDevice::default();
     println!("Using device {}", device);
-    let mut ctx = gpu::Context::new(&ContextInfo { device }).expect("ctx");
+
+    // The GPU context that holds all the data.
+    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
 
     const WIDTH: u32 = 1280;
     const HEIGHT: u32 = 1024;
 
-    // Geometry
-    const VERTICES: [[f32; 2]; 3] = [[0.0, -0.5], [0.5, 0.5], [-0.5, 0.5]];
-    const INDICES:  [u32; 3]     = [0, 1, 2];
+    const VERTICES: [[f32; 2]; 3] = [
+        [0.0, -0.5], // Vertex 0: Bottom
+        [0.5, 0.5],  // Vertex 1: Top right
+        [-0.5, 0.5], // Vertex 2: Top left
+    ];
 
+    const INDICES: [u32; 3] = [
+        0, 1, 2, // Triangle: uses vertices 0, 1, and 2
+    ];
+
+    // Allocate the vertices & indices.
     let vertices = ctx
         .make_buffer(&BufferInfo {
             debug_name: "vertices",
@@ -87,21 +92,25 @@ fn main() {
         })
         .unwrap();
 
-    // Offscreen framebuffer (blitted to the swapchain image)
+    // Allocate the framebuffer image & view
     let fb = ctx
         .make_image(&ImageInfo {
             debug_name: "color_attachment",
             dim: [WIDTH, HEIGHT, 1],
             format: Format::RGBA8,
-            mip_levels: 1,
+            mip_levels: 8, // set >1 to automatically generate mipmaps
             initial_data: None,
             ..Default::default()
         })
         .unwrap();
-    let fb_view = ImageView { img: fb, ..Default::default() };
 
-    // BindGroupLayout in code (pipelines will keep being in code for now).
-    let bgl = ctx
+    let fb_view = ImageView {
+        img: fb,
+        ..Default::default()
+    };
+
+    // Make the bind group layout. This describes the bindings into a shader.
+    let bg_layout = ctx
         .make_bind_group_layout(&BindGroupLayoutInfo {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Vertex,
@@ -111,106 +120,111 @@ fn main() {
                     ..Default::default()
                 }],
             }],
-            debug_name: "Hello Triangle BGL",
+            debug_name: "Hello Triangle",
         })
         .unwrap();
 
-    // Pipeline layout in code
-    let shaders = [
-        PipelineShaderInfo {
-            stage: ShaderType::Vertex,
-            spirv: inline_spirv::inline_spirv!(r#"
-                #version 450
-                layout(location = 0) in vec2 inPosition;
-                layout(location = 0) out vec2 frag_color;
-                layout(binding = 0) uniform position_offset { vec2 pos; };
-                void main() {
-                    frag_color = inPosition;
-                    gl_Position = vec4(inPosition + pos, 0.0, 1.0);
-                }
-            "#, vert),
-            specialization: &[],
-        },
-        PipelineShaderInfo {
-            stage: ShaderType::Fragment,
-            spirv: inline_spirv::inline_spirv!(r#"
-                #version 450 core
-                layout(location = 0) in  vec2 frag_color;
-                layout(location = 0) out vec4 out_color;
-                void main() { out_color = vec4(frag_color.xy, 0, 1); }
-            "#, frag),
-            specialization: &[],
-        },
-    ];
-
-    let gp_layout = ctx
+    // Make a pipeline layout. This describes a graphics pipeline's state.
+    let pipeline_layout = ctx
         .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
-            debug_name: "Hello Triangle Layout",
             vertex_info: VertexDescriptionInfo {
-                entries: &[VertexEntryInfo { format: ShaderPrimitiveType::Vec2, location: 0, offset: 0 }],
+                entries: &[VertexEntryInfo {
+                    format: ShaderPrimitiveType::Vec2,
+                    location: 0,
+                    offset: 0,
+                }],
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [Some(bgl), None, None, None],
+            bg_layouts: [Some(bg_layout), None, None, None],
             bt_layouts: [None, None, None, None],
-            shaders: &shaders,
-            details: GraphicsPipelineDetails {
-                subpass: 0,
-                color_blend_states: vec![Default::default()],
-                topology: Topology::TriangleList,
-                culling: CullMode::Back,
-                front_face: VertexOrdering::Clockwise,
-                depth_test: None,
-                dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
-            },
+            shaders: &[
+                PipelineShaderInfo {
+                    stage: ShaderType::Vertex,
+                    spirv: inline_spirv::inline_spirv!(
+                        r#"
+#version 450
+layout(location = 0) in vec2 inPosition;
+layout(location = 0) out vec2 frag_color;
+
+layout(binding = 0) uniform position_offset {
+    vec2 pos;
+};
+void main() {
+    frag_color = inPosition;
+    gl_Position = vec4(inPosition + pos, 0.0, 1.0);
+}
+"#,
+                        vert
+                    ),
+                    specialization: &[],
+                },
+                PipelineShaderInfo {
+                    stage: ShaderType::Fragment,
+                    spirv: inline_spirv::inline_spirv!(
+                        r#"
+    #version 450 core
+    layout(location = 0) in vec2 frag_color;
+    layout(location = 0) out vec4 out_color;
+    void main() { out_color = vec4(frag_color.xy, 0, 1); }
+"#,
+                        frag
+                    ),
+                    specialization: &[],
+                },
+            ],
+            details: Default::default(),
+            debug_name: "Hello Compute",
         })
-        .expect("gfx layout");
+        .expect("Unable to create GFX Pipeline Layout!");
 
-    // ───────────────────────────────────────────────────────────────
-    // RenderPass is parsed from YAML → borrowed → make_render_pass
-    // ───────────────────────────────────────────────────────────────
-    let rp_cfg = cfg::RenderPassCfg::from_yaml(RENDERPASS_YAML).expect("parse renderpass yaml");
-    let rp_view = rp_cfg.borrow();                 // holds temporary Vec for subpass slices
-    let rp_info: RenderPassInfo = rp_view.info;    // borrowed view into rp_cfg
-    let render_pass = ctx.make_render_pass(&rp_info).expect("make render pass");
+    // Make a render pass. This describes the targets we wish to draw to.
+    let render_pass = ctx.make_render_pass_from_yaml(RENDERPASS_YAML).expect("render_pass");
 
-    // Graphics pipeline in code (still referencing the parsed render pass)
+    // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
-            debug_name: "Hello Triangle Pipeline",
-            layout: gp_layout,
+            layout: pipeline_layout,
             render_pass,
-            subpass_id: 0,
-        })
-        .expect("pipeline");
-
-    // Dynamic allocator + BindGroup
-    let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
-            debug_name: "Hello Triangle BG",
-            layout: bgl,
-            bindings: &[BindingInfo { resource: ShaderResource::Dynamic(&allocator), binding: 0 }],
+            debug_name: "Pipeline",
             ..Default::default()
         })
         .unwrap();
 
-    // Display / window
-    let mut display = ctx.make_display(&Default::default()).unwrap();
-    let mut timer = Timer::new();
-    timer.start();
+    // Make dynamic allocator to use for dynamic buffers.
+    let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
 
-    // Command ring & semaphores
+    // Make bind group what we want to bind to what was described in the Bind Group Layout.
+    let bind_group = ctx
+        .make_bind_group(&BindGroupInfo {
+            debug_name: "Hello Triangle",
+            layout: bg_layout,
+            bindings: &[BindingInfo {
+                resource: ShaderResource::Dynamic(&allocator),
+                binding: 0,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Display for windowing
+    let mut display = ctx.make_display(&Default::default()).unwrap();
+    // Timer to move the triangle
+    let mut timer = Timer::new();
+
+    timer.start();
     let mut ring = ctx
-        .make_command_ring(&CommandQueueInfo2 { debug_name: "cmd", ..Default::default() })
+        .make_command_ring(&CommandQueueInfo2 {
+            debug_name: "cmd",
+            ..Default::default()
+        })
         .unwrap();
     let sems = ctx.make_semaphores(2).unwrap();
-
-    // Main loop
     'running: loop {
+        // Reset the allocator
         allocator.reset();
 
-        // Events (close / Esc)
+        // Listen to events
         let mut should_exit = false;
         {
             let event_loop = display.winit_event_loop();
@@ -233,61 +247,87 @@ fn main() {
                 }
             });
         }
-        if should_exit { break 'running; }
+        if should_exit {
+            break 'running;
+        }
 
-        // Acquire next image from swapchain
-        let (img, sem, _idx, _ok) = ctx.acquire_new_image(&mut display).unwrap();
+        // Get the next image from the display.
+        let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
+
+            // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 
             // Begin render pass & bind pipeline
             let mut draw = stream.begin_drawing(&BeginDrawing {
                 viewport: Viewport {
-                    area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-                    scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+                    area: FRect2D {
+                        w: WIDTH as f32,
+                        h: HEIGHT as f32,
+                        ..Default::default()
+                    },
+                    scissor: Rect2D {
+                        w: WIDTH,
+                        h: HEIGHT,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
                 color_attachments: [Some(fb_view), None, None, None],
                 depth_attachment: None,
-                clear_values: [Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])), None, None, None],
+                clear_values: [
+                    Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
+                    None,
+                    None,
+                    None,
+                ],
             });
 
-            // Dynamic offset buffer (moves triangle)
+            // Bump alloc some data to write the triangle position to.
             let mut buf = allocator.bump().unwrap();
             let pos = &mut buf.slice::<[f32; 2]>()[0];
-            let t = timer.elapsed_ms() as f32 / 1000.0;
-            pos[0] = t.sin();
-            pos[1] = t.cos();
+            pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
+            pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
 
-            // Draw
+            // Append a draw call using our vertices & indices & dynamic buffers
             draw.draw_indexed(&DrawIndexed {
                 vertices,
                 indices,
-                index_count: 3,
+                index_count: INDICES.len() as u32,
                 bind_groups: [Some(bind_group), None, None, None],
                 dynamic_buffers: [Some(buf), None, None, None],
                 ..Default::default()
             });
 
+            // End drawing.
             stream = draw.stop_drawing();
 
-            // Blit to presentable image & transition
+            // Blit the framebuffer to the display's image
             stream.blit_images(&BlitImage {
-                src: fb, dst: img.img, filter: Filter::Nearest, ..Default::default()
+                src: fb,
+                dst: img.img,
+                filter: Filter::Nearest,
+                ..Default::default()
             });
-            stream.prepare_for_presentation(img.img);
-            stream.end().append(list);
-        }).unwrap();
 
-        // Submit & present
+            // Transition the display image for presentation
+            stream.prepare_for_presentation(img.img);
+
+            stream.end().append(list);
+        })
+        .unwrap();
+        // Submit our recorded commands
         ring.submit(&SubmitInfo {
             wait_sems: &[sem],
             signal_sems: &[sems[0], sems[1]],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
+
+        // Present the display image, waiting on the semaphore that will signal when our
+        // drawing/blitting is done.
         ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
 }
-

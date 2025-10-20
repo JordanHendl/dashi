@@ -2469,12 +2469,17 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-serde")]
-    pub fn make_render_pass_from_yaml(&mut self, path: &str) -> Result<Handle<RenderPass>> {
-        let s = cfg::load_text(path)?;
-        let rp_cfg = cfg::RenderPassCfg::from_yaml(&s)?; // parse YAML
+    pub fn make_render_pass_from_yaml(&mut self, yaml_str: &str) -> Result<Handle<RenderPass>> {
+        let rp_cfg = cfg::RenderPassCfg::from_yaml(&yaml_str)?; // parse YAML
         let rp_borrowed = rp_cfg.borrow(); // build borrowed view (keeps slices alive)
         let rp_info: RenderPassInfo = rp_borrowed.info(); // borrowed view
         self.make_render_pass(&rp_info)
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    pub fn make_render_pass_from_yaml_file(&mut self, path: &str) -> Result<Handle<RenderPass>> {
+        let s = cfg::load_text(path)?;
+        self.make_render_pass_from_yaml(&s)
     }
 
     /// Builds a render pass with the supplied subpass configuration.
