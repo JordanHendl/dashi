@@ -51,6 +51,7 @@ subpasses:
     subpass_dependencies: []
 "#;
 
+#[cfg(feature = "dashi-serde")]
 fn main() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
@@ -330,4 +331,10 @@ void main() {
         // drawing/blitting is done.
         ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
+}
+
+#[cfg(not(feature = "dashi-serde"))]
+fn main()
+{
+
 }
