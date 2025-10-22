@@ -1,38 +1,44 @@
 // src/gpu/vulkan/binding_manager.rs
 
 use crate::gpu::vulkan::{
-    BindGroup, BindGroupLayout, BindGroupLayoutInfo, BindGroupVariableType, BindTable,
-    BindTableLayout, BindTableLayoutInfo, Context, ShaderInfo, ShaderType,
+    BindGroup, BindGroupLayout, BindGroupLayoutInfo, BindTable, BindTableLayout,
+    BindTableLayoutInfo, Context,
 };
-use crate::{hash_bind_group_layout_info, hash_bind_table_layout_info};
 use crate::utils::Handle;
+use crate::{hash_bind_group_layout_info, hash_bind_table_layout_info};
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
     sync::{Arc, Mutex, RwLock},
 };
-
 
 /// ----- Keys used by the caches ------------------------------------------------
 
 #[derive(Clone, Debug, Eq)]
 pub struct LayoutKey(pub u64);
 impl PartialEq for LayoutKey {
-    fn eq(&self, o: &Self) -> bool { self.0 == o.0 }
+    fn eq(&self, o: &Self) -> bool {
+        self.0 == o.0
+    }
 }
 impl Hash for LayoutKey {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state) }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
 }
 
 #[derive(Clone, Debug, Eq)]
 pub struct TableLayoutKey(pub u64);
 impl PartialEq for TableLayoutKey {
-    fn eq(&self, o: &Self) -> bool { self.0 == o.0 }
+    fn eq(&self, o: &Self) -> bool {
+        self.0 == o.0
+    }
 }
 impl Hash for TableLayoutKey {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state) }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
 }
 
 impl From<&BindGroupLayoutInfo<'_>> for LayoutKey {
@@ -101,8 +107,14 @@ impl BindingManager {
         })
     }
 
-    #[inline] pub fn frames_in_flight(&self) -> usize { self.frames_in_flight }
-    #[inline] pub fn thread_count(&self) -> usize { self.thread_count }
+    #[inline]
+    pub fn frames_in_flight(&self) -> usize {
+        self.frames_in_flight
+    }
+    #[inline]
+    pub fn thread_count(&self) -> usize {
+        self.thread_count
+    }
 
     // ----- Layout cache: key-taking versions -----------------------------------
 
@@ -126,6 +138,26 @@ impl BindingManager {
         h
     }
 
+    pub fn try_get_or_create_bind_group_layout<F, E>(
+        &self,
+        key: LayoutKey,
+        create: F,
+    ) -> Result<Handle<BindGroupLayout>, E>
+    where
+        F: FnOnce(&mut Context) -> Result<Handle<BindGroupLayout>, E>,
+    {
+        if let Some(h) = self.bgl_cache.read().unwrap().get(&key).cloned() {
+            return Ok(h);
+        }
+        let mut w = self.bgl_cache.write().unwrap();
+        if let Some(h) = w.get(&key).cloned() {
+            return Ok(h);
+        }
+        let h = create(unsafe { &mut *self.ctx })?;
+        w.insert(key, h);
+        Ok(h)
+    }
+
     pub fn get_or_create_bind_table_layout<F>(
         &self,
         key: TableLayoutKey,
@@ -146,6 +178,26 @@ impl BindingManager {
         h
     }
 
+    pub fn try_get_or_create_bind_table_layout<F, E>(
+        &self,
+        key: TableLayoutKey,
+        create: F,
+    ) -> Result<Handle<BindTableLayout>, E>
+    where
+        F: FnOnce(&mut Context) -> Result<Handle<BindTableLayout>, E>,
+    {
+        if let Some(h) = self.btl_cache.read().unwrap().get(&key).cloned() {
+            return Ok(h);
+        }
+        let mut w = self.btl_cache.write().unwrap();
+        if let Some(h) = w.get(&key).cloned() {
+            return Ok(h);
+        }
+        let h = create(unsafe { &mut *self.ctx })?;
+        w.insert(key, h);
+        Ok(h)
+    }
+
     // ----- Layout cache: direct-Info convenience helpers -----------------------
 
     /// Convenience: pass a BindGroupLayoutInfo directly.
@@ -161,6 +213,18 @@ impl BindingManager {
         self.get_or_create_bind_group_layout(key, |ctx| create(ctx, info))
     }
 
+    pub fn try_get_or_create_bgl_from_info<F, E>(
+        &self,
+        info: &BindGroupLayoutInfo<'_>,
+        create: F,
+    ) -> Result<Handle<BindGroupLayout>, E>
+    where
+        F: FnOnce(&mut Context, &BindGroupLayoutInfo<'_>) -> Result<Handle<BindGroupLayout>, E>,
+    {
+        let key = LayoutKey::from(info);
+        self.try_get_or_create_bind_group_layout(key, |ctx| create(ctx, info))
+    }
+
     /// Convenience: pass a BindTableLayoutInfo directly.
     pub fn get_or_create_btl_from_info<F>(
         &self,
@@ -172,6 +236,18 @@ impl BindingManager {
     {
         let key = TableLayoutKey::from(info);
         self.get_or_create_bind_table_layout(key, |ctx| create(ctx, info))
+    }
+
+    pub fn try_get_or_create_btl_from_info<F, E>(
+        &self,
+        info: &BindTableLayoutInfo<'_>,
+        create: F,
+    ) -> Result<Handle<BindTableLayout>, E>
+    where
+        F: FnOnce(&mut Context, &BindTableLayoutInfo<'_>) -> Result<Handle<BindTableLayout>, E>,
+    {
+        let key = TableLayoutKey::from(info);
+        self.try_get_or_create_bind_table_layout(key, |ctx| create(ctx, info))
     }
 
     // ----- Instance reuse (per-frame, per-thread) -------------------------------

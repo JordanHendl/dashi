@@ -4,6 +4,8 @@
 #[cfg(feature = "dashi-serde")]
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
 #[cfg(feature = "dashi-serde")]
+use dashi::gpu::execution::BindingLayoutManager;
+#[cfg(feature = "dashi-serde")]
 use dashi::*;
 #[cfg(feature = "dashi-serde")]
 use std::time::{Duration, Instant};
@@ -69,15 +71,21 @@ subpasses:
 "#;
 
 #[cfg(feature = "dashi-serde")]
-const BIND_GROUP_LAYOUT_YAML: &str = r#"
-debug_name: "Hello Triangle"
-shaders:
-  - stage: Vertex
-    variables:
-      - var_type: DynamicUniform
-        binding: 0
-        count: 1
+const BINDING_LAYOUTS_YAML: &str = r#"
+bind_group_layouts:
+  - name: "hello_triangle.layouts.main"
+    layout:
+      debug_name: "Hello Triangle"
+      shaders:
+        - stage: Vertex
+          variables:
+            - var_type: DynamicUniform
+              binding: 0
+              count: 1
 "#;
+
+#[cfg(feature = "dashi-serde")]
+const BIND_GROUP_LAYOUT_NAME: &str = "hello_triangle.layouts.main";
 
 #[cfg(feature = "dashi-serde")]
 fn main() {
@@ -138,9 +146,21 @@ fn main() {
         ..Default::default()
     };
 
-    // Make the bind group layout from YAML. This describes the bindings into a shader.
-    let bg_layout = ctx
-        .make_bind_group_layout_from_yaml(BIND_GROUP_LAYOUT_YAML)
+    // Use the layout manager to author and resolve bind layouts via string keys.
+    let binding_layouts = BindingLayoutManager::new(&mut ctx as *mut _, 2, 1);
+
+    binding_layouts
+        .load_from_yaml(BINDING_LAYOUTS_YAML)
+        .expect("binding layouts loaded");
+
+    let bg_layout = binding_layouts
+        .bind_group_layout(BIND_GROUP_LAYOUT_NAME)
+        .expect("bind group layout registered");
+
+    let pipeline_layout_refs: [Option<String>; 4] =
+        [Some(BIND_GROUP_LAYOUT_NAME.to_string()), None, None, None];
+    let resolved_bg_layouts = binding_layouts
+        .resolve_bind_group_layouts(&pipeline_layout_refs)
         .unwrap();
 
     // Make a pipeline layout. This describes a graphics pipeline's state.
@@ -155,7 +175,7 @@ fn main() {
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [Some(bg_layout), None, None, None],
+            bg_layouts: resolved_bg_layouts,
             bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo {
