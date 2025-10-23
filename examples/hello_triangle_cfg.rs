@@ -4,9 +4,11 @@
 #[cfg(feature = "dashi-serde")]
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
 #[cfg(feature = "dashi-serde")]
-use dashi::gpu::execution::BindingLayoutManager;
+use dashi::gpu::execution::{BindingLayoutManager, PipelineManager};
 #[cfg(feature = "dashi-serde")]
 use dashi::*;
+#[cfg(feature = "dashi-serde")]
+use std::collections::HashMap;
 #[cfg(feature = "dashi-serde")]
 use std::time::{Duration, Instant};
 #[cfg(feature = "dashi-serde")]
@@ -86,6 +88,58 @@ bind_group_layouts:
 
 #[cfg(feature = "dashi-serde")]
 const BIND_GROUP_LAYOUT_NAME: &str = "hello_triangle.layouts.main";
+#[cfg(feature = "dashi-serde")]
+const PIPELINE_NAME: &str = "hello_triangle.pipeline.main";
+#[cfg(feature = "dashi-serde")]
+const RENDER_PASS_NAME: &str = "hello_triangle.render_pass.main";
+#[cfg(feature = "dashi-serde")]
+#[cfg(feature = "dashi-serde")]
+const HELLO_TRIANGLE_VERT_SPV: &str = env!("HELLO_TRIANGLE_VERT_SPV");
+#[cfg(feature = "dashi-serde")]
+const HELLO_TRIANGLE_FRAG_SPV: &str = env!("HELLO_TRIANGLE_FRAG_SPV");
+
+#[cfg(feature = "dashi-serde")]
+fn pipelines_yaml() -> String {
+    format!(
+        r#"graphics_pipeline_layouts:
+  - name: "hello_triangle.layouts.pipeline"
+    layout:
+      debug_name: "Hello Triangle Pipeline Layout"
+      vertex_info:
+        entries:
+          - format: Vec2
+            location: 0
+            offset: 0
+        stride: 8
+        rate: Vertex
+      layouts:
+        bg_layouts:
+          - "hello_triangle.layouts.main"
+          - ~
+          - ~
+          - ~
+        bt_layouts:
+          - ~
+          - ~
+          - ~
+          - ~
+      shaders:
+        - stage: Vertex
+          spirv_path: "{vert}"
+        - stage: Fragment
+          spirv_path: "{frag}"
+graphics_pipelines:
+  - name: "hello_triangle.pipeline.main"
+    pipeline:
+      debug_name: "Hello Triangle Pipeline"
+      layout: "hello_triangle.layouts.pipeline"
+      render_pass: "hello_triangle.render_pass.main"
+      subpass_id: 0
+"#,
+        vert = HELLO_TRIANGLE_VERT_SPV,
+        frag = HELLO_TRIANGLE_FRAG_SPV,
+    )
+}
 
 #[cfg(feature = "dashi-serde")]
 fn main() {
@@ -153,84 +207,28 @@ fn main() {
         .load_from_yaml(BINDING_LAYOUTS_YAML)
         .expect("binding layouts loaded");
 
+    let pipeline_manager = PipelineManager::new(&mut ctx as *mut _, &binding_layouts);
+
     let bg_layout = binding_layouts
         .bind_group_layout(BIND_GROUP_LAYOUT_NAME)
         .expect("bind group layout registered");
-
-    let pipeline_layout_refs: [Option<String>; 4] =
-        [Some(BIND_GROUP_LAYOUT_NAME.to_string()), None, None, None];
-    let resolved_bg_layouts = binding_layouts
-        .resolve_bind_group_layouts(&pipeline_layout_refs)
-        .unwrap();
-
-    // Make a pipeline layout. This describes a graphics pipeline's state.
-    let pipeline_layout = ctx
-        .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
-            vertex_info: VertexDescriptionInfo {
-                entries: &[VertexEntryInfo {
-                    format: ShaderPrimitiveType::Vec2,
-                    location: 0,
-                    offset: 0,
-                }],
-                stride: 8,
-                rate: VertexRate::Vertex,
-            },
-            bg_layouts: resolved_bg_layouts,
-            bt_layouts: [None, None, None, None],
-            shaders: &[
-                PipelineShaderInfo {
-                    stage: ShaderType::Vertex,
-                    spirv: inline_spirv::inline_spirv!(
-                        r#"
-#version 450
-layout(location = 0) in vec2 inPosition;
-layout(location = 0) out vec2 frag_color;
-
-layout(binding = 0) uniform position_offset {
-    vec2 pos;
-};
-void main() {
-    frag_color = inPosition;
-    gl_Position = vec4(inPosition + pos, 0.0, 1.0);
-}
-"#,
-                        vert
-                    ),
-                    specialization: &[],
-                },
-                PipelineShaderInfo {
-                    stage: ShaderType::Fragment,
-                    spirv: inline_spirv::inline_spirv!(
-                        r#"
-    #version 450 core
-    layout(location = 0) in vec2 frag_color;
-    layout(location = 0) out vec4 out_color;
-    void main() { out_color = vec4(frag_color.xy, 0, 1); }
-"#,
-                        frag
-                    ),
-                    specialization: &[],
-                },
-            ],
-            details: Default::default(),
-            debug_name: "Hello Compute",
-        })
-        .expect("Unable to create GFX Pipeline Layout!");
 
     // Make a render pass. This describes the targets we wish to draw to.
     let render_pass = ctx
         .make_render_pass_from_yaml(RENDERPASS_YAML)
         .expect("render_pass");
 
-    // Make a graphics pipeline. This matches a pipeline layout to a render pass.
-    let graphics_pipeline = ctx
-        .make_graphics_pipeline(&GraphicsPipelineInfo {
-            layout: pipeline_layout,
-            render_pass,
-            debug_name: "Pipeline",
-            ..Default::default()
-        })
-        .unwrap();
+    let mut render_passes = HashMap::new();
+    render_passes.insert(RENDER_PASS_NAME.to_string(), render_pass);
+
+    let pipelines_yaml = pipelines_yaml();
+    pipeline_manager
+        .load_from_yaml(&pipelines_yaml, &render_passes)
+        .expect("pipelines loaded");
+
+    let graphics_pipeline = pipeline_manager
+        .graphics_pipeline(PIPELINE_NAME)
+        .expect("graphics pipeline registered");
 
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
