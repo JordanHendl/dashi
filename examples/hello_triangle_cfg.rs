@@ -1,30 +1,20 @@
 // examples/hello_triangle_rpass_cfg.rs
 // (or src/bin/hello_triangle_rpass_cfg.rs)
 
-#[cfg(feature = "dashi-serde")]
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
-#[cfg(feature = "dashi-serde")]
 use dashi::gpu::execution::{BindingLayoutManager, PipelineManager};
-#[cfg(feature = "dashi-serde")]
 use dashi::*;
-#[cfg(feature = "dashi-serde")]
 use std::collections::HashMap;
-#[cfg(feature = "dashi-serde")]
 use std::time::{Duration, Instant};
-#[cfg(feature = "dashi-serde")]
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-#[cfg(feature = "dashi-serde")]
 use winit::event_loop::ControlFlow;
-#[cfg(feature = "dashi-serde")]
 use winit::platform::run_return::EventLoopExtRunReturn;
 
-#[cfg(feature = "dashi-serde")]
 pub struct Timer {
     start_time: Option<Instant>,
     elapsed: Duration,
     is_paused: bool,
 }
-#[cfg(feature = "dashi-serde")]
 impl Timer {
     pub fn new() -> Self {
         Self {
@@ -56,7 +46,6 @@ impl Timer {
 
 // Minimal YAML snippets (only what we need here).
 // Swap this for `std::fs::read_to_string("configs/gbuffer.rpass.yaml")?` later.
-#[cfg(feature = "dashi-serde")]
 const RENDERPASS_YAML: &str = r#"
 debug_name: "gbuffer"
 viewport:
@@ -72,7 +61,6 @@ subpasses:
     subpass_dependencies: []
 "#;
 
-#[cfg(feature = "dashi-serde")]
 const BINDING_LAYOUTS_YAML: &str = r#"
 bind_group_layouts:
   - name: "hello_triangle.layouts.main"
@@ -86,19 +74,12 @@ bind_group_layouts:
               count: 1
 "#;
 
-#[cfg(feature = "dashi-serde")]
 const BIND_GROUP_LAYOUT_NAME: &str = "hello_triangle.layouts.main";
-#[cfg(feature = "dashi-serde")]
 const PIPELINE_NAME: &str = "hello_triangle.pipeline.main";
-#[cfg(feature = "dashi-serde")]
 const RENDER_PASS_NAME: &str = "hello_triangle.render_pass.main";
-#[cfg(feature = "dashi-serde")]
-#[cfg(feature = "dashi-serde")]
 const HELLO_TRIANGLE_VERT_SPV: &str = env!("HELLO_TRIANGLE_VERT_SPV");
-#[cfg(feature = "dashi-serde")]
 const HELLO_TRIANGLE_FRAG_SPV: &str = env!("HELLO_TRIANGLE_FRAG_SPV");
 
-#[cfg(feature = "dashi-serde")]
 fn pipelines_yaml() -> String {
     format!(
         r#"graphics_pipeline_layouts:
@@ -141,7 +122,6 @@ graphics_pipelines:
     )
 }
 
-#[cfg(feature = "dashi-serde")]
 fn main() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
@@ -206,7 +186,7 @@ fn main() {
     binding_layouts
         .load_from_yaml(BINDING_LAYOUTS_YAML)
         .expect("binding layouts loaded");
-
+    
     let pipeline_manager = PipelineManager::new(&mut ctx as *mut _, &binding_layouts);
 
     let bg_layout = binding_layouts
@@ -369,6 +349,3 @@ fn main() {
         ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
 }
-
-#[cfg(not(feature = "dashi-serde"))]
-fn main() {}

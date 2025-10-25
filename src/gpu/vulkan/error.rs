@@ -91,6 +91,18 @@ impl From<ash::vk::Result> for GPUError {
     }
 }
 
+impl<T> From<(T, ash::vk::Result)> for GPUError {
+    fn from(res: (T, ash::vk::Result)) -> Self {
+        return GPUError::VulkanError(VulkanError { res: res.1 });
+    }
+}
+
+impl From<SlotError> for GPUError {
+    fn from(_res: SlotError) -> Self {
+        return GPUError::SlotError();
+    }
+}
+
 impl From<ash::LoadingError> for GPUError {
     fn from(res: ash::LoadingError) -> Self {
         return GPUError::LoadingError(res);

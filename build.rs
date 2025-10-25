@@ -38,8 +38,8 @@ fn compile_shader(source_path: &Path, kind: shaderc::ShaderKind) -> PathBuf {
 }
 
 fn main() {
-    let vert_path = Path::new("examples/shaders/hello_triangle.vert");
-    let frag_path = Path::new("examples/shaders/hello_triangle.frag");
+    let vert_path = Path::new("examples/shaders/hello_triangle_v.glsl");
+    let frag_path = Path::new("examples/shaders/hello_triangle_f.glsl");
 
     let vert_spv = compile_shader(vert_path, shaderc::ShaderKind::Vertex);
     let frag_spv = compile_shader(frag_path, shaderc::ShaderKind::Fragment);

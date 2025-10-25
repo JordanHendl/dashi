@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [features]
-default = ["dashi-winit", "vulkan"]
+default = ["dashi-winit", "dashi-serde", "vulkan"]
 dashi-winit = ["dep:winit"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]

@@ -59,13 +59,7 @@ impl PipelineManager {
         info: &GraphicsPipelineLayoutInfo<'_>,
     ) -> Result<Handle<GraphicsPipelineLayout>> {
         let name = name.into();
-        if let Some(handle) = self
-            .graphics_layouts
-            .read()
-            .unwrap()
-            .get(&name)
-            .copied()
-        {
+        if let Some(handle) = self.graphics_layouts.read().unwrap().get(&name).copied() {
             return Ok(handle);
         }
 
@@ -86,13 +80,7 @@ impl PipelineManager {
         info: &ComputePipelineLayoutInfo<'_>,
     ) -> Result<Handle<ComputePipelineLayout>> {
         let name = name.into();
-        if let Some(handle) = self
-            .compute_layouts
-            .read()
-            .unwrap()
-            .get(&name)
-            .copied()
-        {
+        if let Some(handle) = self.compute_layouts.read().unwrap().get(&name).copied() {
             return Ok(handle);
         }
 
@@ -113,13 +101,7 @@ impl PipelineManager {
         info: &GraphicsPipelineInfo<'_>,
     ) -> Result<Handle<GraphicsPipeline>> {
         let name = name.into();
-        if let Some(handle) = self
-            .graphics_pipelines
-            .read()
-            .unwrap()
-            .get(&name)
-            .copied()
-        {
+        if let Some(handle) = self.graphics_pipelines.read().unwrap().get(&name).copied() {
             return Ok(handle);
         }
 
@@ -140,13 +122,7 @@ impl PipelineManager {
         info: &ComputePipelineInfo<'_>,
     ) -> Result<Handle<ComputePipeline>> {
         let name = name.into();
-        if let Some(handle) = self
-            .compute_pipelines
-            .read()
-            .unwrap()
-            .get(&name)
-            .copied()
-        {
+        if let Some(handle) = self.compute_pipelines.read().unwrap().get(&name).copied() {
             return Ok(handle);
         }
 
@@ -165,17 +141,17 @@ impl PipelineManager {
 #[cfg(feature = "dashi-serde")]
 mod serde_support {
     use std::fs;
-
+    
+    use std::collections::HashMap;
+    use super::*;
     use anyhow::{anyhow, bail, Context as _};
 
-    use super::{
-        PipelineManager, Result,
-    };
+    use super::{PipelineManager, Result};
+    use crate::gpu::vulkan::structs::cfg;
     use crate::gpu::vulkan::{
         GraphicsPipelineInfo, GraphicsPipelineLayout, GraphicsPipelineLayoutInfo,
         PipelineShaderInfo, RenderPass, SpecializationInfo, VertexDescriptionInfo,
     };
-    use crate::gpu::vulkan::structs::cfg;
     use crate::utils::Handle;
 
     #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -248,10 +224,7 @@ mod serde_support {
             for entry in &cfg.graphics_pipeline_layouts {
                 self.register_graphics_pipeline_layout_cfg(&entry.name, &entry.layout)
                     .with_context(|| {
-                        format!(
-                            "registering graphics pipeline layout '{}'",
-                            entry.name
-                        )
+                        format!("registering graphics pipeline layout '{}'", entry.name)
                     })?;
             }
 
@@ -263,21 +236,13 @@ mod serde_support {
             }
 
             for entry in &cfg.graphics_pipelines {
-                self.register_graphics_pipeline_cfg(
-                    &entry.name,
-                    &entry.pipeline,
-                    render_passes,
-                )
-                .with_context(|| {
-                    format!("registering graphics pipeline '{}'", entry.name)
-                })?;
+                self.register_graphics_pipeline_cfg(&entry.name, &entry.pipeline, render_passes)
+                    .with_context(|| format!("registering graphics pipeline '{}'", entry.name))?;
             }
 
             for entry in &cfg.compute_pipelines {
                 self.register_compute_pipeline_cfg(&entry.name, &entry.pipeline)
-                    .with_context(|| {
-                        format!("registering compute pipeline '{}'", entry.name)
-                    })?;
+                    .with_context(|| format!("registering compute pipeline '{}'", entry.name))?;
             }
 
             Ok(())
@@ -310,14 +275,11 @@ mod serde_support {
                 })?;
 
             let mut shader_words: Vec<Vec<u32>> = Vec::with_capacity(cfg.shaders.len());
-            let mut specialization_data: Vec<Vec<Vec<u8>>> =
-                Vec::with_capacity(cfg.shaders.len());
-            let mut specialization_infos: Vec<Vec<SpecializationInfo<'_>>> =
-                Vec::with_capacity(cfg.shaders.len());
+            let mut specialization_data: Vec<Vec<Vec<u8>>> = Vec::with_capacity(cfg.shaders.len());
 
+            // Pass 1: build all owned data first (no references yet)
             for shader in &cfg.shaders {
                 shader_words.push(load_shader_words(shader)?);
-
                 specialization_data.push(
                     shader
                         .specialization
@@ -325,10 +287,13 @@ mod serde_support {
                         .map(|spec| spec.data.clone())
                         .collect(),
                 );
+            }
 
-                let infos: Vec<SpecializationInfo<'_>> = specialization_data
-                    .last()
-                    .unwrap()
+            // Pass 2: now create SpecializationInfo slices borrowing from specialization_data
+            let mut specialization_infos: Vec<Vec<SpecializationInfo<'_>>> =
+                Vec::with_capacity(cfg.shaders.len());
+            for (shader, data_vec) in cfg.shaders.iter().zip(specialization_data.iter()) {
+                let infos: Vec<SpecializationInfo<'_>> = data_vec
                     .iter()
                     .zip(shader.specialization.iter())
                     .map(|(data, spec)| SpecializationInfo {
@@ -449,9 +414,9 @@ mod serde_support {
             let name = name.into();
             let layout = {
                 let layouts = self.compute_layouts.read().unwrap();
-                *layouts.get(&cfg.layout).ok_or_else(|| {
-                    anyhow!("Unknown ComputePipelineLayout key: {}", cfg.layout)
-                })?
+                *layouts
+                    .get(&cfg.layout)
+                    .ok_or_else(|| anyhow!("Unknown ComputePipelineLayout key: {}", cfg.layout))?
             };
 
             let info = ComputePipelineInfo {
@@ -465,8 +430,8 @@ mod serde_support {
 
     fn load_shader_words(cfg: &cfg::PipelineShaderCfg) -> Result<Vec<u32>> {
         if let Some(path) = &cfg.spirv_path {
-            let bytes = fs::read(path)
-                .with_context(|| format!("reading SPIR-V file '{}'", path))?;
+            let bytes =
+                fs::read(path).with_context(|| format!("reading SPIR-V file '{}'", path))?;
             if bytes.len() % 4 != 0 {
                 bail!("SPIR-V file '{}' length must be a multiple of 4", path);
             }

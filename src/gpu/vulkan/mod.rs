@@ -3033,8 +3033,7 @@ impl Context {
 
         let graphics_pipelines = unsafe {
             self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-                .unwrap()
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)?
         };
 
         self.set_name(
