@@ -2,9 +2,10 @@
 // (or src/bin/hello_triangle_rpass_cfg.rs)
 
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
-use dashi::gpu::execution::{BindingLayoutManager, PipelineManager};
+use dashi::gpu::execution::{BindingLayoutManager, BindingManager, PipelineManager};
 use dashi::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
@@ -182,6 +183,7 @@ fn main() {
 
     // Use the layout manager to author and resolve bind layouts via string keys.
     let binding_layouts = BindingLayoutManager::new(&mut ctx as *mut _, 2, 1);
+    let binding_manager: Arc<BindingManager> = binding_layouts.binding_manager();
 
     binding_layouts
         .load_from_yaml(BINDING_LAYOUTS_YAML)
@@ -214,17 +216,24 @@ fn main() {
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
 
     // Make bind group what we want to bind to what was described in the Bind Group Layout.
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
-            debug_name: "Hello Triangle",
-            layout: bg_layout,
-            bindings: &[BindingInfo {
+    let bind_group = binding_manager.alloc_bind_group(
+        0,
+        0,
+        |ctx| {
+            let bindings = [BindingInfo {
                 resource: ShaderResource::Dynamic(&allocator),
                 binding: 0,
-            }],
-            ..Default::default()
-        })
-        .unwrap();
+            }];
+            ctx.make_bind_group(&BindGroupInfo {
+                debug_name: "Hello Triangle",
+                layout: bg_layout,
+                bindings: &bindings,
+                ..Default::default()
+            })
+            .expect("make bind group")
+        },
+        |_ctx, _| {},
+    );
 
     // Display for windowing
     let mut display = ctx.make_display(&Default::default()).unwrap();
