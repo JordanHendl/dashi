@@ -2057,9 +2057,9 @@ impl Context {
         let table = self.bind_tables.get_ref(info.table).unwrap();
         let descriptor_set = table.set;
 
-        let mut write_descriptor_sets = Vec::new();
-        let mut buffer_infos = Vec::new();
-        let mut image_infos = Vec::new();
+        let mut write_descriptor_sets = Vec::with_capacity(9064);
+        let mut buffer_infos = Vec::with_capacity(9064);
+        let mut image_infos = Vec::with_capacity(9064);
 
         for binding_info in info.bindings.iter() {
             for res in binding_info.resources {
