@@ -124,7 +124,11 @@ graphics_pipelines:
 }
 
 fn main() {
-    let device = SelectedDevice::default();
+    let device = DeviceSelector::new()
+        .expect("Unable to make device selector")
+        .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+        .expect("Unable to find dedicated device!");
+
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
@@ -188,7 +192,7 @@ fn main() {
     binding_layouts
         .load_from_yaml(BINDING_LAYOUTS_YAML)
         .expect("binding layouts loaded");
-    
+
     let pipeline_manager = PipelineManager::new(&mut ctx as *mut _, &binding_layouts);
 
     let bg_layout = binding_layouts

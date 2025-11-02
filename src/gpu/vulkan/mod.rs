@@ -1758,7 +1758,7 @@ impl Context {
             .map(|binding| {
                 vk::DescriptorPoolSize::builder()
                     .ty(binding.descriptor_type)
-                    .descriptor_count(1) // Assuming one descriptor per binding
+                    .descriptor_count(binding.descriptor_count)
                     .build()
             })
             .collect::<Vec<_>>();
@@ -1919,14 +1919,7 @@ impl Context {
     }
 
     /// Updates an existing bind group with new resource bindings.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid. (If using OpenXR)
-    /// - Synchronization primitives are handled during presentation.
-    pub fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<()> {
+    fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<()> {
         let bg = self.bind_groups.get_ref(info.bg).unwrap();
         let descriptor_set = bg.set;
 

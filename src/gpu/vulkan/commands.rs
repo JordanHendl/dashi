@@ -8,8 +8,8 @@ use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline, QueueType, Result, Semaphore,
-    SubmitInfo2, UsageBits,
+    ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
+    QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -58,17 +58,14 @@ pub fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
 fn queue_family_index(ctx: &Context, ty: QueueType) -> u32 {
     match ty {
         QueueType::Graphics => ctx.gfx_queue.family,
-        QueueType::Compute => ctx
-            .compute_queue
-            .as_ref()
-            .unwrap_or(&ctx.gfx_queue)
-            .family,
-        QueueType::Transfer => ctx
-            .transfer_queue
-            .as_ref()
-            .or(ctx.compute_queue.as_ref())
-            .unwrap_or(&ctx.gfx_queue)
-            .family,
+        QueueType::Compute => ctx.compute_queue.as_ref().unwrap_or(&ctx.gfx_queue).family,
+        QueueType::Transfer => {
+            ctx.transfer_queue
+                .as_ref()
+                .or(ctx.compute_queue.as_ref())
+                .unwrap_or(&ctx.gfx_queue)
+                .family
+        }
     }
 }
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
@@ -93,12 +90,6 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
 
 impl CommandQueue {
     /// Reset the command buffer and begin recording again.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
     pub fn reset(&mut self) -> Result<()> {
         unsafe {
             (*self.pool).reset(self)?;
@@ -116,16 +107,10 @@ impl CommandQueue {
     }
 
     /// Begin recording a secondary command queue using the same pool.
-    ///
-    /// The returned queue is a secondary command buffer that can be recorded
-    /// independently and later executed by this primary queue.
-    pub fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
+    fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
         unsafe { (*self.pool).begin(self.ctx, debug_name, true) }
     }
-    pub fn submit(
-        &mut self,
-        info: &SubmitInfo2,
-    ) -> Result<Handle<Fence>, GPUError> {
+    fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {
             unsafe { (*self.ctx).device.end_command_buffer(self.cmd_buf)? };
             self.dirty = false;
@@ -174,7 +159,7 @@ impl CommandQueue {
         }
     }
 
-    pub fn bind_compute_pipeline(&mut self, pipeline: Handle<ComputePipeline>) -> Result<()> {
+    fn bind_compute_pipeline(&mut self, pipeline: Handle<ComputePipeline>) -> Result<()> {
         todo!()
         //        if self.curr_rp.is_none() {
         //            return Err(GPUError::LibraryError());
@@ -217,13 +202,7 @@ impl CommandQueue {
     }
 
     /// Bind a graphics pipeline for subsequent draw calls.
-    ///
-    /// # Vulkan prerequisites
-    /// - Command list must be recording.
-    /// - Resources must have matching usage flags and layouts.
-    /// - Required pipelines and bind groups must be bound beforehand.
-    /// - Transitions must be handled via appropriate barriers.
-    pub fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
+    fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
         if self.curr_rp.is_none() {
             return Err(GPUError::LibraryError());
         }
@@ -326,8 +305,8 @@ impl CommandSink for CommandQueue {
             }
         }
 
-        let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
-            .attachments(&attachments_vk);
+        let mut attachment_info =
+            vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
         let clears: Vec<vk::ClearValue> = cmd
             .clear_values
@@ -436,8 +415,8 @@ impl CommandSink for CommandQueue {
             }
         }
 
-        let mut attachment_info = vk::RenderPassAttachmentBeginInfo::builder()
-            .attachments(&attachments_vk);
+        let mut attachment_info =
+            vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
         let clears: Vec<vk::ClearValue> = cmd
             .clear_values
