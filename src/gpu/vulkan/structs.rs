@@ -540,6 +540,7 @@ pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
     hash_from_shaders(info.shaders)
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct BufferView {
     pub handle: Handle<Buffer>,
     pub offset: u64,
@@ -551,6 +552,7 @@ impl BufferView {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum ShaderResource {
     Buffer(Handle<Buffer>),
     ConstBuffer(BufferView),
