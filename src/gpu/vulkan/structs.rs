@@ -1,6 +1,5 @@
 use super::{
-    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator,
-    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
+    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator, DynamicAllocatorState, GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice
 };
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
 use std::hash::{Hash, Hasher};
@@ -552,26 +551,26 @@ impl BufferView {
     }
 }
 
-pub enum ShaderResource<'a> {
+pub enum ShaderResource {
     Buffer(Handle<Buffer>),
     ConstBuffer(BufferView),
     StorageBuffer(Handle<Buffer>),
-    Dynamic(&'a DynamicAllocator),
-    DynamicStorage(&'a DynamicAllocator),
+    Dynamic(DynamicAllocatorState),
+    DynamicStorage(DynamicAllocatorState),
     SampledImage(ImageView, Handle<Sampler>),
 }
 
-pub struct BindingInfo<'a> {
-    pub resource: ShaderResource<'a>,
+pub struct BindingInfo {
+    pub resource: ShaderResource,
     pub binding: u32,
 }
 
-pub struct IndexedResource<'a> {
-    pub resource: ShaderResource<'a>,
+pub struct IndexedResource {
+    pub resource: ShaderResource,
     pub slot: u32,
 }
 pub struct IndexedBindingInfo<'a> {
-    pub resources: &'a [IndexedResource<'a>],
+    pub resources: &'a [IndexedResource],
     pub binding: u32,
 }
 
@@ -615,7 +614,7 @@ impl<'a> Default for IndexedBindGroupInfo<'a> {
 pub struct BindGroupInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
-    pub bindings: &'a [BindingInfo<'a>],
+    pub bindings: &'a [BindingInfo],
     pub set: u32,
 }
 

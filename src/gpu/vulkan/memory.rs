@@ -90,6 +90,13 @@ impl DynamicBuffer {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct  DynamicAllocatorState {
+    pub pool: Handle<Buffer>,
+    pub report: offset_allocator::StorageReport,
+    pub min_alloc_size: u32,
+}
+
 #[derive(Clone)]
 pub struct DynamicAllocator {
     pub(crate) allocator: offset_allocator::Allocator,
@@ -117,6 +124,14 @@ impl DynamicAllocator {
     /// allocations produced by this allocator.
     pub fn reset(&mut self) {
         self.allocator.reset();
+    }
+    
+    pub fn state(&self) -> DynamicAllocatorState {
+        DynamicAllocatorState {
+            pool: self.pool,
+            report: self.allocator.storage_report(),
+            min_alloc_size: self.min_alloc_size,
+        }
     }
 
     /// Allocates a new [`DynamicBuffer`] of `min_alloc_size` bytes.

@@ -380,7 +380,7 @@ impl<'a> BindGroupLayoutBuilder<'a> {
 pub struct BindGroupBuilder<'a> {
     debug_name: &'a str,
     layout: Handle<BindGroupLayout>,
-    bindings: SmallVec<[crate::BindingInfo<'a>; 8]>,
+    bindings: SmallVec<[crate::BindingInfo; 8]>,
     set: u32,
 }
 
@@ -402,7 +402,7 @@ impl<'a> BindGroupBuilder<'a> {
     }
 
     /// Add a binding with its resource at a binding slot.
-    pub fn binding(mut self, binding: u32, resource: crate::ShaderResource<'a>) -> Self {
+    pub fn binding(mut self, binding: u32, resource: crate::ShaderResource) -> Self {
         self.bindings.push(crate::BindingInfo { binding, resource });
         self
     }
@@ -530,7 +530,7 @@ impl<'a> BindTableBuilder<'a> {
     pub fn binding(
         mut self,
         binding: u32,
-        resources: &'a [crate::IndexedResource<'a>],
+        resources: &'a [crate::IndexedResource],
     ) -> Self {
         self.bindings
             .push(crate::IndexedBindingInfo { binding, resources });
