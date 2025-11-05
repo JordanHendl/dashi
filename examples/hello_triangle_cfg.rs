@@ -225,7 +225,7 @@ fn main() {
         0,
         |ctx| {
             let bindings = [BindingInfo {
-                resource: ShaderResource::Dynamic(&allocator),
+                resource: ShaderResource::Dynamic(allocator.state().clone()),
                 binding: 0,
             }];
             ctx.make_bind_group(&BindGroupInfo {

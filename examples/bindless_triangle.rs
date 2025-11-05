@@ -106,7 +106,7 @@ fn main() -> Result<(), GPUError> {
     let bind_group = BindGroupBuilder::new("instance_index")
         .layout(instance_layout)
         .set(0)
-        .binding(0, ShaderResource::Dynamic(&allocator))
+        .binding(0, ShaderResource::Dynamic(allocator.state().clone()))
         .build(&mut ctx)?;
 
     // Geometry buffers.

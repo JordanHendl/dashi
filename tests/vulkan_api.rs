@@ -247,7 +247,7 @@ outputData[index] = inputData[index] + num_to_add;
                     binding: 1,
                 },
                 BindingInfo {
-                    resource: ShaderResource::Dynamic(&allocator),
+                    resource: ShaderResource::Dynamic(allocator.state().clone()),
                     binding: 2,
                 },
             ],

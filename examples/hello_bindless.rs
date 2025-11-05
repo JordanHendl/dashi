@@ -31,7 +31,7 @@ fn main() -> Result<(), GPUError> {
             0,
             &[IndexedResource {
                 slot: 0,
-                resource: ShaderResource::Dynamic(&allocator),
+                resource: ShaderResource::Dynamic(allocator.state()),
             }],
         )
         .build(&mut ctx)?;

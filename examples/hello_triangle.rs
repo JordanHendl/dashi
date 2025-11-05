@@ -244,7 +244,7 @@ void main() {
             debug_name: "Hello Triangle",
             layout: bg_layout,
             bindings: &[BindingInfo {
-                resource: ShaderResource::Dynamic(&allocator),
+                resource: ShaderResource::Dynamic(allocator.state().clone()),
                 binding: 0,
             }],
             ..Default::default()
