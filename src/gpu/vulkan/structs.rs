@@ -1,5 +1,6 @@
 use super::{
-    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocator, DynamicAllocatorState, GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice
+    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocatorState,
+    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
 use std::hash::{Hash, Hasher};
@@ -997,6 +998,64 @@ impl Hash for Attachment {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RenderPassAttachmentInfo {
+    pub name: Option<String>,
+    pub view: ImageView,
+    pub clear_value: Option<ClearValue>,
+    pub description: AttachmentDescription,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RenderPassSubpassTargets {
+    pub color_attachments: [Option<RenderPassAttachmentInfo>; 4],
+    pub depth_attachment: Option<RenderPassAttachmentInfo>,
+}
+
+impl RenderPassSubpassTargets {
+    pub fn color_views(&self) -> [Option<ImageView>; 4] {
+        let mut views = [None; 4];
+        for (dst, src) in views.iter_mut().zip(self.color_attachments.iter()) {
+            *dst = src.as_ref().map(|att| att.view);
+        }
+        views
+    }
+
+    pub fn color_clear_values(&self) -> [Option<ClearValue>; 4] {
+        let mut clears = [None; 4];
+        for (dst, src) in clears.iter_mut().zip(self.color_attachments.iter()) {
+            *dst = src.as_ref().and_then(|att| att.clear_value);
+        }
+        clears
+    }
+
+    pub fn depth_view(&self) -> Option<ImageView> {
+        self.depth_attachment.as_ref().map(|att| att.view)
+    }
+
+    pub fn depth_clear_value(&self) -> Option<ClearValue> {
+        self.depth_attachment
+            .as_ref()
+            .and_then(|att| att.clear_value)
+    }
+
+    pub fn find_color_attachment_mut(
+        &mut self,
+        name: &str,
+    ) -> Option<&mut RenderPassAttachmentInfo> {
+        self.color_attachments
+            .iter_mut()
+            .filter_map(|att| att.as_mut())
+            .find(|att| att.name.as_deref() == Some(name))
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RenderPassWithImages {
+    pub render_pass: Handle<RenderPass>,
+    pub subpasses: Vec<RenderPassSubpassTargets>,
+}
+
 //#[derive(Clone, Default, Hash, PartialEq, Eq)]
 //pub struct Subpass<'a> {
 //    pub colors: &'a [Attachment],
@@ -1111,16 +1170,27 @@ pub struct XrDisplayInfo;
 // -----------------------------------------------------------------------------
 #[cfg(feature = "dashi-serde")]
 pub mod cfg {
-    use std::fs;
-
     use super::*;
     use serde::{Deserialize, Serialize};
 
     // ---------------- RenderPass (authoring) ----------------
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct AttachmentCfg {
+        #[serde(flatten)]
+        pub description: AttachmentDescription,
+        #[serde(default)]
+        pub debug_name: Option<String>,
+        #[serde(default)]
+        pub clear_value: Option<ClearValue>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct SubpassDescriptionCfg {
-        pub color_attachments: Vec<AttachmentDescription>,
-        pub depth_stencil_attachment: Option<AttachmentDescription>,
+        #[serde(default)]
+        pub color_attachments: Vec<AttachmentCfg>,
+        #[serde(default)]
+        pub depth_stencil_attachment: Option<AttachmentCfg>,
+        #[serde(default)]
         pub subpass_dependencies: Vec<SubpassDependency>,
     }
 
@@ -1137,45 +1207,6 @@ pub mod cfg {
         }
         pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
             serde_yaml::from_str(s)
-        }
-    }
-
-    /// Holds the temporary `Vec<SubpassDescription<'a>>` so we can build a
-    /// borrowed `RenderPassInfo<'a>` view when needed (without self-references).
-    pub struct RenderPassBorrowed<'a> {
-        cfg: &'a RenderPassCfg,
-        subpasses: Vec<SubpassDescription<'a>>,
-    }
-
-    impl RenderPassBorrowed<'_> {
-        /// Build a borrowed `RenderPassInfo` view. The returned value borrows
-        /// from `self`, so keep this wrapper alive until the API call that
-        /// consumes the info.
-        pub fn info(&self) -> RenderPassInfo<'_> {
-            RenderPassInfo {
-                debug_name: &self.cfg.debug_name,
-                viewport: self.cfg.viewport,
-                subpasses: &self.subpasses,
-            }
-        }
-    }
-
-    impl RenderPassCfg {
-        /// Prepare a wrapper that owns the `Vec<SubpassDescription<'_>>`.
-        pub fn borrow(&self) -> RenderPassBorrowed<'_> {
-            let mut subpasses: Vec<SubpassDescription<'_>> =
-                Vec::with_capacity(self.subpasses.len());
-            for sp in &self.subpasses {
-                subpasses.push(SubpassDescription {
-                    color_attachments: &sp.color_attachments,
-                    depth_stencil_attachment: sp.depth_stencil_attachment.as_ref(),
-                    subpass_dependencies: &sp.subpass_dependencies,
-                });
-            }
-            RenderPassBorrowed {
-                cfg: self,
-                subpasses,
-            }
         }
     }
 

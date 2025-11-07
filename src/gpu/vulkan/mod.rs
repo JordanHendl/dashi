@@ -2462,15 +2462,137 @@ impl Context {
     }
 
     #[cfg(feature = "dashi-serde")]
-    pub fn make_render_pass_from_yaml(&mut self, yaml_str: &str) -> Result<Handle<RenderPass>> {
+    pub fn make_render_pass_from_yaml(&mut self, yaml_str: &str) -> Result<RenderPassWithImages> {
         let rp_cfg = cfg::RenderPassCfg::from_yaml(&yaml_str)?; // parse YAML
-        let rp_borrowed = rp_cfg.borrow(); // build borrowed view (keeps slices alive)
-        let rp_info: RenderPassInfo = rp_borrowed.info(); // borrowed view
-        self.make_render_pass(&rp_info)
+        let mut color_storage: Vec<Vec<AttachmentDescription>> =
+            Vec::with_capacity(rp_cfg.subpasses.len());
+        let mut depth_storage: Vec<Option<AttachmentDescription>> =
+            Vec::with_capacity(rp_cfg.subpasses.len());
+        for subpass in &rp_cfg.subpasses {
+            color_storage.push(
+                subpass
+                    .color_attachments
+                    .iter()
+                    .map(|att| att.description)
+                    .collect(),
+            );
+            depth_storage.push(
+                subpass
+                    .depth_stencil_attachment
+                    .as_ref()
+                    .map(|att| att.description),
+            );
+        }
+
+        let mut subpass_descriptions: Vec<SubpassDescription<'_>> =
+            Vec::with_capacity(rp_cfg.subpasses.len());
+        for (idx, subpass_cfg) in rp_cfg.subpasses.iter().enumerate() {
+            subpass_descriptions.push(SubpassDescription {
+                color_attachments: &color_storage[idx],
+                depth_stencil_attachment: depth_storage[idx].as_ref(),
+                subpass_dependencies: &subpass_cfg.subpass_dependencies,
+            });
+        }
+
+        let rp_info = RenderPassInfo {
+            debug_name: &rp_cfg.debug_name,
+            viewport: rp_cfg.viewport,
+            subpasses: &subpass_descriptions,
+        };
+        let render_pass = self.make_render_pass(&rp_info)?;
+
+        let width = rp_cfg.viewport.scissor.w;
+        let height = rp_cfg.viewport.scissor.h;
+
+        let mut subpasses: Vec<RenderPassSubpassTargets> =
+            Vec::with_capacity(rp_cfg.subpasses.len());
+
+        for (subpass_idx, subpass_cfg) in rp_cfg.subpasses.iter().enumerate() {
+            let mut targets = RenderPassSubpassTargets::default();
+
+            for (attachment_idx, attachment_cfg) in subpass_cfg.color_attachments.iter().enumerate()
+            {
+                if attachment_idx >= targets.color_attachments.len() {
+                    return Err(GPUError::Unimplemented(
+                        "render pass YAML supports up to 4 color attachments per subpass",
+                    ));
+                }
+
+                let debug_name = attachment_cfg.debug_name.clone().unwrap_or_else(|| {
+                    format!(
+                        "{}.subpass{}/color{}",
+                        rp_cfg.debug_name, subpass_idx, attachment_idx
+                    )
+                });
+
+                let image_info = ImageInfo {
+                    debug_name: &debug_name,
+                    dim: [width, height, 1],
+                    layers: 1,
+                    format: attachment_cfg.description.format,
+                    mip_levels: 1,
+                    initial_data: None,
+                };
+
+                let image = self.make_image(&image_info)?;
+                let aspect = if attachment_cfg.description.format == Format::D24S8 {
+                    AspectMask::DepthStencil
+                } else {
+                    AspectMask::Color
+                };
+
+                targets.color_attachments[attachment_idx] = Some(RenderPassAttachmentInfo {
+                    name: Some(debug_name),
+                    view: ImageView {
+                        img: image,
+                        layer: 0,
+                        mip_level: 0,
+                        aspect,
+                    },
+                    clear_value: attachment_cfg.clear_value,
+                    description: attachment_cfg.description,
+                });
+            }
+
+            if let Some(depth_cfg) = &subpass_cfg.depth_stencil_attachment {
+                let debug_name = depth_cfg.debug_name.clone().unwrap_or_else(|| {
+                    format!("{}.subpass{}/depth", rp_cfg.debug_name, subpass_idx)
+                });
+
+                let image_info = ImageInfo {
+                    debug_name: &debug_name,
+                    dim: [width, height, 1],
+                    layers: 1,
+                    format: depth_cfg.description.format,
+                    mip_levels: 1,
+                    initial_data: None,
+                };
+
+                let image = self.make_image(&image_info)?;
+                targets.depth_attachment = Some(RenderPassAttachmentInfo {
+                    name: Some(debug_name),
+                    view: ImageView {
+                        img: image,
+                        layer: 0,
+                        mip_level: 0,
+                        aspect: AspectMask::DepthStencil,
+                    },
+                    clear_value: depth_cfg.clear_value,
+                    description: depth_cfg.description,
+                });
+            }
+
+            subpasses.push(targets);
+        }
+
+        Ok(RenderPassWithImages {
+            render_pass,
+            subpasses,
+        })
     }
 
     #[cfg(feature = "dashi-serde")]
-    pub fn make_render_pass_from_yaml_file(&mut self, path: &str) -> Result<Handle<RenderPass>> {
+    pub fn make_render_pass_from_yaml_file(&mut self, path: &str) -> Result<RenderPassWithImages> {
         let s = cfg::load_text(path)?;
         self.make_render_pass_from_yaml(&s)
     }
@@ -2492,8 +2614,7 @@ impl Context {
         yaml_str: &str,
     ) -> Result<Vec<Handle<BindGroupLayout>>> {
         let cfgs = cfg::BindGroupLayoutCfg::vec_from_yaml(yaml_str)?;
-        cfgs
-            .iter()
+        cfgs.iter()
             .map(|cfg| {
                 let borrowed = cfg.borrow();
                 let info = borrowed.info();
@@ -2537,8 +2658,7 @@ impl Context {
         yaml_str: &str,
     ) -> Result<Vec<Handle<BindTableLayout>>> {
         let cfgs = cfg::BindTableLayoutCfg::vec_from_yaml(yaml_str)?;
-        cfgs
-            .iter()
+        cfgs.iter()
             .map(|cfg| {
                 let borrowed = cfg.borrow();
                 let info = borrowed.info();
@@ -3025,8 +3145,11 @@ impl Context {
         let pipeline_info = pipeline_builder.build();
 
         let graphics_pipelines = unsafe {
-            self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)?
+            self.device.create_graphics_pipelines(
+                vk::PipelineCache::null(),
+                &[pipeline_info],
+                None,
+            )?
         };
 
         self.set_name(
