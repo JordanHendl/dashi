@@ -1,7 +1,7 @@
 // examples/hello_triangle_rpass_cfg.rs
 // (or src/bin/hello_triangle_rpass_cfg.rs)
 
-use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
+use dashi::driver::command::{BeginDrawing, DrawIndexed};
 use dashi::gpu::execution::{BindingLayoutManager, BindingManager, PipelineManager};
 use dashi::*;
 use std::collections::HashMap;
@@ -56,8 +56,16 @@ viewport:
   max_depth: 1.0
 subpasses:
   - color_attachments:
-      - { format: RGBA8, samples: S1, load_op: Clear, store_op: Store,
-          stencil_load_op: DontCare, stencil_store_op: DontCare }
+      - debug_name: "hello_triangle.swapchain"
+        format: BGRA8
+        samples: S1
+        load_op: Clear
+        store_op: Store
+        stencil_load_op: DontCare
+        stencil_store_op: DontCare
+        clear_value:
+          kind: color
+          value: [0.0, 0.0, 0.0, 1.0]
     depth_stencil_attachment: ~
     subpass_dependencies: []
 "#;
@@ -78,6 +86,7 @@ bind_group_layouts:
 const BIND_GROUP_LAYOUT_NAME: &str = "hello_triangle.layouts.main";
 const PIPELINE_NAME: &str = "hello_triangle.pipeline.main";
 const RENDER_PASS_NAME: &str = "hello_triangle.render_pass.main";
+const SWAPCHAIN_ATTACHMENT_NAME: &str = "hello_triangle.swapchain";
 const HELLO_TRIANGLE_VERT_SPV: &str = env!("HELLO_TRIANGLE_VERT_SPV");
 const HELLO_TRIANGLE_FRAG_SPV: &str = env!("HELLO_TRIANGLE_FRAG_SPV");
 
@@ -168,23 +177,6 @@ fn main() {
         })
         .unwrap();
 
-    // Allocate the framebuffer image & view
-    let fb = ctx
-        .make_image(&ImageInfo {
-            debug_name: "color_attachment",
-            dim: [WIDTH, HEIGHT, 1],
-            format: Format::RGBA8,
-            mip_levels: 8, // set >1 to automatically generate mipmaps
-            initial_data: None,
-            ..Default::default()
-        })
-        .unwrap();
-
-    let fb_view = ImageView {
-        img: fb,
-        ..Default::default()
-    };
-
     // Use the layout manager to author and resolve bind layouts via string keys.
     let binding_layouts = BindingLayoutManager::new(&mut ctx as *mut _, 2, 1);
     let binding_manager: Arc<BindingManager> = binding_layouts.binding_manager();
@@ -200,9 +192,12 @@ fn main() {
         .expect("bind group layout registered");
 
     // Make a render pass. This describes the targets we wish to draw to.
-    let render_pass = ctx
+    let mut render_pass_with_images = ctx
         .make_render_pass_from_yaml(RENDERPASS_YAML)
         .expect("render_pass");
+
+    let render_pass = render_pass_with_images.render_pass;
+    let subpass_count = render_pass_with_images.subpasses.len();
 
     let mut render_passes = HashMap::new();
     render_passes.insert(RENDER_PASS_NAME.to_string(), render_pass);
@@ -215,6 +210,11 @@ fn main() {
     let graphics_pipeline = pipeline_manager
         .graphics_pipeline(PIPELINE_NAME)
         .expect("graphics pipeline registered");
+
+    let mut subpass_pipelines = vec![None; subpass_count];
+    if let Some(slot) = subpass_pipelines.get_mut(0) {
+        *slot = Some(graphics_pipeline);
+    }
 
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
@@ -287,63 +287,65 @@ fn main() {
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
-            // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 
-            // Begin render pass & bind pipeline
-            let mut draw = stream.begin_drawing(&BeginDrawing {
-                viewport: Viewport {
-                    area: FRect2D {
-                        w: WIDTH as f32,
-                        h: HEIGHT as f32,
-                        ..Default::default()
-                    },
-                    scissor: Rect2D {
-                        w: WIDTH,
-                        h: HEIGHT,
-                        ..Default::default()
-                    },
+            let viewport = Viewport {
+                area: FRect2D {
+                    w: WIDTH as f32,
+                    h: HEIGHT as f32,
                     ..Default::default()
                 },
-                pipeline: graphics_pipeline,
-                color_attachments: [Some(fb_view), None, None, None],
-                depth_attachment: None,
-                clear_values: [
-                    Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
-                    None,
-                    None,
-                    None,
-                ],
-            });
-
-            // Bump alloc some data to write the triangle position to.
-            let mut buf = allocator.bump().unwrap();
-            let pos = &mut buf.slice::<[f32; 2]>()[0];
-            pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
-            pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
-
-            // Append a draw call using our vertices & indices & dynamic buffers
-            draw.draw_indexed(&DrawIndexed {
-                vertices,
-                indices,
-                index_count: INDICES.len() as u32,
-                bind_groups: [Some(bind_group), None, None, None],
-                dynamic_buffers: [Some(buf), None, None, None],
+                scissor: Rect2D {
+                    w: WIDTH,
+                    h: HEIGHT,
+                    ..Default::default()
+                },
                 ..Default::default()
-            });
+            };
 
-            // End drawing.
-            stream = draw.stop_drawing();
+            for (subpass_idx, subpass_targets) in
+                render_pass_with_images.subpasses.iter_mut().enumerate()
+            {
+                if let Some(attachment) =
+                    subpass_targets.find_color_attachment_mut(SWAPCHAIN_ATTACHMENT_NAME)
+                {
+                    attachment.view = img;
+                }
 
-            // Blit the framebuffer to the display's image
-            stream.blit_images(&BlitImage {
-                src: fb,
-                dst: img.img,
-                filter: Filter::Nearest,
-                ..Default::default()
-            });
+                let Some(pipeline) = subpass_pipelines
+                    .get(subpass_idx)
+                    .and_then(|pipeline| *pipeline)
+                else {
+                    continue;
+                };
 
-            // Transition the display image for presentation
+                let mut draw = stream.begin_drawing(&BeginDrawing {
+                    viewport,
+                    pipeline,
+                    color_attachments: subpass_targets.color_views(),
+                    depth_attachment: subpass_targets.depth_view(),
+                    clear_values: subpass_targets.color_clear_values(),
+                });
+
+                if subpass_idx == 0 {
+                    let mut buf = allocator.bump().unwrap();
+                    let pos = &mut buf.slice::<[f32; 2]>()[0];
+                    pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
+                    pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
+
+                    draw.draw_indexed(&DrawIndexed {
+                        vertices,
+                        indices,
+                        index_count: INDICES.len() as u32,
+                        bind_groups: [Some(bind_group), None, None, None],
+                        dynamic_buffers: [Some(buf), None, None, None],
+                        ..Default::default()
+                    });
+                }
+
+                stream = draw.stop_drawing();
+            }
+
             stream.prepare_for_presentation(img.img);
 
             stream.end().append(list);
