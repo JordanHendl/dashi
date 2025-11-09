@@ -5,7 +5,11 @@ use dashi::builders::{
 };
 use dashi::driver::command::{BeginDrawing, CommandSink, DrawIndexed, EndDrawing};
 use dashi::*;
+use driver::command::BlitImage;
 use glam::{Mat4, Quat, Vec3};
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event_loop::ControlFlow;
+use winit::platform::run_return::EventLoopExtRunReturn;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -255,44 +259,111 @@ void main() {
         .build(&mut ctx)?;
 
     println!("Created bind table: {:?}", table);
-
-    allocator.reset();
-    let ctx_ptr = &mut ctx as *mut _;
-    let mut list = ctx
-        .pool_mut(QueueType::Graphics)
-        .begin(ctx_ptr, "bindless_triangle", false)?;
-
-    let mut color_attachments = [None; 4];
-    color_attachments[0] = Some(color_view);
-    let mut clear_values = [None; 4];
-    clear_values[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0]));
-
-    list.begin_drawing(&BeginDrawing {
-        viewport,
-        pipeline: graphics_pipeline,
-        color_attachments,
-        depth_attachment: None,
-        clear_values,
-    });
-
-    for slot in 0..transforms.len() {
-        let mut buf = allocator.bump().expect("allocator exhausted");
-        buf.slice::<u32>()[0] = slot as u32;
-        list.draw_indexed(&DrawIndexed {
-            vertices,
-            indices,
-            index_count: INDICES.len() as u32,
-            bind_groups: [Some(bind_group), None, None, None],
-            bind_tables: [Some(table), None, None, None],
-            dynamic_buffers: [Some(buf), None, None, None],
+    let mut ring = ctx
+        .make_command_ring(&CommandQueueInfo2 {
+            debug_name: "cmd",
             ..Default::default()
-        });
+        })
+        .unwrap();
+
+    let mut display = ctx.make_display(&Default::default()).unwrap();
+    let sems = ctx.make_semaphores(2).unwrap();
+    'running: loop {
+        // Reset the allocator
+        allocator.reset();
+
+        // Listen to events
+        let mut should_exit = false;
+        {
+            let event_loop = display.winit_event_loop();
+            event_loop.run_return(|event, _target, control_flow| {
+                *control_flow = ControlFlow::Exit;
+                if let Event::WindowEvent { event, .. } = event {
+                    match event {
+                        WindowEvent::CloseRequested => should_exit = true,
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    state: ElementState::Pressed,
+                                    ..
+                                },
+                            ..
+                        } => should_exit = true,
+                        _ => {}
+                    }
+                }
+            });
+        }
+        if should_exit {
+            break 'running;
+        }
+
+        // Get the next image from the display.
+        let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
+
+        allocator.reset();
+        ring.record(|list| {
+            let ctx_ptr = &mut ctx as *mut _;
+
+            // Begin render pass & bind pipeline
+            let mut stream = CommandStream::new().begin();
+
+            let mut color_attachments = [None; 4];
+            color_attachments[0] = Some(color_view);
+            let mut clear_values = [None; 4];
+            clear_values[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0]));
+
+            let mut drawing = stream.begin_drawing(&BeginDrawing {
+                viewport,
+                pipeline: graphics_pipeline,
+                color_attachments,
+                depth_attachment: None,
+                clear_values,
+            });
+
+            for slot in 0..transforms.len() {
+                let mut buf = allocator.bump().expect("allocator exhausted");
+                buf.slice::<u32>()[0] = slot as u32;
+                drawing.draw_indexed(&DrawIndexed {
+                    vertices,
+                    indices,
+                    index_count: INDICES.len() as u32,
+                    bind_groups: [Some(bind_group), None, None, None],
+                    bind_tables: [Some(table), None, None, None],
+                    dynamic_buffers: [Some(buf), None, None, None],
+                    ..Default::default()
+                });
+            }
+
+            stream = drawing.stop_drawing();
+
+            // Blit the framebuffer to the display's image
+            stream.blit_images(&BlitImage {
+                src: color_view.img,
+                dst: img.img,
+                filter: Filter::Nearest,
+                ..Default::default()
+            });
+            // Transition the display image for presentation
+            stream.prepare_for_presentation(img.img);
+
+            stream.end().append(list);
+        })
+        .expect("Unable to record drawing commands!");
+
+        // Submit our recorded commands
+        ring.submit(&SubmitInfo {
+            wait_sems: &[sem],
+            signal_sems: &[sems[0], sems[1]],
+            ..Default::default()
+        })
+        .unwrap();
+
+        // Present the display image, waiting on the semaphore that will signal when our
+        // drawing/blitting is done.
+        ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
-
-    list.end_drawing(&EndDrawing::default());
-
-    let fence = ctx.submit(&mut list, &Default::default())?;
-    ctx.wait(fence)?;
 
     ctx.destroy_dynamic_allocator(allocator);
     ctx.destroy();
