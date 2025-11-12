@@ -2,8 +2,8 @@ use crate::utils::Handle;
 use ash::vk;
 
 use super::{
-    Context, DisplayInfo, Fence, GPUError, Image, ImageView, Semaphore, WindowBuffering,
-    WindowInfo,
+    Context, DisplayInfo, Fence, GPUError, Image, ImageView, SampleCount, Semaphore,
+    WindowBuffering, WindowInfo,
 };
 
 #[cfg(feature = "dashi-openxr")]
@@ -307,6 +307,7 @@ impl Context {
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
                 format: super::vk_to_lib_image_format(wanted_format)?,
+                samples: SampleCount::S1,
             }) {
                 Some(handle) => {
                     self.oneshot_transition_image_noview(

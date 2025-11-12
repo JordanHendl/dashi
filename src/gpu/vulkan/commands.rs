@@ -2,7 +2,7 @@
 
 use ash::vk;
 
-use super::convert_rect2d_to_vulkan;
+use super::{convert_rect2d_to_vulkan, SampleCount, SubpassSampleInfo};
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::driver::state::{Layout, LayoutTransition};
@@ -233,6 +233,92 @@ impl CommandQueue {
     pub(crate) fn ctx_ref(&self) -> &'static mut Context {
         unsafe { &mut *self.ctx }
     }
+
+    fn validate_subpass_samples(
+        &mut self,
+        subpass_samples: &[SubpassSampleInfo],
+        subpass_index: usize,
+        color_attachments: &[Option<crate::ImageView>; 4],
+        depth_attachment: Option<crate::ImageView>,
+        pipeline_samples: Option<SampleCount>,
+    ) -> Result<(), GPUError> {
+        let subpass_info =
+            subpass_samples
+                .get(subpass_index)
+                .ok_or_else(|| GPUError::InvalidSubpass {
+                    subpass: subpass_index as u32,
+                    available: subpass_samples.len() as u32,
+                })?;
+
+        for (attachment_idx, attachment) in color_attachments.iter().enumerate() {
+            if let Some(view) = attachment {
+                let image = self
+                    .ctx_ref()
+                    .images
+                    .get_ref(view.img)
+                    .ok_or(GPUError::SlotError())?;
+
+                if let Some(expected) = subpass_info.color_samples.get(attachment_idx) {
+                    if image.samples != *expected {
+                        return Err(GPUError::MismatchedSampleCount {
+                            context: format!(
+                                "image for render pass subpass {} color attachment {}",
+                                subpass_index, attachment_idx
+                            ),
+                            expected: *expected,
+                            actual: image.samples,
+                        });
+                    }
+                }
+
+                if let Some(pipeline_samples) = pipeline_samples {
+                    if image.samples != pipeline_samples {
+                        return Err(GPUError::MismatchedSampleCount {
+                            context: format!(
+                                "graphics pipeline vs image for color attachment {}",
+                                attachment_idx
+                            ),
+                            expected: pipeline_samples,
+                            actual: image.samples,
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(view) = depth_attachment {
+            let image = self
+                .ctx_ref()
+                .images
+                .get_ref(view.img)
+                .ok_or(GPUError::SlotError())?;
+
+            if let Some(expected) = subpass_info.depth_sample {
+                if image.samples != expected {
+                    return Err(GPUError::MismatchedSampleCount {
+                        context: format!(
+                            "image for render pass subpass {} depth attachment",
+                            subpass_index
+                        ),
+                        expected,
+                        actual: image.samples,
+                    });
+                }
+
+                if let Some(pipeline_samples) = pipeline_samples {
+                    if image.samples != pipeline_samples {
+                        return Err(GPUError::MismatchedSampleCount {
+                            context: "graphics pipeline vs image for depth attachment".to_string(),
+                            expected: pipeline_samples,
+                            actual: image.samples,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl CommandSink for CommandQueue {
@@ -266,6 +352,22 @@ impl CommandSink for CommandQueue {
             .get_ref(cmd.render_pass)
             .ok_or(GPUError::SlotError())
             .unwrap();
+        let rp_raw = rp_obj.raw;
+        let fb = rp_obj.fb;
+
+        #[cfg(debug_assertions)]
+        {
+            let subpass_samples = rp_obj.subpass_samples.clone();
+            if let Err(err) = self.validate_subpass_samples(
+                &subpass_samples,
+                0,
+                &cmd.color_attachments,
+                cmd.depth_attachment,
+                None,
+            ) {
+                panic!("{}", err);
+            }
+        }
 
         let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
         self.curr_attachments.clear();
@@ -319,8 +421,8 @@ impl CommandSink for CommandQueue {
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
-                    .render_pass(rp_obj.raw)
-                    .framebuffer(rp_obj.fb)
+                    .render_pass(rp_raw)
+                    .framebuffer(fb)
                     .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
                     .clear_values(&clears)
                     .push_next(&mut attachment_info)
@@ -333,14 +435,14 @@ impl CommandSink for CommandQueue {
     }
 
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
-        let pipeline_rp = {
+        let (pipeline_rp, pipeline_subpass, layout_handle) = {
             let gfx = self
                 .ctx_ref()
                 .gfx_pipelines
                 .get_ref(cmd.pipeline)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
-            gfx.render_pass
+            (gfx.render_pass, gfx.subpass as usize, gfx.layout)
         };
 
         if self.curr_rp.map_or(false, |rp| rp == pipeline_rp) {
@@ -376,6 +478,33 @@ impl CommandSink for CommandQueue {
             .get_ref(pipeline_rp)
             .ok_or(GPUError::SlotError())
             .unwrap();
+        let rp_raw = rp_obj.raw;
+        let fb = rp_obj.fb;
+
+        #[cfg(debug_assertions)]
+        {
+            let pipeline_samples = {
+                let layout = self
+                    .ctx_ref()
+                    .gfx_pipeline_layouts
+                    .get_ref(layout_handle)
+                    .ok_or(GPUError::SlotError())
+                    .unwrap();
+                layout.sample_count
+            };
+
+            let subpass_samples = rp_obj.subpass_samples.clone();
+
+            if let Err(err) = self.validate_subpass_samples(
+                &subpass_samples,
+                pipeline_subpass,
+                &cmd.color_attachments,
+                cmd.depth_attachment,
+                Some(pipeline_samples),
+            ) {
+                panic!("{}", err);
+            }
+        }
 
         let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
         self.curr_attachments.clear();
@@ -429,8 +558,8 @@ impl CommandSink for CommandQueue {
             self.ctx_ref().device.cmd_begin_render_pass(
                 self.cmd_buf,
                 &vk::RenderPassBeginInfo::builder()
-                    .render_pass(rp_obj.raw)
-                    .framebuffer(rp_obj.fb)
+                    .render_pass(rp_raw)
+                    .framebuffer(fb)
                     .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
                     .clear_values(&clears)
                     .push_next(&mut attachment_info)

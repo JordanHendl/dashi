@@ -1,6 +1,6 @@
-use std::fmt;
+use super::structs::{SampleCount, ShaderType};
 use ash::vk;
-use super::structs::ShaderType;
+use std::fmt;
 
 #[derive(Debug)]
 pub struct VulkanError {
@@ -31,6 +31,15 @@ pub enum GPUError {
     UnsupportedFormat(vk::Format),
     UnsupportedShaderStage(ShaderType),
     Unimplemented(&'static str),
+    MismatchedSampleCount {
+        context: String,
+        expected: SampleCount,
+        actual: SampleCount,
+    },
+    InvalidSubpass {
+        subpass: u32,
+        available: u32,
+    },
 }
 
 /// Convenient crate-wide result type.
@@ -68,19 +77,33 @@ impl fmt::Display for GPUError {
             GPUError::UnsupportedFormat(format) => write!(f, "Format {:?} not supported", format),
             GPUError::UnsupportedShaderStage(stage) => write!(f, "Shader Stage {:?} not supported", stage),
             GPUError::Unimplemented(feature) => write!(f, "Unimplemented Feature: {}", feature),
+            GPUError::MismatchedSampleCount {
+                context,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "Multisample mismatch for {}: expected {:?}, got {:?}. Ensure image, render pass, and graphics pipeline sample counts match.",
+                context, expected, actual
+            ),
+            GPUError::InvalidSubpass { subpass, available } => write!(
+                f,
+                "Invalid subpass index {} (render pass has {} subpasses)",
+                subpass, available
+            ),
         }
     }
 }
 
 impl From<anyhow::Error> for GPUError {
-    fn from(value: anyhow::Error) -> Self { 
+    fn from(value: anyhow::Error) -> Self {
         todo!()
     }
 }
 
 #[cfg(feature = "dashi-serde")]
 impl From<serde_yaml::Error> for GPUError {
-    fn from(value: serde_yaml::Error) -> Self { 
+    fn from(value: serde_yaml::Error) -> Self {
         todo!()
     }
 }

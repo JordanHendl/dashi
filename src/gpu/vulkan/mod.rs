@@ -73,12 +73,19 @@ unsafe extern "system" fn vulkan_debug_callback(
     vk::FALSE
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SubpassSampleInfo {
+    pub color_samples: Vec<SampleCount>,
+    pub depth_sample: Option<SampleCount>,
+}
+
 #[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) fb: vk::Framebuffer,
     pub(super) viewport: Viewport,
     pub(super) attachment_formats: Vec<Format>,
+    pub(super) subpass_samples: Vec<SubpassSampleInfo>,
 }
 
 #[derive(Clone)]
@@ -1138,6 +1145,7 @@ impl Context {
                 .build(),
             dim: info.dim,
             format: info.format,
+            samples: info.samples,
         }) {
             Some(h) => {
                 self.init_image(h, &info)?;
@@ -2697,10 +2705,12 @@ impl Context {
         let mut subpasses = Vec::with_capacity(256);
         let mut deps = Vec::with_capacity(256);
         let mut attachment_formats = Vec::with_capacity(256);
+        let mut subpass_samples = Vec::with_capacity(info.subpasses.len());
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
             let attachment_offset = attachments.len();
             let color_offset = color_attachment_refs.len();
+            let mut subpass_sample_info = SubpassSampleInfo::default();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
                 let attachment_desc = vk::AttachmentDescription {
@@ -2723,6 +2733,9 @@ impl Context {
                 attachments.push(attachment_desc);
                 color_attachment_refs.push(attachment_ref);
                 attachment_formats.push(color_attachment.format);
+                subpass_sample_info
+                    .color_samples
+                    .push(color_attachment.samples);
             }
 
             // Process depth-stencil attachment
@@ -2744,6 +2757,7 @@ impl Context {
                     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 });
                 attachment_formats.push(depth_stencil_attachment.format);
+                subpass_sample_info.depth_sample = Some(depth_stencil_attachment.samples);
             }
 
             let colors = if color_attachment_refs.is_empty() {
@@ -2776,6 +2790,8 @@ impl Context {
                     dependency_flags: vk::DependencyFlags::empty(),
                 });
             }
+
+            subpass_samples.push(subpass_sample_info);
         }
         // Create the render pass info
         let render_pass_info = vk::RenderPassCreateInfo {
@@ -2839,6 +2855,7 @@ impl Context {
                 fb,
                 viewport: info.viewport,
                 attachment_formats,
+                subpass_samples,
             })
             .unwrap());
     }
@@ -2959,11 +2976,11 @@ impl Context {
             .line_width(1.0)
             .build();
 
-        // Step 6: Multisampling (we'll disable multisampling for now)
+        // Step 6: Multisampling
         let multisampling = vk::PipelineMultisampleStateCreateInfo::builder()
-            .sample_shading_enable(false)
+            .sample_shading_enable(info.details.min_sample_shading > 0.0)
             .rasterization_samples(info.details.sample_count.into())
-            .min_sample_shading(0.0) 
+            .min_sample_shading(info.details.min_sample_shading)
             .build();
 
         // Step 7: Depth and Stencil State (depth testing)
@@ -3012,6 +3029,8 @@ impl Context {
                 input_assembly,
                 color_blend_states: color_blends,
                 dynamic_states,
+                sample_count: info.details.sample_count,
+                min_sample_shading: info.details.min_sample_shading,
             })
             .unwrap());
     }
@@ -3070,6 +3089,39 @@ impl Context {
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
         let rp_ref = self.render_passes.get_ref(info.render_pass).unwrap();
+        let subpass_index = info.subpass_id as usize;
+        let subpass_info =
+            rp_ref
+                .subpass_samples
+                .get(subpass_index)
+                .ok_or_else(|| GPUError::InvalidSubpass {
+                    subpass: info.subpass_id as u32,
+                    available: rp_ref.subpass_samples.len() as u32,
+                })?;
+
+        for (attachment_idx, expected) in subpass_info.color_samples.iter().enumerate() {
+            if layout.sample_count != *expected {
+                return Err(GPUError::MismatchedSampleCount {
+                    context: format!(
+                        "render pass subpass {} color attachment {}",
+                        subpass_index, attachment_idx
+                    ),
+                    expected: *expected,
+                    actual: layout.sample_count,
+                });
+            }
+        }
+
+        if let Some(depth_sample) = subpass_info.depth_sample {
+            if layout.sample_count != depth_sample {
+                return Err(GPUError::MismatchedSampleCount {
+                    context: format!("render pass subpass {} depth attachment", subpass_index),
+                    expected: depth_sample,
+                    actual: layout.sample_count,
+                });
+            }
+        }
+
         let rp = rp_ref.raw;
 
         let rp_viewport = self
@@ -3167,6 +3219,7 @@ impl Context {
                 render_pass: info.render_pass,
                 raw: graphics_pipelines[0],
                 layout: info.layout,
+                subpass: info.subpass_id,
             })
             .unwrap());
     }

@@ -18,6 +18,8 @@ pub struct GraphicsPipelineLayout {
     pub(super) vertex_attribs: Vec<vk::VertexInputAttributeDescription>,
     pub(super) dynamic_states: Vec<vk::DynamicState>,
     pub(super) layout: vk::PipelineLayout,
+    pub(super) sample_count: SampleCount,
+    pub(super) min_sample_shading: f32,
 }
 
 #[derive(Clone, Default)]
@@ -31,4 +33,5 @@ pub struct GraphicsPipeline {
     pub(super) raw: vk::Pipeline,
     pub(super) render_pass: Handle<RenderPass>,
     pub(super) layout: Handle<GraphicsPipelineLayout>,
+    pub(super) subpass: u8,
 }
