@@ -105,7 +105,7 @@ pub enum StoreOp {
     DontCare,
 }
 
-#[derive(Hash, Debug, Copy, Clone, Default)]
+#[derive(Hash, Debug, Copy, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
     #[default]
@@ -815,6 +815,7 @@ pub struct GraphicsPipelineDetails {
     pub front_face: VertexOrdering,
     pub depth_test: Option<DepthInfo>,
     pub sample_count: SampleCount,
+    pub min_sample_shading: f32,
     /// Pipeline states that will be configured dynamically at draw time.
     pub dynamic_states: Vec<DynamicState>,
 }
@@ -828,6 +829,7 @@ impl Default for GraphicsPipelineDetails {
             depth_test: None,
             color_blend_states: vec![Default::default()],
             sample_count: SampleCount::S1,
+            min_sample_shading: 0.0,
             dynamic_states: Vec::new(),
             subpass: 0,
         }

@@ -2,7 +2,7 @@ use crate::utils::Handle;
 use ash::vk;
 use vk_mem;
 
-use super::Format;
+use super::{Format, SampleCount};
 
 #[derive(Debug)]
 pub struct Image {
@@ -12,6 +12,7 @@ pub struct Image {
     pub(crate) format: Format,
     pub(crate) layouts: Vec<vk::ImageLayout>,
     pub(crate) sub_layers: vk::ImageSubresourceLayers,
+    pub(crate) samples: SampleCount,
 }
 
 #[derive(Debug)]
@@ -25,4 +26,3 @@ pub struct VkImageView {
     pub(crate) range: vk::ImageSubresourceRange,
     pub(crate) view: vk::ImageView,
 }
-
