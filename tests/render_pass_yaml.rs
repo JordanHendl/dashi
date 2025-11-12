@@ -105,6 +105,7 @@ fn yaml_render_pass_allows_overriding_attachment_views() {
             format: Format::BGRA8,
             mip_levels: 1,
             initial_data: None,
+            ..Default::default()
         })
         .expect("override image");
 

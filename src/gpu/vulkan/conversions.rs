@@ -128,6 +128,12 @@ impl From<DynamicState> for vk::DynamicState {
     }
 }
 
+impl From<SampleCount> for vk::SampleCountFlags {
+    fn from(value: SampleCount) -> vk::SampleCountFlags {
+        convert_sample_count(value)
+    }
+}
+
 impl From<SamplerInfo> for vk::SamplerCreateInfo {
     fn from(info: SamplerInfo) -> Self {
         vk::SamplerCreateInfo {
@@ -241,7 +247,12 @@ pub(super) fn convert_store_op(store_op: StoreOp) -> vk::AttachmentStoreOp {
 
 pub(super) fn convert_sample_count(sample_count: SampleCount) -> vk::SampleCountFlags {
     match sample_count {
-        SampleCount::S1 => vk::SampleCountFlags::TYPE_1,
-        SampleCount::S2 => vk::SampleCountFlags::TYPE_2,
+        SampleCount::S1  => vk::SampleCountFlags::TYPE_1,
+        SampleCount::S2  => vk::SampleCountFlags::TYPE_2,
+        SampleCount::S4  => vk::SampleCountFlags::TYPE_4,
+        SampleCount::S8  => vk::SampleCountFlags::TYPE_8,
+        SampleCount::S16 => vk::SampleCountFlags::TYPE_16,
+        SampleCount::S32 => vk::SampleCountFlags::TYPE_32,
+        SampleCount::S64 => vk::SampleCountFlags::TYPE_64,
     }
 }

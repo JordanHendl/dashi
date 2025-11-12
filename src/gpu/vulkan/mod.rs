@@ -1111,7 +1111,7 @@ impl Context {
                     .initial_layout(vk::ImageLayout::UNDEFINED)
                     .usage(base_usage_flags)
                     .image_type(vk::ImageType::TYPE_2D)
-                    .samples(vk::SampleCountFlags::TYPE_1)
+                    .samples(info.samples.into())
                     .tiling(vk::ImageTiling::OPTIMAL)
                     .flags(vk::ImageCreateFlags::empty())
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -2532,6 +2532,7 @@ impl Context {
                     format: attachment_cfg.description.format,
                     mip_levels: 1,
                     initial_data: None,
+                    samples: attachment_cfg.description.samples,
                 };
 
                 let image = self.make_image(&image_info)?;
@@ -2566,6 +2567,7 @@ impl Context {
                     format: depth_cfg.description.format,
                     mip_levels: 1,
                     initial_data: None,
+                    samples: depth_cfg.description.samples,
                 };
 
                 let image = self.make_image(&image_info)?;
@@ -2960,7 +2962,8 @@ impl Context {
         // Step 6: Multisampling (we'll disable multisampling for now)
         let multisampling = vk::PipelineMultisampleStateCreateInfo::builder()
             .sample_shading_enable(false)
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+            .rasterization_samples(info.details.sample_count.into())
+            .min_sample_shading(0.0) 
             .build();
 
         // Step 7: Depth and Stencil State (depth testing)

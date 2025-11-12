@@ -111,8 +111,51 @@ pub enum SampleCount {
     #[default]
     S1,
     S2,
+    S4,
+    S8,
+    S16,
+    S32,
+    S64,
 }
 
+impl SampleCount {
+    pub fn from_samples(samples: u32) -> Self {
+        // Clamp to range [1, 64]
+        let clamped = samples.clamp(1, 64);
+
+        // Round to nearest power of two
+        let next_pow2 = clamped.next_power_of_two();
+        let prev_pow2 = next_pow2 >> 1;
+
+        let closest_pow2 = if next_pow2 - clamped < clamped - prev_pow2 {
+            next_pow2
+        } else {
+            prev_pow2.max(1)
+        };
+
+        match closest_pow2 {
+            1 => Self::S1,
+            2 => Self::S2,
+            4 => Self::S4,
+            8 => Self::S8,
+            16 => Self::S16,
+            32 => Self::S32,
+            _ => Self::S64, // covers 64 and above
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::S1 => 1,
+            Self::S2 => 2,
+            Self::S4 => 4,
+            Self::S8 => 8,
+            Self::S16 => 16,
+            Self::S32 => 32,
+            Self::S64 => 64,
+        }
+    }
+}
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BarrierPoint {
@@ -246,6 +289,7 @@ pub struct ImageInfo<'a> {
     pub layers: u32,
     pub format: Format,
     pub mip_levels: u32,
+    pub samples: SampleCount,
     pub initial_data: Option<&'a [u8]>,
 }
 
@@ -257,6 +301,7 @@ impl<'a> Default for ImageInfo<'a> {
             layers: 1,
             format: Format::RGBA8,
             mip_levels: 1,
+            samples: SampleCount::S1,
             initial_data: None,
         }
     }
@@ -769,6 +814,7 @@ pub struct GraphicsPipelineDetails {
     pub culling: CullMode,
     pub front_face: VertexOrdering,
     pub depth_test: Option<DepthInfo>,
+    pub sample_count: SampleCount,
     /// Pipeline states that will be configured dynamically at draw time.
     pub dynamic_states: Vec<DynamicState>,
 }
@@ -781,6 +827,7 @@ impl Default for GraphicsPipelineDetails {
             front_face: VertexOrdering::Clockwise,
             depth_test: None,
             color_blend_states: vec![Default::default()],
+            sample_count: SampleCount::S1,
             dynamic_states: Vec::new(),
             subpass: 0,
         }
