@@ -31,7 +31,7 @@ pub enum BufferUsage {
 
 #[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
-pub enum QueueType {
+pub enum QueueType: u32 {
     #[default]
     Graphics,
     Compute,
