@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{Buffer, Image, QueueType};
+use crate::structs::SubresourceRange;
 
 use super::{
     command::BufferBarrier,
@@ -64,37 +65,6 @@ fn pick_layout_for_usage(usage: UsageBits) -> Layout {
         return Layout::ShaderReadOnly;
     }
     Layout::General
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Pod, Zeroable)]
-pub struct SubresourceRange {
-    pub base_mip: u32,
-    pub level_count: u32,
-    pub base_layer: u32,
-    pub layer_count: u32,
-}
-
-impl Default for SubresourceRange {
-    fn default() -> Self {
-        Self {
-            base_mip: Default::default(),
-            level_count: 1,
-            base_layer: Default::default(),
-            layer_count: 1,
-        }
-    }
-}
-
-impl SubresourceRange {
-    pub fn new(base_mip: u32, level_count: u32, base_layer: u32, layer_count: u32) -> Self {
-        Self {
-            base_mip,
-            level_count,
-            base_layer,
-            layer_count,
-        }
-    }
 }
 
 #[derive(Default)]

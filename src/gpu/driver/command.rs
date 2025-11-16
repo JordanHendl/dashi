@@ -2,13 +2,15 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter, GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport
+    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
+    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
 };
 
 use super::{
-    state::{Layout, LayoutTransition, StateTracker, SubresourceRange},
+    state::{Layout, LayoutTransition, StateTracker},
     types::{Handle, UsageBits},
 };
+use crate::structs::SubresourceRange;
 
 //===----------------------------------------------------------------------===//
 // Command definitions
@@ -73,7 +75,6 @@ pub struct BeginRenderPass {
     pub depth_attachment: Option<ImageView>,
     pub clear_values: [Option<ClearValue>; 4],
 }
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -350,19 +351,17 @@ impl CommandEncoder {
     /// Begin a render pass with the provided attachments.
     pub fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
         for view in desc.color_attachments.iter().flatten() {
-            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
-            let _ = self
-                .state
-                .request_image_state(
-                    view.img,
-                    range,
-                    UsageBits::RT_WRITE,
-                    Layout::ColorAttachment,
-                    self.queue,
-                );
+            let range = view.range;
+            let _ = self.state.request_image_state(
+                view.img,
+                range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+                self.queue,
+            );
         }
         if let Some(view) = desc.depth_attachment {
-            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let range = view.range;
             let _ = self.state.request_image_state(
                 view.img,
                 range,
@@ -377,19 +376,17 @@ impl CommandEncoder {
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
         for view in desc.color_attachments.iter().flatten() {
-            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
-            let _ = self
-                .state
-                .request_image_state(
-                    view.img,
-                    range,
-                    UsageBits::RT_WRITE,
-                    Layout::ColorAttachment,
-                    self.queue,
-                );
+            let range = view.range;
+            let _ = self.state.request_image_state(
+                view.img,
+                range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+                self.queue,
+            );
         }
         if let Some(view) = desc.depth_attachment {
-            let range = SubresourceRange::new(view.mip_level, 1, view.layer, 1);
+            let range = view.range;
             let _ = self.state.request_image_state(
                 view.img,
                 range,
@@ -553,7 +550,7 @@ impl CommandEncoder {
     pub fn end_debug_marker(&mut self) {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
-    
+
     pub fn combine(&mut self, other: &CommandEncoder) {
         self.data.extend_from_slice(&other.data);
         self.side.extend_from_slice(&other.side);
@@ -627,7 +624,6 @@ pub struct Command<'a> {
 
 impl<'a> Command<'a> {
     pub fn payload<T>(&self) -> &T {
-
         assert_eq!(
             self.bytes.len(),
             size_of::<T>(),

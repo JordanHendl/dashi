@@ -1,4 +1,5 @@
 use dashi::*;
+use dashi::structs::*;
 
 #[test]
 #[ignore]
@@ -23,7 +24,10 @@ fn mipmap_generation() {
     // read back from the smallest mip
     let view = ImageView {
         img: image,
-        mip_level: 2,
+        range: SubresourceRange {
+            base_mip: 2,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -36,19 +40,19 @@ fn mipmap_generation() {
         })
         .unwrap();
 
-//    let mut list = ctx
-//        .begin_command_queue(&Default::default())
-//        .unwrap();
-//    list.copy_image_to_buffer(ImageBufferCopy { src: view, dst: buffer, dst_offset: 0 });
-//    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-//    ctx.wait(fence).unwrap();
-//
-//    let actual = ctx.map_buffer::<u8>(buffer).unwrap().to_vec();
-//    ctx.unmap_buffer(buffer).unwrap();
-//
-//    assert_eq!(actual, vec![255u8, 0, 0, 255]);
+    //    let mut list = ctx
+    //        .begin_command_queue(&Default::default())
+    //        .unwrap();
+    //    list.copy_image_to_buffer(ImageBufferCopy { src: view, dst: buffer, dst_offset: 0 });
+    //    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+    //    ctx.wait(fence).unwrap();
+    //
+    //    let actual = ctx.map_buffer::<u8>(buffer).unwrap().to_vec();
+    //    ctx.unmap_buffer(buffer).unwrap();
+    //
+    //    assert_eq!(actual, vec![255u8, 0, 0, 255]);
 
-//    ctx.destroy_cmd_queue(list);
+    //    ctx.destroy_cmd_queue(list);
     ctx.destroy_buffer(buffer);
     ctx.destroy_image(image);
     ctx.destroy();

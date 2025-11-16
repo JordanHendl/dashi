@@ -199,6 +199,37 @@ pub enum BorderColor {
     TransparentBlack,
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Pod, Zeroable)]
+pub struct SubresourceRange {
+    pub base_mip: u32,
+    pub level_count: u32,
+    pub base_layer: u32,
+    pub layer_count: u32,
+}
+
+impl Default for SubresourceRange {
+    fn default() -> Self {
+        Self {
+            base_mip: Default::default(),
+            level_count: 1,
+            base_layer: Default::default(),
+            layer_count: 1,
+        }
+    }
+}
+
+impl SubresourceRange {
+    pub fn new(base_mip: u32, level_count: u32, base_layer: u32, layer_count: u32) -> Self {
+        Self {
+            base_mip,
+            level_count,
+            base_layer,
+            layer_count,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct SamplerInfo {
@@ -324,8 +355,7 @@ unsafe impl Pod for AspectMask {}
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct ImageView {
     pub img: Handle<Image>,
-    pub layer: u32,
-    pub mip_level: u32,
+    pub range: SubresourceRange,
     pub aspect: AspectMask,
 }
 
@@ -333,8 +363,7 @@ impl Default for ImageView {
     fn default() -> Self {
         Self {
             img: Default::default(),
-            layer: 0,
-            mip_level: 0,
+            range: Default::default(),
             aspect: Default::default(),
         }
     }

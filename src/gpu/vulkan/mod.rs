@@ -3,7 +3,6 @@ use crate::{
     cmd::{CommandStream, Executable},
     driver::{
         command::{CopyBuffer, CopyBufferImage},
-        state::SubresourceRange,
     },
     execution::CommandRing,
     utils::{Handle, Pool},
@@ -811,8 +810,7 @@ impl Context {
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
         let tmp_view = ImageView {
             img,
-            layer: 0,
-            mip_level: 0,
+            range: Default::default(),
             aspect: Default::default(),
         };
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
@@ -1059,10 +1057,10 @@ impl Context {
         let img = self.images.get_ref(info.img).unwrap();
         let aspect: vk::ImageAspectFlags = info.aspect.into();
         let sub_range = vk::ImageSubresourceRange::builder()
-            .base_array_layer(info.layer)
-            .layer_count(1)
-            .base_mip_level(info.mip_level)
-            .level_count(1)
+            .base_array_layer(info.range.base_layer)
+            .layer_count(info.range.layer_count)
+            .base_mip_level(info.range.base_mip)
+            .level_count(info.range.level_count)
             .aspect_mask(aspect)
             .build();
 
@@ -2554,8 +2552,7 @@ impl Context {
                     name: Some(debug_name),
                     view: ImageView {
                         img: image,
-                        layer: 0,
-                        mip_level: 0,
+                        range: Default::default(),
                         aspect,
                     },
                     clear_value: attachment_cfg.clear_value,
@@ -2583,8 +2580,7 @@ impl Context {
                     name: Some(debug_name),
                     view: ImageView {
                         img: image,
-                        layer: 0,
-                        mip_level: 0,
+                        range: Default::default(),
                         aspect: AspectMask::DepthStencil,
                     },
                     clear_value: depth_cfg.clear_value,

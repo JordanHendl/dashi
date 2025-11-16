@@ -433,7 +433,7 @@ impl Context {
         }?;
 
         dsp.frame_idx = res.0;
-        let view = ImageView { img: dsp.images[res.0 as usize], layer: 0, mip_level: 0, aspect: Default::default() };
+        let view = ImageView { img: dsp.images[res.0 as usize], range: Default::default(), aspect: Default::default() };
         Ok((view, signal_sem_handle, res.0, res.1))
     }
 

@@ -111,8 +111,7 @@ fn yaml_render_pass_allows_overriding_attachment_views() {
 
     let override_view = ImageView {
         img: override_img,
-        layer: 0,
-        mip_level: 0,
+        range: Default::default(),
         aspect: AspectMask::Color,
     };
 
