@@ -12,6 +12,7 @@ use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
 use serde::{Deserialize, Serialize};
 
+#[repr(C)]
 #[derive(Hash, Clone, Copy, Debug)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum MemoryVisibility {
@@ -19,6 +20,7 @@ pub enum MemoryVisibility {
     CpuAndGpu,
 }
 
+#[repr(C)]
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BufferUsage {
@@ -29,15 +31,17 @@ pub enum BufferUsage {
     STORAGE,
 }
 
+#[repr(C)]
 #[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
-pub enum QueueType: u32 {
+pub enum QueueType {
     #[default]
     Graphics,
     Compute,
     Transfer,
 }
 
+#[repr(C)]
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum Format {
@@ -53,6 +57,7 @@ pub enum Format {
     D24S8,
 }
 
+#[repr(C)]
 #[derive(Hash, Clone, Copy, Debug)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum WindowBuffering {
@@ -60,6 +65,7 @@ pub enum WindowBuffering {
     Triple,
 }
 
+#[repr(C)]
 #[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BlendFactor {
@@ -77,6 +83,7 @@ pub enum BlendFactor {
     BlendFactor,
 }
 
+#[repr(C)]
 #[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BlendOp {
@@ -88,6 +95,7 @@ pub enum BlendOp {
     Max,
 }
 
+#[repr(C)]
 #[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum LoadOp {
@@ -97,6 +105,7 @@ pub enum LoadOp {
     DontCare,
 }
 
+#[repr(C)]
 #[derive(Hash, Debug, Copy, Clone, Default)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum StoreOp {
@@ -105,6 +114,7 @@ pub enum StoreOp {
     DontCare,
 }
 
+#[repr(C)]
 #[derive(Hash, Debug, Copy, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
@@ -156,6 +166,7 @@ impl SampleCount {
         }
     }
 }
+#[repr(C)]
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BarrierPoint {
@@ -175,6 +186,7 @@ pub enum Filter {
 }
 
 unsafe impl Pod for Filter {}
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SamplerAddressMode {
@@ -184,6 +196,7 @@ pub enum SamplerAddressMode {
     ClampToBorder,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum SamplerMipmapMode {
@@ -191,6 +204,7 @@ pub enum SamplerMipmapMode {
     Linear,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BorderColor {
@@ -230,6 +244,7 @@ impl SubresourceRange {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct SamplerInfo {
@@ -265,6 +280,7 @@ impl Default for SamplerInfo {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Hash, Default, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Extent {
@@ -281,6 +297,7 @@ pub struct Rect2D {
     pub h: u32,
 }
 
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct FRect2D {
@@ -290,6 +307,7 @@ pub struct FRect2D {
     pub h: f32,
 }
 
+#[repr(C)]
 #[derive(Default)]
 pub struct ContextInfo {
     pub device: SelectedDevice,
