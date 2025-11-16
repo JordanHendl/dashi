@@ -1,7 +1,10 @@
 mod error;
 use crate::{
     cmd::{CommandStream, Executable},
-    driver::command::{CopyBuffer, CopyBufferImage},
+    driver::{
+        command::{CopyBuffer, CopyBufferImage},
+        state::StateTracker,
+    },
     execution::CommandRing,
     utils::{Handle, Pool},
 };
@@ -180,6 +183,7 @@ pub struct Context {
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
     pub(super) compute_pipelines: Pool<ComputePipeline>,
+    pub(super) resource_states: StateTracker,
 
     pub(super) gpu_timers: Vec<GpuTimer>,
     pub(super) timestamp_period: f32,
@@ -551,6 +555,7 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
+            resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
             headless: true,
@@ -672,6 +677,7 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
+            resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
             headless: false,

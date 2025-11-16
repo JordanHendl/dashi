@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    state::{Layout, LayoutTransition, StateTracker},
+    state::Layout,
     types::{Handle, UsageBits},
 };
 use crate::structs::SubresourceRange;
@@ -32,12 +32,10 @@ pub enum Op {
     CopyImageToBuffer = 10,
     CopyImage = 11,
     BlitImage = 12,
-    ImageBarrier = 13,
-    BufferBarrier = 14,
-    DebugMarkerBegin = 15,
-    DebugMarkerEnd = 16,
-    TransitionImage = 17,
-    BeginRenderPass = 18,
+    DebugMarkerBegin = 13,
+    DebugMarkerEnd = 14,
+    TransitionImage = 15,
+    BeginRenderPass = 16,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -220,27 +218,20 @@ pub struct BlitImage {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
-pub struct ImageBarrier {
-    pub image: Handle<Image>,
-    pub range: SubresourceRange,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BufferBarrier {
-    pub buffer: Handle<Buffer>,
-    pub usage: UsageBits,
-    pub old_queue: QueueType,
-    pub new_queue: QueueType,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct DebugMarkerBegin {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct DebugMarkerEnd {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransitionImage {
+    pub image: Handle<Image>,
+    pub range: SubresourceRange,
+    pub usage: UsageBits,
+    pub layout: Layout,
+}
 
 //===----------------------------------------------------------------------===//
 // Command encoder & stream
@@ -262,7 +253,6 @@ struct CmdHeader {
 pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
-    state: StateTracker,
     queue: QueueType,
 }
 
@@ -273,7 +263,6 @@ impl CommandEncoder {
         Self {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
-            state: StateTracker::new(),
             queue,
         }
     }
@@ -282,7 +271,6 @@ impl CommandEncoder {
     pub fn reset(&mut self) {
         self.data.clear();
         self.side.clear();
-        self.state.reset();
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
@@ -350,51 +338,11 @@ impl CommandEncoder {
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
-        for view in desc.color_attachments.iter().flatten() {
-            let range = view.range;
-            let _ = self.state.request_image_state(
-                view.img,
-                range,
-                UsageBits::RT_WRITE,
-                Layout::ColorAttachment,
-                self.queue,
-            );
-        }
-        if let Some(view) = desc.depth_attachment {
-            let range = view.range;
-            let _ = self.state.request_image_state(
-                view.img,
-                range,
-                UsageBits::DEPTH_WRITE,
-                Layout::DepthStencilAttachment,
-                self.queue,
-            );
-        }
         self.push(Op::BeginRenderPass, desc);
     }
 
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
-        for view in desc.color_attachments.iter().flatten() {
-            let range = view.range;
-            let _ = self.state.request_image_state(
-                view.img,
-                range,
-                UsageBits::RT_WRITE,
-                Layout::ColorAttachment,
-                self.queue,
-            );
-        }
-        if let Some(view) = desc.depth_attachment {
-            let range = view.range;
-            let _ = self.state.request_image_state(
-                view.img,
-                range,
-                UsageBits::DEPTH_WRITE,
-                Layout::DepthStencilAttachment,
-                self.queue,
-            );
-        }
         self.push(Op::BeginDrawing, desc);
     }
 
@@ -425,120 +373,44 @@ impl CommandEncoder {
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
     pub fn copy_buffer(&mut self, cmd: &CopyBuffer) {
-        if let Some(bar) = self
-            .state
-            .request_buffer_state(cmd.src, UsageBits::COPY_SRC, self.queue)
-        {
-            self.push(Op::BufferBarrier, &bar);
-        }
-        if let Some(bar) = self
-            .state
-            .request_buffer_state(cmd.dst, UsageBits::COPY_DST, self.queue)
-        {
-            self.push(Op::BufferBarrier, &bar);
-        }
         self.push(Op::CopyBuffer, cmd);
     }
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
     pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
-        if let Some(bar) = self
-            .state
-            .request_buffer_state(cmd.src, UsageBits::COPY_SRC, self.queue)
-        {
-            self.push(Op::BufferBarrier, &bar);
-        }
-        if let Some(bar) = self.state.request_image_state(
-            cmd.dst,
-            cmd.range,
-            UsageBits::COPY_DST,
-            Layout::TransferDst,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
         self.push(Op::CopyBufferToImage, cmd);
     }
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
     pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
-        if let Some(bar) = self.state.request_image_state(
-            cmd.src,
-            cmd.range,
-            UsageBits::COPY_SRC,
-            Layout::TransferSrc,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
-        if let Some(bar) = self
-            .state
-            .request_buffer_state(cmd.dst, UsageBits::COPY_DST, self.queue)
-        {
-            self.push(Op::BufferBarrier, &bar);
-        }
         self.push(Op::CopyImageToBuffer, cmd);
     }
 
     /// Copy data between images, emitting required barriers.
     pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, range: SubresourceRange) {
-        if let Some(bar) = self.state.request_image_state(
-            src,
-            range,
-            UsageBits::COPY_SRC,
-            Layout::TransferSrc,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
-        if let Some(bar) = self.state.request_image_state(
-            dst,
-            range,
-            UsageBits::COPY_DST,
-            Layout::TransferDst,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
         let payload = CopyImage { src, dst };
         self.push(Op::CopyImage, &payload);
     }
 
     /// Copy data between images, emitting required barriers.
     pub fn blit_image(&mut self, cmd: &BlitImage) {
-        if let Some(bar) = self.state.request_image_state(
-            cmd.src,
-            cmd.src_range,
-            UsageBits::COPY_SRC,
-            Layout::TransferSrc,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
-        if let Some(bar) = self.state.request_image_state(
-            cmd.dst,
-            cmd.dst_range,
-            UsageBits::COPY_DST,
-            Layout::TransferDst,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
         self.push(Op::BlitImage, cmd);
     }
 
     /// Transition an image to presentation layout.
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         let range = SubresourceRange::default();
-        if let Some(bar) = self.state.request_image_state(
+        let transition = TransitionImage {
             image,
             range,
-            UsageBits::PRESENT,
-            Layout::Present,
-            self.queue,
-        ) {
-            self.push(Op::ImageBarrier, &bar);
-        }
+            usage: UsageBits::PRESENT,
+            layout: Layout::Present,
+        };
+        self.transition_image(&transition);
+    }
+
+    pub fn transition_image(&mut self, cmd: &TransitionImage) {
+        self.push(Op::TransitionImage, cmd);
     }
 
     /// Begin a debug marker region.
@@ -569,8 +441,6 @@ impl CommandEncoder {
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
                 Op::CopyBufferToImage => sink.copy_buffer_to_image(cmd.payload()),
                 Op::CopyImage => sink.copy_image(cmd.payload()),
-                Op::ImageBarrier => sink.image_barrier(cmd.payload()),
-                Op::BufferBarrier => sink.buffer_barrier(cmd.payload()),
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload()),
                 Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload()),
                 Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload()),
@@ -578,7 +448,7 @@ impl CommandEncoder {
                 Op::DrawIndexed => sink.draw_indexed(cmd.payload()),
                 Op::DrawIndirect => todo!(),
                 Op::DispatchIndirect => todo!(),
-                Op::TransitionImage => todo!(),
+                Op::TransitionImage => sink.transition_image(cmd.payload()),
                 Op::BeginRenderPass => sink.begin_render_pass(cmd.payload()),
             }
         }
@@ -735,11 +605,10 @@ impl Op {
             x if x == Op::CopyImageToBuffer as u16 => Some(Op::CopyImageToBuffer),
             x if x == Op::CopyImage as u16 => Some(Op::CopyImage),
             x if x == Op::BlitImage as u16 => Some(Op::BlitImage),
-            x if x == Op::ImageBarrier as u16 => Some(Op::ImageBarrier),
-            x if x == Op::BufferBarrier as u16 => Some(Op::BufferBarrier),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
+            x if x == Op::TransitionImage as u16 => Some(Op::TransitionImage),
             _ => None,
         }
     }
@@ -763,8 +632,7 @@ pub trait CommandSink {
     fn copy_texture(&mut self, cmd: &CopyImage) {
         self.copy_image(cmd)
     }
-    fn image_barrier(&mut self, cmd: &LayoutTransition);
-    fn buffer_barrier(&mut self, cmd: &BufferBarrier);
+    fn transition_image(&mut self, cmd: &TransitionImage);
     fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);
