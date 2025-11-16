@@ -5,11 +5,11 @@ use ash::vk;
 use super::{convert_rect2d_to_vulkan, SampleCount, SubpassSampleInfo};
 use crate::driver::command::CommandSink;
 use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
-use crate::driver::state::{Layout, LayoutTransition};
+use crate::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
-    QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
+    Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
+    Image, QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -230,6 +230,148 @@ impl CommandQueue {
         self.last_op_access = access;
     }
 
+    fn ensure_image_state(
+        &mut self,
+        image: Handle<Image>,
+        range: crate::structs::SubresourceRange,
+        usage: UsageBits,
+        layout: Layout,
+    ) {
+        if let Some(transition) = {
+            let ctx = self.ctx_ref();
+            ctx.resource_states
+                .request_image_state(image, range, usage, layout, self.queue_type)
+        } {
+            self.apply_image_barrier(&transition);
+        }
+    }
+
+    fn ensure_buffer_state(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        if let Some(barrier) = {
+            let ctx = self.ctx_ref();
+            ctx.resource_states
+                .request_buffer_state(buffer, usage, self.queue_type)
+        } {
+            self.apply_buffer_barrier(&barrier);
+        }
+    }
+
+    fn apply_image_barrier(&mut self, cmd: &LayoutTransition) {
+        let ctx = self.ctx_ref();
+        let img_data = ctx
+            .images
+            .get_ref(cmd.image)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        // Heuristic aspect selection. If you track format, prefer using that.
+        let aspect = if cmd
+            .new_usage
+            .intersects(UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE)
+        {
+            vk::ImageAspectFlags::DEPTH
+        } else {
+            vk::ImageAspectFlags::COLOR
+        };
+
+        let sub = vk::ImageSubresourceRange {
+            aspect_mask: aspect,
+            base_mip_level: cmd.range.base_mip,
+            level_count: cmd.range.level_count,
+            base_array_layer: cmd.range.base_layer,
+            layer_count: cmd.range.layer_count,
+        };
+
+        let dst_stage = usage_to_stages(cmd.new_usage);
+        let src_access = usage_to_access(cmd.old_usage);
+        let dst_access = usage_to_access(cmd.new_usage);
+
+        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
+            (
+                queue_family_index(&ctx, cmd.old_queue),
+                queue_family_index(&ctx, cmd.new_queue),
+            )
+        } else {
+            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+        };
+
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .old_layout(layout_to_vk(cmd.old_layout))
+            .new_layout(layout_to_vk(cmd.new_layout))
+            .src_queue_family_index(src_family)
+            .dst_queue_family_index(dst_family)
+            .image(img_data.img)
+            .subresource_range(sub)
+            .build();
+
+        unsafe {
+            ctx.device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                self.last_op_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            )
+        };
+        self.update_last_access(dst_stage, dst_access);
+        let img = ctx.images.get_mut_ref(cmd.image).unwrap();
+        for level in 0..cmd.range.level_count {
+            let mip = (cmd.range.base_mip + level) as usize;
+            if let Some(l) = img.layouts.get_mut(mip) {
+                *l = layout_to_vk(cmd.new_layout);
+            }
+        }
+    }
+
+    fn apply_buffer_barrier(&mut self, cmd: &BufferBarrier) {
+        let ctx = self.ctx_ref();
+        let buffer = ctx
+            .buffers
+            .get_ref(cmd.buffer)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        let src_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+        let src_access = vk::AccessFlags::empty();
+
+        let dst_stage = usage_to_stages(cmd.usage);
+        let dst_access = usage_to_access(cmd.usage);
+
+        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
+            (
+                queue_family_index(&ctx, cmd.old_queue),
+                queue_family_index(&ctx, cmd.new_queue),
+            )
+        } else {
+            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+        };
+
+        let barrier = vk::BufferMemoryBarrier::builder()
+            .buffer(buffer.buf)
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .size(vk::WHOLE_SIZE)
+            .src_queue_family_index(src_family)
+            .dst_queue_family_index(dst_family)
+            .build();
+
+        unsafe {
+            ctx.device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[barrier],
+                &[],
+            )
+        };
+        self.update_last_access(dst_stage, dst_access);
+    }
     pub(crate) fn ctx_ref(&self) -> &'static mut Context {
         unsafe { &mut *self.ctx }
     }
@@ -323,6 +465,22 @@ impl CommandQueue {
 
 impl CommandSink for CommandQueue {
     fn begin_render_pass(&mut self, cmd: &crate::driver::command::BeginRenderPass) {
+        for view in cmd.color_attachments.iter().flatten() {
+            self.ensure_image_state(
+                view.img,
+                view.range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+            );
+        }
+        if let Some(depth) = cmd.depth_attachment {
+            self.ensure_image_state(
+                depth.img,
+                depth.range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            );
+        }
         // end previous pass
         if self.curr_rp.is_some() {
             unsafe {
@@ -435,6 +593,22 @@ impl CommandSink for CommandQueue {
     }
 
     fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
+        for view in cmd.color_attachments.iter().flatten() {
+            self.ensure_image_state(
+                view.img,
+                view.range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+            );
+        }
+        if let Some(depth) = cmd.depth_attachment {
+            self.ensure_image_state(
+                depth.img,
+                depth.range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            );
+        }
         let (pipeline_rp, pipeline_subpass, layout_handle) = {
             let gfx = self
                 .ctx_ref()
@@ -600,6 +774,18 @@ impl CommandSink for CommandQueue {
     }
 
     fn blit_image(&mut self, cmd: &crate::driver::command::BlitImage) {
+        self.ensure_image_state(
+            cmd.src,
+            cmd.src_range,
+            UsageBits::COPY_SRC,
+            Layout::TransferSrc,
+        );
+        self.ensure_image_state(
+            cmd.dst,
+            cmd.dst_range,
+            UsageBits::COPY_DST,
+            Layout::TransferDst,
+        );
         unsafe {
             let src_data = self
                 .ctx_ref()
@@ -831,6 +1017,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
+        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
+        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
         unsafe {
             let src = self.ctx_ref().buffers.get_ref(cmd.src).unwrap();
             let dst = self.ctx_ref().buffers.get_ref(cmd.dst).unwrap();
@@ -856,6 +1044,13 @@ impl CommandSink for CommandQueue {
     }
 
     fn copy_buffer_to_image(&mut self, cmd: &crate::driver::command::CopyBufferImage) {
+        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
+        self.ensure_image_state(
+            cmd.dst,
+            cmd.range,
+            UsageBits::COPY_DST,
+            Layout::TransferDst,
+        );
         unsafe {
             let img_data = self
                 .ctx_ref()
@@ -900,6 +1095,13 @@ impl CommandSink for CommandQueue {
     }
 
     fn copy_image_to_buffer(&mut self, cmd: &crate::driver::command::CopyImageBuffer) {
+        self.ensure_image_state(
+            cmd.src,
+            cmd.range,
+            UsageBits::COPY_SRC,
+            Layout::TransferSrc,
+        );
+        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
         unsafe {
             let img_data = self
                 .ctx_ref()
@@ -948,122 +1150,8 @@ impl CommandSink for CommandQueue {
         todo!()
     }
 
-    fn image_barrier(&mut self, cmd: &LayoutTransition) {
-        let ctx = self.ctx_ref();
-        let img_data = ctx
-            .images
-            .get_ref(cmd.image)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
-
-        // Heuristic aspect selection. If you track format, prefer using that.
-        let aspect = if cmd
-            .new_usage
-            .intersects(UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE)
-        {
-            vk::ImageAspectFlags::DEPTH
-        } else {
-            vk::ImageAspectFlags::COLOR
-        };
-
-        let sub = vk::ImageSubresourceRange {
-            aspect_mask: aspect,
-            base_mip_level: cmd.range.base_mip,
-            level_count: cmd.range.level_count,
-            base_array_layer: cmd.range.base_layer,
-            layer_count: cmd.range.layer_count,
-        };
-
-        let dst_stage = usage_to_stages(cmd.new_usage);
-        let src_access = usage_to_access(cmd.old_usage);
-        let dst_access = usage_to_access(cmd.new_usage);
-
-        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
-            (
-                queue_family_index(&ctx, cmd.old_queue),
-                queue_family_index(&ctx, cmd.new_queue),
-            )
-        } else {
-            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
-        };
-
-        let barrier = vk::ImageMemoryBarrier::builder()
-            .src_access_mask(src_access)
-            .dst_access_mask(dst_access)
-            .old_layout(layout_to_vk(cmd.old_layout))
-            .new_layout(layout_to_vk(cmd.new_layout))
-            .src_queue_family_index(src_family)
-            .dst_queue_family_index(dst_family)
-            .image(img_data.img)
-            .subresource_range(sub)
-            .build();
-
-        unsafe {
-            ctx.device.cmd_pipeline_barrier(
-                self.cmd_buf,
-                self.last_op_stage,
-                dst_stage,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            )
-        };
-        self.update_last_access(dst_stage, dst_access);
-        let img = ctx.images.get_mut_ref(cmd.image).unwrap();
-        for level in 0..cmd.range.level_count {
-            let mip = (cmd.range.base_mip + level) as usize;
-            if let Some(l) = img.layouts.get_mut(mip) {
-                *l = layout_to_vk(cmd.new_layout);
-            }
-        }
-    }
-
-    fn buffer_barrier(&mut self, cmd: &crate::driver::command::BufferBarrier) {
-        let ctx = self.ctx_ref();
-        let buffer = ctx
-            .buffers
-            .get_ref(cmd.buffer)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
-
-        // If you track previous usage per-buffer, use it for src masks; otherwise fall back to TOP_OF_PIPE/empty.
-        let src_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-        let src_access = vk::AccessFlags::empty();
-
-        let dst_stage = usage_to_stages(cmd.usage);
-        let dst_access = usage_to_access(cmd.usage);
-
-        let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
-            (
-                queue_family_index(&ctx, cmd.old_queue),
-                queue_family_index(&ctx, cmd.new_queue),
-            )
-        } else {
-            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
-        };
-
-        let barrier = vk::BufferMemoryBarrier::builder()
-            .src_access_mask(src_access)
-            .dst_access_mask(dst_access)
-            .src_queue_family_index(src_family)
-            .dst_queue_family_index(dst_family)
-            .buffer(buffer.buf)
-            .offset(buffer.offset as u64)
-            .size(buffer.size as u64)
-            .build();
-
-        unsafe {
-            ctx.device.cmd_pipeline_barrier(
-                self.cmd_buf,
-                src_stage,
-                dst_stage,
-                vk::DependencyFlags::BY_REGION,
-                &[],
-                std::slice::from_ref(&barrier),
-                &[],
-            );
-        }
+    fn transition_image(&mut self, cmd: &crate::driver::command::TransitionImage) {
+        self.ensure_image_state(cmd.image, cmd.range, cmd.usage, cmd.layout);
     }
 
     fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Handle<Fence> {

@@ -3,12 +3,7 @@ use std::collections::HashMap;
 use crate::{Buffer, Image, QueueType};
 use crate::structs::SubresourceRange;
 
-use super::{
-    command::BufferBarrier,
-    types::{Handle, UsageBits},
-};
-
-use bytemuck::{Pod, Zeroable};
+use super::types::{Handle, UsageBits};
 
 // --- New: backend-agnostic image layout + transition info ---
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -32,6 +27,15 @@ pub struct LayoutTransition {
     pub new_usage: UsageBits,
     pub old_layout: Layout,
     pub new_layout: Layout,
+    pub old_queue: QueueType,
+    pub new_queue: QueueType,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferBarrier {
+    pub buffer: Handle<Buffer>,
+    pub usage: UsageBits,
     pub old_queue: QueueType,
     pub new_queue: QueueType,
 }
