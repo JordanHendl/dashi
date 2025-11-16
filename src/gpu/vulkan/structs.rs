@@ -618,12 +618,13 @@ pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
 #[derive(Debug, Clone, Copy)]
 pub struct BufferView {
     pub handle: Handle<Buffer>,
+    pub size: u64,
     pub offset: u64,
 }
 
 impl BufferView {
     pub fn new(handle: Handle<Buffer>) -> Self {
-        Self { handle, offset: 0 }
+        Self { handle, size: 0, offset: 0 }
     }
 }
 

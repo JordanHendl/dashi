@@ -1,9 +1,7 @@
 mod error;
 use crate::{
     cmd::{CommandStream, Executable},
-    driver::{
-        command::{CopyBuffer, CopyBufferImage},
-    },
+    driver::command::{CopyBuffer, CopyBufferImage},
     execution::CommandRing,
     utils::{Handle, Pool},
 };
@@ -2041,10 +2039,29 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::ConstBuffer(_) => {
-                        return Err(GPUError::Unimplemented(
-                            "Constant buffers are not supported",
-                        ))
+                    ShaderResource::ConstBuffer(view) => {
+                        let buffer = self.buffers.get_ref(view.handle).unwrap();
+
+                        let size = if view.size == 0 {
+                            buffer.size as u64
+                        } else {
+                            view.size
+                        };
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(view.offset as u64)
+                            .range(size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
                     }
                 }
             }
@@ -2174,10 +2191,29 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::ConstBuffer(_) => {
-                        return Err(GPUError::Unimplemented(
-                            "Constant buffers are not supported",
-                        ))
+                    ShaderResource::ConstBuffer(view) => {
+                        let buffer = self.buffers.get_ref(view.handle).unwrap();
+
+                        let size = if view.size == 0 {
+                            buffer.size as u64
+                        } else {
+                            view.size
+                        };
+                        let buffer_info = vk::DescriptorBufferInfo::builder()
+                            .buffer(buffer.buf)
+                            .offset(view.offset as u64)
+                            .range(size as u64)
+                            .build();
+
+                        buffer_infos.push(buffer_info);
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
+                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
                     }
                 }
             }
@@ -2373,10 +2409,29 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
-                ShaderResource::ConstBuffer(_) => {
-                    return Err(GPUError::Unimplemented(
-                        "Constant buffers are not supported",
-                    ))
+                ShaderResource::ConstBuffer(view) => {
+                    let buffer = self.buffers.get_ref(view.handle).unwrap();
+
+                    let size = if view.size == 0 {
+                        buffer.size as u64
+                    } else {
+                        view.size
+                    };
+                    let buffer_info = vk::DescriptorBufferInfo::builder()
+                        .buffer(buffer.buf)
+                        .offset(view.offset as u64)
+                        .range(size as u64)
+                        .build();
+
+                    buffer_infos.push(buffer_info);
+                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                        .dst_set(descriptor_set)
+                        .dst_binding(binding_info.binding)
+                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
+                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
+                        .build();
+
+                    write_descriptor_sets.push(write_descriptor_set);
                 }
             }
         }
