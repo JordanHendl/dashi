@@ -469,13 +469,13 @@ impl CommandEncoder {
             Layout::TransferSrc,
             self.queue,
         ) {
-            self.push(Op::BufferBarrier, &bar);
+            self.push(Op::ImageBarrier, &bar);
         }
         if let Some(bar) = self
             .state
             .request_buffer_state(cmd.dst, UsageBits::COPY_DST, self.queue)
         {
-            self.push(Op::ImageBarrier, &bar);
+            self.push(Op::BufferBarrier, &bar);
         }
         self.push(Op::CopyImageToBuffer, cmd);
     }
