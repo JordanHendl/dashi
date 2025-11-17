@@ -183,6 +183,7 @@ pub struct Context {
     pub(super) gfx_pipelines: Pool<GraphicsPipeline>,
     pub(super) compute_pipeline_layouts: Pool<ComputePipelineLayout>,
     pub(super) compute_pipelines: Pool<ComputePipeline>,
+    empty_set_layout: vk::DescriptorSetLayout,
     pub(super) resource_states: StateTracker,
 
     pub(super) gpu_timers: Vec<GpuTimer>,
@@ -208,6 +209,277 @@ impl Drop for Context {
                 utils.destroy_debug_utils_messenger(messenger, None);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    unsafe extern "system" fn validation_flag_callback(
+        _message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+        _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+        _p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+        user_data: *mut c_void,
+    ) -> vk::Bool32 {
+        if !user_data.is_null() {
+            let flag: &AtomicBool = &*(user_data as *const AtomicBool);
+            flag.store(true, Ordering::SeqCst);
+        }
+
+        vk::FALSE
+    }
+
+    #[test]
+    #[serial]
+    fn pipeline_layout_matches_declared_bindings() {
+        let original_validation = std::env::var("DASHI_VALIDATION").ok();
+        std::env::set_var("DASHI_VALIDATION", "1");
+
+        let mut ctx = Context::headless(&ContextInfo::default()).expect("create headless context");
+
+        let validation_flag = Arc::new(AtomicBool::new(false));
+        let validation_ptr = Arc::into_raw(Arc::clone(&validation_flag));
+
+        let messenger = {
+            let debug_utils = ctx
+                .debug_utils
+                .as_ref()
+                .expect("validation layers should expose debug utils");
+
+            let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                )
+                .pfn_user_callback(Some(validation_flag_callback))
+                .user_data(validation_ptr as *mut c_void);
+
+            unsafe {
+                debug_utils
+                    .create_debug_utils_messenger(&messenger_info, None)
+                    .expect("create debug messenger")
+            }
+        };
+
+        let bind_group_layout = ctx
+            .make_bind_group_layout(&BindGroupLayoutInfo {
+                debug_name: "validation_bind_group_layout",
+                shaders: &[ShaderInfo {
+                    shader_type: ShaderType::Compute,
+                    variables: &[
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::DynamicUniform,
+                            binding: 0,
+                            count: 1,
+                        },
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Uniform,
+                            binding: 1,
+                            count: 1,
+                        },
+                    ],
+                }],
+            })
+            .expect("create bind group layout");
+
+        let bind_table_layout = ctx
+            .make_bind_table_layout(&BindTableLayoutInfo {
+                debug_name: "validation_bind_table_layout",
+                shaders: &[ShaderInfo {
+                    shader_type: ShaderType::Compute,
+                    variables: &[
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::SampledImage,
+                            binding: 0,
+                            count: 1,
+                        },
+                        BindGroupVariable {
+                            var_type: BindGroupVariableType::Storage,
+                            binding: 1,
+                            count: 1,
+                        },
+                    ],
+                }],
+            })
+            .expect("create bind table layout");
+
+        let pipeline_layout = ctx
+            .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
+                bg_layouts: [Some(bind_group_layout), None, None, None],
+                bt_layouts: [None, None, None, Some(bind_table_layout)],
+                shader: &PipelineShaderInfo {
+                    stage: ShaderType::Compute,
+                    spirv: inline_spirv::inline_spirv!(
+                        r#"
+                        #version 450
+                        layout(local_size_x = 1) in;
+
+                        layout(set = 0, binding = 0) uniform ExposureData {
+                            float exposure;
+                        } exposure_data;
+
+                        layout(set = 0, binding = 1) uniform ExtraData {
+                            float offset;
+                        } extra_data;
+
+                        layout(set = 3, binding = 0) uniform sampler2D bindless_textures[1];
+                        layout(set = 3, binding = 1) readonly buffer BindlessIndices {
+                            uint first_index;
+                        } bindless_indices;
+
+                        void main() {
+                            vec4 color = texture(bindless_textures[bindless_indices.first_index], vec2(0.0));
+                            float value = exposure_data.exposure + extra_data.offset + color.r;
+                            if (value > 1000.0) {
+                                return;
+                            }
+                        }
+                        "#,
+                        comp
+                    ),
+                    specialization: &[],
+                },
+            })
+            .expect("create compute pipeline layout");
+
+        let pipeline = ctx
+            .make_compute_pipeline(&ComputePipelineInfo {
+                debug_name: "validation_pipeline",
+                layout: pipeline_layout,
+            })
+            .expect("create compute pipeline");
+
+        let mut allocator = ctx
+            .make_dynamic_allocator(&DynamicAllocatorInfo {
+                debug_name: "validation_alloc",
+                usage: BufferUsage::UNIFORM,
+                ..Default::default()
+            })
+            .expect("create allocator");
+
+        let uniform_buffer = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "uniform_buffer",
+                byte_size: std::mem::size_of::<f32>() as u32,
+                visibility: MemoryVisibility::CpuAndGpu,
+                initial_data: Some(&[0; std::mem::size_of::<f32>()]),
+                ..Default::default()
+            })
+            .expect("create uniform buffer");
+
+        let storage_buffer = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "bindless_indices",
+                byte_size: 16,
+                visibility: MemoryVisibility::CpuAndGpu,
+                usage: BufferUsage::STORAGE,
+                initial_data: Some(&[0; 16]),
+                ..Default::default()
+            })
+            .expect("create storage buffer");
+
+        let image = ctx
+            .make_image(&ImageInfo {
+                debug_name: "bindless_image",
+                dim: [1, 1, 1],
+                mip_levels: 1,
+                layers: 1,
+                format: Format::RGBA8,
+                initial_data: Some(&[255, 255, 255, 255]),
+                ..Default::default()
+            })
+            .expect("create image");
+
+        let sampler = ctx
+            .make_sampler(&SamplerInfo::default())
+            .expect("create sampler");
+
+        let bind_group = ctx
+            .make_bind_group(&BindGroupInfo {
+                debug_name: "validation_bind_group",
+                layout: bind_group_layout,
+                bindings: &[
+                    BindingInfo {
+                        resource: ShaderResource::Dynamic(allocator.state().clone()),
+                        binding: 0,
+                    },
+                    BindingInfo {
+                        resource: ShaderResource::Buffer(uniform_buffer),
+                        binding: 1,
+                    },
+                ],
+                ..Default::default()
+            })
+            .expect("create bind group");
+
+        let _table = ctx
+            .make_bind_table(&BindTableInfo {
+                debug_name: "validation_bind_table",
+                layout: bind_table_layout,
+                bindings: &[
+                    IndexedBindingInfo {
+                        binding: 0,
+                        resources: &[IndexedResource {
+                            slot: 0,
+                            resource: ShaderResource::SampledImage(
+                                ImageView {
+                                    img: image,
+                                    range: SubresourceRange {
+                                        base_mip: 0,
+                                        level_count: 1,
+                                        base_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                    aspect: AspectMask::Color,
+                                },
+                                sampler,
+                            ),
+                        }],
+                    },
+                    IndexedBindingInfo {
+                        binding: 1,
+                        resources: &[IndexedResource {
+                            slot: 0,
+                            resource: ShaderResource::StorageBuffer(storage_buffer),
+                        }],
+                    },
+                ],
+                set: 3,
+            })
+            .expect("create bind table");
+
+        if let Some(value) = original_validation {
+            std::env::set_var("DASHI_VALIDATION", value);
+        } else {
+            std::env::remove_var("DASHI_VALIDATION");
+        }
+
+        unsafe {
+            if let Some(debug_utils) = ctx.debug_utils.as_ref() {
+                debug_utils.destroy_debug_utils_messenger(messenger, None);
+            }
+            let _ = Arc::from_raw(validation_ptr);
+        }
+
+        assert!(
+            !validation_flag.load(Ordering::SeqCst),
+            "validation layers reported an error while configuring bind layouts"
+        );
+
+        ctx.destroy_buffer(uniform_buffer);
+        ctx.destroy_buffer(storage_buffer);
+        ctx.destroy_image(image);
+        ctx.destroy_dynamic_allocator(allocator);
+        ctx.destroy();
     }
 }
 
@@ -525,6 +797,8 @@ impl Context {
             None
         };
 
+        let empty_set_layout = Self::create_empty_set_layout(&device)?;
+
         let mut ctx = Context {
             entry,
             instance,
@@ -555,6 +829,7 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
+            empty_set_layout,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
@@ -647,6 +922,8 @@ impl Context {
             None
         };
 
+        let empty_set_layout = Self::create_empty_set_layout(&device)?;
+
         let mut ctx = Context {
             entry,
             instance,
@@ -677,6 +954,7 @@ impl Context {
             gfx_pipelines: Default::default(),
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
+            empty_set_layout,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
@@ -1463,6 +1741,11 @@ impl Context {
             if let Some(utils) = &self.debug_utils {
                 unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
             }
+        }
+
+        unsafe {
+            self.device
+                .destroy_descriptor_set_layout(self.empty_set_layout, None);
         }
 
         // Bind group layouts
@@ -2493,15 +2776,31 @@ impl Context {
         bind_group_layout_handle: &[Option<Handle<BindGroupLayout>>],
         bind_table_layout_handle: &[Option<Handle<BindTableLayout>>],
     ) -> Result<vk::PipelineLayout> {
-        let mut layouts = Vec::new();
-        for (bg, bt) in bind_group_layout_handle
+        let max_index = bind_group_layout_handle
             .iter()
-            .zip(bind_table_layout_handle.iter())
-        {
-            if let Some(b) = bg {
-                layouts.push(self.bind_group_layouts.get_ref(*b).unwrap().layout);
-            } else if let Some(t) = bt {
-                layouts.push(self.bind_table_layouts.get_ref(*t).unwrap().layout);
+            .enumerate()
+            .filter_map(|(idx, h)| h.map(|_| idx))
+            .chain(
+                bind_table_layout_handle
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, h)| h.map(|_| idx)),
+            )
+            .max();
+
+        let mut layouts = Vec::new();
+        if let Some(max_index) = max_index {
+            layouts.reserve(max_index + 1);
+            for index in 0..=max_index {
+                match (bind_group_layout_handle.get(index), bind_table_layout_handle.get(index)) {
+                    (Some(Some(b)), _) => {
+                        layouts.push(self.bind_group_layouts.get_ref(*b).unwrap().layout)
+                    }
+                    (Some(None), Some(Some(t))) | (None, Some(Some(t))) => {
+                        layouts.push(self.bind_table_layouts.get_ref(*t).unwrap().layout)
+                    }
+                    _ => layouts.push(self.empty_set_layout),
+                }
             }
         }
 
@@ -2513,6 +2812,16 @@ impl Context {
         let pipeline_layout = unsafe { self.device.create_pipeline_layout(&layout_info, None)? };
 
         Ok(pipeline_layout)
+    }
+
+    fn create_empty_set_layout(device: &ash::Device) -> Result<vk::DescriptorSetLayout> {
+        let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&[])
+            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
+            .build();
+
+        let layout = unsafe { device.create_descriptor_set_layout(&layout_info, None)? };
+        Ok(layout)
     }
 
     fn create_shader_module(&self, spirv_code: &[u32]) -> Result<vk::ShaderModule> {
