@@ -656,15 +656,18 @@ pub enum ShaderResource {
     SampledImage(ImageView, Handle<Sampler>),
 }
 
+#[derive(Debug, Clone)]
 pub struct BindingInfo {
     pub resource: ShaderResource,
     pub binding: u32,
 }
 
+#[derive(Debug, Clone)]
 pub struct IndexedResource {
     pub resource: ShaderResource,
     pub slot: u32,
 }
+
 pub struct IndexedBindingInfo<'a> {
     pub resources: &'a [IndexedResource],
     pub binding: u32,
