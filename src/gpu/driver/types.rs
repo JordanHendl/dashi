@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
-pub use crate::utils::handle::Handle;
+pub use resource_pool::Handle;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Format {

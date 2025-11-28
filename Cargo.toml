@@ -25,6 +25,7 @@ ash-window = { version = "0.11", optional = true }
 minifb = { version = "0.24", optional = true }
 winit = { version = "0.26", optional = true }
 offset-allocator = { git = "https://github.com/JordanHendl/offsetallocator-rs" }
+resource_pool = { git = "https://github.com/JordanHendl/ResourcePool" }
 openxr = { version = "0.19", optional = true }
 raw-window-handle = "0.4"
 serde = {version = "1.0.210", features = ["derive"], optional = true}

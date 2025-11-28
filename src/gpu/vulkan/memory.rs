@@ -24,24 +24,6 @@ impl Clone for Buffer {
     }
 }
 
-impl Handle<Buffer> {
-    /// Creates a [`DynamicBuffer`] view into this buffer at `byte_offset`.
-    ///
-    /// The caller must ensure the offset is within the buffer's bounds
-    /// and correctly aligned for the data that will be written.
-    pub fn to_unmapped_dynamic(&self, byte_offset: u32) -> DynamicBuffer {
-        DynamicBuffer {
-            handle: self.clone(),
-            alloc: offset_allocator::Allocation {
-                offset: byte_offset,
-                metadata: 0,
-            },
-            ptr: std::ptr::null_mut(),
-            size: 0,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct DynamicBuffer {
     pub(crate) handle: Handle<Buffer>,
