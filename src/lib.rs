@@ -1,4 +1,5 @@
 pub mod utils;
+pub mod transient;
 pub mod gpu;
 pub mod job;
 pub use gpu::driver::types::{Handle, IndexType, UsageBits};

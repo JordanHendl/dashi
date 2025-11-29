@@ -13,17 +13,19 @@ use bytemuck::{Pod, Zeroable};
 use serde::{Deserialize, Serialize};
 
 #[repr(C)]
-#[derive(Hash, Clone, Copy, Debug)]
+#[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum MemoryVisibility {
     Gpu,
+    #[default]
     CpuAndGpu,
 }
 
 #[repr(C)]
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BufferUsage {
+    #[default]
     ALL,
     VERTEX,
     INDEX,
@@ -332,6 +334,8 @@ pub struct IndexedIndirectCommand {
     pub first_instance: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct ImageInfo<'a> {
     pub debug_name: &'a str,
     pub dim: [u32; 3],
