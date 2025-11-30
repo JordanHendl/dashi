@@ -215,6 +215,7 @@ impl Drop for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::driver::command::{BeginDrawing, CommandSink, EndDrawing};
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -487,7 +488,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn dynamic_state_updates_produce_no_validation_errors() {
+    fn begin_drawing_respects_validation_layers() {
         let original_validation = std::env::var("DASHI_VALIDATION").ok();
         std::env::set_var("DASHI_VALIDATION", "1");
 
@@ -522,141 +523,191 @@ mod tests {
             }
         };
 
-        const WIDTH: u32 = 32;
-        const HEIGHT: u32 = 32;
-
-        let img = ctx
-            .make_image(&ImageInfo {
-                debug_name: "dynamic_state_fb",
-                dim: [WIDTH, HEIGHT, 1],
-                format: Format::RGBA8,
-                mip_levels: 1,
-                initial_data: Some(&vec![0u8; (WIDTH * HEIGHT * 4) as usize]),
+        const WIDTH: u32 = 64;
+        const HEIGHT: u32 = 64;
+        let viewport = Viewport {
+            area: FRect2D {
+                w: WIDTH as f32,
+                h: HEIGHT as f32,
                 ..Default::default()
-            })
-            .expect("create image");
+            },
+            scissor: Rect2D {
+                w: WIDTH,
+                h: HEIGHT,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
-        let rp = ctx
+        let color_attachments = [AttachmentDescription::default(); 2];
+        let depth_attachment = AttachmentDescription {
+            format: Format::D24S8,
+            load_op: LoadOp::Clear,
+            store_op: StoreOp::Store,
+            ..Default::default()
+        };
+
+        let subpass = SubpassDescription {
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: Some(&depth_attachment),
+            subpass_dependencies: &[],
+        };
+
+        let render_pass = ctx
             .make_render_pass(&RenderPassInfo {
-                debug_name: "dynamic_state_rp",
-                viewport: Viewport {
-                    area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-                    scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
-                    ..Default::default()
-                },
-                subpasses: &[SubpassDescription {
-                    color_attachments: &[AttachmentDescription::default()],
-                    depth_stencil_attachment: None,
-                    subpass_dependencies: &[],
-                }],
+                debug_name: "validation_draw_rp",
+                viewport,
+                subpasses: &[subpass],
             })
             .expect("create render pass");
 
-        let view = ImageView { img, ..Default::default() };
-
         let vert = inline_spirv::inline_spirv!(
-            r"#version 450
-            vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
-            void main() {
-                gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-            }
-        ",
+            r#"#version 450
+               vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
+               void main() {
+                   gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+               }
+            "#,
             vert
         );
 
         let frag = inline_spirv::inline_spirv!(
-            r"#version 450
-            layout(location=0) out vec4 color;
-            void main() { color = vec4(0.0,0.5,1.0,1.0); }
-        ",
+            r#"#version 450
+               layout(location = 0) out vec4 color0;
+               layout(location = 1) out vec4 color1;
+               void main() {
+                   color0 = vec4(0.2, 0.3, 0.4, 1.0);
+                   color1 = vec4(0.4, 0.5, 0.6, 1.0);
+               }
+            "#,
             frag
         );
 
-        let layout = ctx
+        let pipeline_layout = ctx
             .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
-                debug_name: "dynamic_state_layout",
-                vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
+                debug_name: "validation_draw_layout",
+                vertex_info: VertexDescriptionInfo {
+                    entries: &[],
+                    stride: 0,
+                    rate: VertexRate::Vertex,
+                },
                 bg_layouts: [None, None, None, None],
                 bt_layouts: [None, None, None, None],
                 shaders: &[
-                    PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
-                    PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag, specialization: &[] },
+                    PipelineShaderInfo {
+                        stage: ShaderType::Vertex,
+                        spirv: vert,
+                        specialization: &[],
+                    },
+                    PipelineShaderInfo {
+                        stage: ShaderType::Fragment,
+                        spirv: frag,
+                        specialization: &[],
+                    },
                 ],
                 details: GraphicsPipelineDetails {
-                    dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
+                    color_blend_states: vec![Default::default(); 2],
+                    depth_test: Some(DepthInfo {
+                        should_test: true,
+                        should_write: true,
+                    }),
                     ..Default::default()
                 },
             })
-            .expect("create pipeline layout");
+            .expect("create graphics pipeline layout");
 
         let pipeline = ctx
             .make_graphics_pipeline(&GraphicsPipelineInfo {
-                debug_name: "dynamic_state_pipeline",
-                layout,
-                render_pass: rp,
+                debug_name: "validation_draw_pipeline",
+                layout: pipeline_layout,
+                render_pass,
                 ..Default::default()
             })
             .expect("create graphics pipeline");
 
-        let vertex_data = [0u8; 4 * 3];
-        let vb = ctx
-            .make_buffer(&BufferInfo {
-                debug_name: "dynamic_state_vb",
-                byte_size: vertex_data.len() as u32,
-                visibility: MemoryVisibility::Gpu,
-                usage: BufferUsage::VERTEX,
-                initial_data: Some(&vertex_data),
+        let color0 = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_color0",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::RGBA8,
+                ..Default::default()
             })
-            .expect("create vertex buffer");
+            .expect("create color0 image");
 
-        let mut encoder = CommandEncoder::new(QueueType::Graphics);
-        encoder.begin_drawing(&BeginDrawing {
-            viewport: Viewport {
-                area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-                scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+        let color1 = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_color1",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::RGBA8,
                 ..Default::default()
-            },
-            pipeline,
-            color_attachments: [Some(view), None, None, None],
-            depth_attachment: None,
-            clear_values: [Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])), None, None, None],
-        });
+            })
+            .expect("create color1 image");
 
-        encoder.update_graphics_pipeline_state(&GraphicsPipelineStateUpdate {
-            viewport: Some(Viewport {
-                area: FRect2D { w: (WIDTH / 2) as f32, h: (HEIGHT / 2) as f32, ..Default::default() },
-                scissor: Rect2D { w: WIDTH / 2, h: HEIGHT / 2, ..Default::default() },
+        let depth = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_depth",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::D24S8,
                 ..Default::default()
-            }),
-        });
+            })
+            .expect("create depth image");
 
-        encoder.draw(&Draw {
-            vertices: vb,
-            bind_groups: Default::default(),
-            bind_tables: Default::default(),
-            dynamic_buffers: Default::default(),
-            instance_count: 1,
-            count: 3,
-        });
+        let color_view0 = ImageView {
+            img: color0,
+            aspect: AspectMask::Color,
+            ..Default::default()
+        };
 
-        encoder.end_drawing();
+        let color_view1 = ImageView {
+            img: color1,
+            aspect: AspectMask::Color,
+            ..Default::default()
+        };
 
-        let ctx_ptr: *mut Context = &mut ctx;
-        let mut queue = ctx
-            .gfx_pool
-            .begin(ctx_ptr, "dynamic_state_validation", false)
-            .expect("allocate command queue");
+        let depth_view = ImageView {
+            img: depth,
+            aspect: AspectMask::DepthStencil,
+            ..Default::default()
+        };
 
-        let fence = encoder
-            .submit(&mut queue, &SubmitInfo2::default())
-            .expect("submit command buffer");
+        let mut ring = ctx
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "validation_draw_ring",
+                queue_type: QueueType::Graphics,
+                ..Default::default()
+            })
+            .expect("create command ring");
 
-        ctx.wait(fence).expect("wait for submit");
-        ctx.destroy_cmd_queue(queue);
+        ring.record(|cmd| {
+            let mut color_attachments = [None; 8];
+            color_attachments[0] = Some(color_view0);
+            color_attachments[1] = Some(color_view1);
 
-        ctx.destroy_buffer(vb);
-        ctx.destroy_image(img);
-        ctx.destroy_render_pass(rp);
+            let mut clear_values = [None; 8];
+            clear_values[0] = Some(ClearValue::Color([0.1, 0.2, 0.3, 1.0]));
+            clear_values[1] = Some(ClearValue::Color([0.3, 0.4, 0.5, 1.0]));
+
+            cmd.begin_drawing(&BeginDrawing {
+                viewport,
+                pipeline,
+                color_attachments,
+                depth_attachment: Some(depth_view),
+                clear_values,
+                depth_clear: Some(ClearValue::DepthStencil {
+                    depth: 1.0,
+                    stencil: 0,
+                }),
+            });
+
+            cmd.end_drawing(&EndDrawing::default());
+        })
+        .expect("record drawing commands");
+
+        ring.submit(&SubmitInfo::default())
+            .expect("submit drawing commands");
+        ring.wait_all().expect("wait for validation work");
+
+        drop(ring);
 
         if let Some(value) = original_validation {
             std::env::set_var("DASHI_VALIDATION", value);
@@ -673,9 +724,13 @@ mod tests {
 
         assert!(
             !validation_flag.load(Ordering::SeqCst),
-            "validation layers reported an error when updating dynamic state",
+            "validation layers reported an error while issuing begin_drawing"
         );
 
+        ctx.destroy_image(color0);
+        ctx.destroy_image(color1);
+        ctx.destroy_image(depth);
+        ctx.destroy_render_pass(render_pass);
         ctx.destroy();
     }
 }
