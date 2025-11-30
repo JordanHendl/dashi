@@ -215,6 +215,7 @@ impl Drop for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::driver::command::{BeginDrawing, CommandSink, EndDrawing};
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -479,6 +480,254 @@ mod tests {
         ctx.destroy_buffer(storage_buffer);
         ctx.destroy_image(image);
         ctx.destroy_dynamic_allocator(allocator);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn begin_drawing_respects_validation_layers() {
+        let original_validation = std::env::var("DASHI_VALIDATION").ok();
+        std::env::set_var("DASHI_VALIDATION", "1");
+
+        let mut ctx = Context::headless(&ContextInfo::default()).expect("create headless context");
+
+        let validation_flag = Arc::new(AtomicBool::new(false));
+        let validation_ptr = Arc::into_raw(Arc::clone(&validation_flag));
+
+        let messenger = {
+            let debug_utils = ctx
+                .debug_utils
+                .as_ref()
+                .expect("validation layers should expose debug utils");
+
+            let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                )
+                .pfn_user_callback(Some(validation_flag_callback))
+                .user_data(validation_ptr as *mut c_void);
+
+            unsafe {
+                debug_utils
+                    .create_debug_utils_messenger(&messenger_info, None)
+                    .expect("create debug messenger")
+            }
+        };
+
+        const WIDTH: u32 = 64;
+        const HEIGHT: u32 = 64;
+        let viewport = Viewport {
+            area: FRect2D {
+                w: WIDTH as f32,
+                h: HEIGHT as f32,
+                ..Default::default()
+            },
+            scissor: Rect2D {
+                w: WIDTH,
+                h: HEIGHT,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let color_attachments = [AttachmentDescription::default(); 2];
+        let depth_attachment = AttachmentDescription {
+            format: Format::D24S8,
+            load_op: LoadOp::Clear,
+            store_op: StoreOp::Store,
+            ..Default::default()
+        };
+
+        let subpass = SubpassDescription {
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: Some(&depth_attachment),
+            subpass_dependencies: &[],
+        };
+
+        let render_pass = ctx
+            .make_render_pass(&RenderPassInfo {
+                debug_name: "validation_draw_rp",
+                viewport,
+                subpasses: &[subpass],
+            })
+            .expect("create render pass");
+
+        let vert = inline_spirv::inline_spirv!(
+            r#"#version 450
+               vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
+               void main() {
+                   gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+               }
+            "#,
+            vert
+        );
+
+        let frag = inline_spirv::inline_spirv!(
+            r#"#version 450
+               layout(location = 0) out vec4 color0;
+               layout(location = 1) out vec4 color1;
+               void main() {
+                   color0 = vec4(0.2, 0.3, 0.4, 1.0);
+                   color1 = vec4(0.4, 0.5, 0.6, 1.0);
+               }
+            "#,
+            frag
+        );
+
+        let pipeline_layout = ctx
+            .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
+                debug_name: "validation_draw_layout",
+                vertex_info: VertexDescriptionInfo {
+                    entries: &[],
+                    stride: 0,
+                    rate: VertexRate::Vertex,
+                },
+                bg_layouts: [None, None, None, None],
+                bt_layouts: [None, None, None, None],
+                shaders: &[
+                    PipelineShaderInfo {
+                        stage: ShaderType::Vertex,
+                        spirv: vert,
+                        specialization: &[],
+                    },
+                    PipelineShaderInfo {
+                        stage: ShaderType::Fragment,
+                        spirv: frag,
+                        specialization: &[],
+                    },
+                ],
+                details: GraphicsPipelineDetails {
+                    color_blend_states: vec![Default::default(); 2],
+                    depth_test: Some(DepthInfo {
+                        should_test: true,
+                        should_write: true,
+                    }),
+                    ..Default::default()
+                },
+            })
+            .expect("create graphics pipeline layout");
+
+        let pipeline = ctx
+            .make_graphics_pipeline(&GraphicsPipelineInfo {
+                debug_name: "validation_draw_pipeline",
+                layout: pipeline_layout,
+                render_pass,
+                ..Default::default()
+            })
+            .expect("create graphics pipeline");
+
+        let color0 = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_color0",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::RGBA8,
+                ..Default::default()
+            })
+            .expect("create color0 image");
+
+        let color1 = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_color1",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::RGBA8,
+                ..Default::default()
+            })
+            .expect("create color1 image");
+
+        let depth = ctx
+            .make_image(&ImageInfo {
+                debug_name: "validation_depth",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::D24S8,
+                ..Default::default()
+            })
+            .expect("create depth image");
+
+        let color_view0 = ImageView {
+            img: color0,
+            aspect: AspectMask::Color,
+            ..Default::default()
+        };
+
+        let color_view1 = ImageView {
+            img: color1,
+            aspect: AspectMask::Color,
+            ..Default::default()
+        };
+
+        let depth_view = ImageView {
+            img: depth,
+            aspect: AspectMask::DepthStencil,
+            ..Default::default()
+        };
+
+        let mut ring = ctx
+            .make_command_ring(&CommandQueueInfo2 {
+                debug_name: "validation_draw_ring",
+                queue_type: QueueType::Graphics,
+                ..Default::default()
+            })
+            .expect("create command ring");
+
+        ring.record(|cmd| {
+            let mut color_attachments = [None; 8];
+            color_attachments[0] = Some(color_view0);
+            color_attachments[1] = Some(color_view1);
+
+            let mut clear_values = [None; 8];
+            clear_values[0] = Some(ClearValue::Color([0.1, 0.2, 0.3, 1.0]));
+            clear_values[1] = Some(ClearValue::Color([0.3, 0.4, 0.5, 1.0]));
+
+            cmd.begin_drawing(&BeginDrawing {
+                viewport,
+                pipeline,
+                color_attachments,
+                depth_attachment: Some(depth_view),
+                clear_values,
+                depth_clear: Some(ClearValue::DepthStencil {
+                    depth: 1.0,
+                    stencil: 0,
+                }),
+            });
+
+            cmd.end_drawing(&EndDrawing::default());
+        })
+        .expect("record drawing commands");
+
+        ring.submit(&SubmitInfo::default())
+            .expect("submit drawing commands");
+        ring.wait_all().expect("wait for validation work");
+
+        drop(ring);
+
+        if let Some(value) = original_validation {
+            std::env::set_var("DASHI_VALIDATION", value);
+        } else {
+            std::env::remove_var("DASHI_VALIDATION");
+        }
+
+        unsafe {
+            if let Some(debug_utils) = ctx.debug_utils.as_ref() {
+                debug_utils.destroy_debug_utils_messenger(messenger, None);
+            }
+            let _ = Arc::from_raw(validation_ptr);
+        }
+
+        assert!(
+            !validation_flag.load(Ordering::SeqCst),
+            "validation layers reported an error while issuing begin_drawing"
+        );
+
+        ctx.destroy_image(color0);
+        ctx.destroy_image(color1);
+        ctx.destroy_image(depth);
+        ctx.destroy_render_pass(render_pass);
         ctx.destroy();
     }
 }
