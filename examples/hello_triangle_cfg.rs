@@ -325,6 +325,7 @@ fn main() {
                     color_attachments: subpass_targets.color_views(),
                     depth_attachment: subpass_targets.depth_view(),
                     clear_values: subpass_targets.color_clear_values(),
+                    ..Default::default()
                 });
 
                 if subpass_idx == 0 {

@@ -81,13 +81,14 @@ pub struct GraphicsPipelineStateUpdate {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct BeginDrawing {
     pub viewport: Viewport,
     pub pipeline: Handle<GraphicsPipeline>,
-    pub color_attachments: [Option<ImageView>; 4],
+    pub color_attachments: [Option<ImageView>; 8],
     pub depth_attachment: Option<ImageView>,
-    pub clear_values: [Option<ClearValue>; 4],
+    pub clear_values: [Option<ClearValue>; 8],
+    pub depth_clear: Option<ClearValue>,
 }
 
 #[repr(C)]

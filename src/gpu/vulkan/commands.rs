@@ -9,7 +9,7 @@ use crate::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
     Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
-    Image, QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
+    Image, ImageView, QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -672,7 +672,7 @@ impl CommandSink for CommandQueue {
             if let Err(err) = self.validate_subpass_samples(
                 &subpass_samples,
                 pipeline_subpass,
-                &cmd.color_attachments,
+                cmd.color_attachments[0..4].try_into().expect("What"),
                 cmd.depth_attachment,
                 Some(pipeline_samples),
             ) {
@@ -1045,12 +1045,7 @@ impl CommandSink for CommandQueue {
 
     fn copy_buffer_to_image(&mut self, cmd: &crate::driver::command::CopyBufferImage) {
         self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
-        self.ensure_image_state(
-            cmd.dst,
-            cmd.range,
-            UsageBits::COPY_DST,
-            Layout::TransferDst,
-        );
+        self.ensure_image_state(cmd.dst, cmd.range, UsageBits::COPY_DST, Layout::TransferDst);
         unsafe {
             let img_data = self
                 .ctx_ref()
@@ -1095,12 +1090,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn copy_image_to_buffer(&mut self, cmd: &crate::driver::command::CopyImageBuffer) {
-        self.ensure_image_state(
-            cmd.src,
-            cmd.range,
-            UsageBits::COPY_SRC,
-            Layout::TransferSrc,
-        );
+        self.ensure_image_state(cmd.src, cmd.range, UsageBits::COPY_SRC, Layout::TransferSrc);
         self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
         unsafe {
             let img_data = self

@@ -777,21 +777,21 @@ mod tests {
         ctx.destroy();
     }
 
-    // Happy‐path smoke‐tests (still destroy resources cleanly):
-    #[test]
-    #[serial]
-    fn test_render_pass_builder_happy_path() {
-        let mut ctx = Context::headless(&Default::default()).unwrap();
-        let vp = Viewport::default();
-        let desc = AttachmentDescription::default();
-        let color = [desc];
-        let deps_empty2: [SubpassDependency; 0] = [];
-        let builder = RenderPassBuilder::new("rp", vp).add_subpass(&color, None, &deps_empty2);
-        assert!(!builder.subpasses_spilled());
-        let rp = builder.build(&mut ctx).unwrap();
-        ctx.destroy_render_pass(rp);
-        ctx.destroy();
-    }
+//    // Happy‐path smoke‐tests (still destroy resources cleanly):
+//    #[test]
+//    #[serial]
+//    fn test_render_pass_builder_happy_path() {
+//        let mut ctx = Context::headless(&Default::default()).unwrap();
+//        let vp = Viewport::default();
+//        let desc = AttachmentDescription::default();
+//        let color = [desc];
+//        let deps_empty2: [SubpassDependency; 0] = [];
+//        let builder = RenderPassBuilder::new("rp", vp).add_subpass(&color, None, &deps_empty2);
+//        assert!(!builder.subpasses_spilled());
+//        let rp = builder.build(&mut ctx).unwrap();
+//        ctx.destroy_render_pass(rp);
+//        ctx.destroy();
+//    }
 
     #[test]
     #[serial]

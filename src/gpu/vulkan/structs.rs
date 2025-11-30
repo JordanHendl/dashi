@@ -1276,16 +1276,16 @@ impl Hash for RenderPassSubpassTargets {
 }
 
 impl RenderPassSubpassTargets {
-    pub fn color_views(&self) -> [Option<ImageView>; 4] {
-        let mut views = [None; 4];
+    pub fn color_views(&self) -> [Option<ImageView>; 8] {
+        let mut views = [None; 8];
         for (dst, src) in views.iter_mut().zip(self.color_attachments.iter()) {
             *dst = src.as_ref().map(|att| att.view);
         }
         views
     }
 
-    pub fn color_clear_values(&self) -> [Option<ClearValue>; 4] {
-        let mut clears = [None; 4];
+    pub fn color_clear_values(&self) -> [Option<ClearValue>; 8] {
+        let mut clears = [None; 8];
         for (dst, src) in clears.iter_mut().zip(self.color_attachments.iter()) {
             *dst = src.as_ref().and_then(|att| att.clear_value);
         }

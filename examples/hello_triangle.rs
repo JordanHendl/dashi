@@ -319,14 +319,19 @@ void main() {
                     ..Default::default()
                 },
                 pipeline: graphics_pipeline,
-                color_attachments: [Some(fb_view), None, None, None],
+                color_attachments: [Some(fb_view), None, None, None, None, None, None, None],
                 depth_attachment: None,
                 clear_values: [
                     Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])),
                     None,
                     None,
                     None,
+                    None,
+                    None,
+                    None,
+                    None,
                 ],
+                ..Default::default()
             });
 
             // Bump alloc some data to write the triangle position to.

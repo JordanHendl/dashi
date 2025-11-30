@@ -309,9 +309,9 @@ void main() {
             // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 
-            let mut color_attachments = [None; 4];
+            let mut color_attachments = [None; 8];
             color_attachments[0] = Some(color_view);
-            let mut clear_values = [None; 4];
+            let mut clear_values = [None; 8];
             clear_values[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0]));
 
             let mut drawing = stream.begin_drawing(&BeginDrawing {
@@ -320,6 +320,7 @@ void main() {
                 color_attachments,
                 depth_attachment: None,
                 clear_values,
+                ..Default::default()
             });
 
             for slot in 0..transforms.len() {
