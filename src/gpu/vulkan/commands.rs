@@ -324,10 +324,6 @@ impl CommandQueue {
 
         #[cfg(debug_assertions)]
         {
-            if curr_rp != gfx.render_pass {
-                return Err(GPUError::LibraryError());
-            }
-
             let rp = self
                 .ctx_ref()
                 .render_passes

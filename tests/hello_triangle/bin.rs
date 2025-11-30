@@ -229,11 +229,17 @@ void main() {
         })
         .unwrap();
 
+    let subpass_info = ctx
+        .render_pass_subpass_info(render_pass, 0)
+        .expect("render pass subpass info");
+
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
             layout: pipeline_layout,
-            render_pass,
+            attachment_formats: subpass_info.color_formats,
+            depth_format: subpass_info.depth_format,
+            subpass_samples: subpass_info.samples,
             debug_name: "Pipeline",
             ..Default::default()
         })

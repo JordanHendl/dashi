@@ -264,7 +264,7 @@ impl GraphicsPipelineBuilder {
             subpass_samples: subpass_info.samples,
             subpass_id: self.subpass_id,
         };
-        ctx.make_graphics_pipeline(self.render_pass, &info)
+        ctx.make_graphics_pipeline(&info)
     }
 }
 

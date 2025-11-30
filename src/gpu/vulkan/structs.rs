@@ -1186,7 +1186,7 @@ impl Default for GraphicsPipelineDetails {
             color_blend_states: vec![Default::default()],
             sample_count: SampleCount::S1,
             min_sample_shading: 0.0,
-            dynamic_states: Vec::new(),
+            dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
             subpass: 0,
         }
     }
@@ -1559,7 +1559,6 @@ pub struct ComputePipelineInfo<'a> {
 
 #[derive(Clone, Debug, Default)]
 pub struct RenderPassSubpassInfo {
-    pub viewport: Viewport,
     pub color_formats: Vec<Format>,
     pub depth_format: Option<Format>,
     pub samples: SubpassSampleInfo,

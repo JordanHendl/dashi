@@ -110,7 +110,8 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
         debug_name:"renderpass"
     }).unwrap();
     let render_target = ctx.make_render_target(&RenderTargetInfo{debug_name:"rt",render_pass,attachments:&[fb_view]}).unwrap();
-    let graphics_pipeline = ctx.make_graphics_pipeline(&GraphicsPipelineInfo{layout:pipeline_layout,render_pass,debug_name:"Pipeline",..Default::default()}).unwrap();
+    let subpass_info = ctx.render_pass_subpass_info(render_pass, 0).expect("render pass subpass info");
+    let graphics_pipeline = ctx.make_graphics_pipeline(&GraphicsPipelineInfo{layout:pipeline_layout,attachment_formats:subpass_info.color_formats,depth_format:subpass_info.depth_format,subpass_samples:subpass_info.samples,debug_name:"Pipeline",..Default::default()}).unwrap();
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
     let bind_group = ctx.make_bind_group(&BindGroupInfo{debug_name:"OpenXR Triangle",layout:bg_layout,bindings:&[BindingInfo{resource:ShaderResource::Dynamic(&allocator),binding:0}],..Default::default()}).unwrap();
     let mut timer = Timer::new();
