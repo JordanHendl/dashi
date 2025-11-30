@@ -34,4 +34,8 @@ pub struct GraphicsPipeline {
     pub(super) render_pass: Handle<RenderPass>,
     pub(super) layout: Handle<GraphicsPipelineLayout>,
     pub(super) subpass: u8,
+    pub(super) attachment_formats: Vec<Format>,
+    pub(super) depth_format: Option<Format>,
+    pub(super) sample_count: SampleCount,
+    pub(super) subpass_samples: SubpassSampleInfo,
 }
