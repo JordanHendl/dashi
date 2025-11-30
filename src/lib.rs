@@ -3,11 +3,6 @@ pub mod gpu;
 pub mod job;
 pub use gpu::driver::types::{Handle, IndexType, UsageBits};
 
-#[cfg(feature = "dx12")]
-pub mod gpu_dx12;
-#[cfg(feature = "metal")]
-pub mod gpu_metal;
-
 #[cfg(
     any(
         all(feature = "dashi-sdl2", feature = "dashi-minifb"),
@@ -21,9 +16,3 @@ compile_error!(
 
 
 pub use gpu::*;
-#[cfg(feature = "dx12")]
-#[allow(unused_imports)]
-pub use gpu_dx12::*;
-#[cfg(feature = "metal")]
-#[allow(unused_imports)]
-pub use gpu_metal::*;
