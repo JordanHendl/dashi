@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
-use crate::driver::command::{
+use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
 };
-use crate::driver::types::Handle;
+use crate::gpu::driver::types::Handle;
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };

@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    cmd::PendingGraphics, driver::command::BeginRenderPass, CommandQueueInfo2, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo
+    cmd::PendingGraphics, gpu::driver::command::BeginRenderPass, CommandQueueInfo2, CommandStream, Context, Handle, QueueType, RenderPass, SubmitInfo
 };
 
 use super::CommandRing;

@@ -3,9 +3,9 @@
 use ash::vk;
 
 use super::{convert_rect2d_to_vulkan, SampleCount, SubpassSampleInfo};
-use crate::driver::command::CommandSink;
-use crate::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
-use crate::driver::state::{BufferBarrier, Layout, LayoutTransition};
+use crate::gpu::driver::command::CommandSink;
+use crate::gpu::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
+use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
     Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
@@ -228,7 +228,7 @@ impl CommandQueue {
 
     fn apply_graphics_pipeline_state_update(
         &mut self,
-        update: &crate::driver::command::GraphicsPipelineStateUpdate,
+        update: &crate::gpu::driver::command::GraphicsPipelineStateUpdate,
     ) {
         let Some(pipeline) = self.curr_pipeline else { return };
         let ctx = self.ctx_ref();
@@ -499,7 +499,7 @@ impl CommandQueue {
 }
 
 impl CommandSink for CommandQueue {
-    fn begin_render_pass(&mut self, cmd: &crate::driver::command::BeginRenderPass) {
+    fn begin_render_pass(&mut self, cmd: &crate::gpu::driver::command::BeginRenderPass) {
         for view in cmd.color_attachments.iter().flatten() {
             self.ensure_image_state(
                 view.img,
@@ -628,7 +628,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn begin_drawing(&mut self, cmd: &crate::driver::command::BeginDrawing) {
+    fn begin_drawing(&mut self, cmd: &crate::gpu::driver::command::BeginDrawing) {
         for view in cmd.color_attachments.iter().flatten() {
             self.ensure_image_state(
                 view.img,
@@ -787,7 +787,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn end_drawing(&mut self, _pass: &crate::driver::command::EndDrawing) {
+    fn end_drawing(&mut self, _pass: &crate::gpu::driver::command::EndDrawing) {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
@@ -811,7 +811,7 @@ impl CommandSink for CommandQueue {
         self.curr_pipeline = None;
     }
 
-    fn next_subpass(&mut self, _cmd: &crate::driver::command::NextSubpass) {
+    fn next_subpass(&mut self, _cmd: &crate::gpu::driver::command::NextSubpass) {
         let curr = self.curr_subpass.unwrap_or(0);
         let rp = self
             .curr_rp
@@ -853,18 +853,18 @@ impl CommandSink for CommandQueue {
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
     }
 
-    fn bind_graphics_pipeline(&mut self, cmd: &crate::driver::command::BindGraphicsPipeline) {
+    fn bind_graphics_pipeline(&mut self, cmd: &crate::gpu::driver::command::BindGraphicsPipeline) {
         let _ = self.bind_graphics_pipeline(cmd.pipeline);
     }
 
     fn update_graphics_pipeline_state(
         &mut self,
-        cmd: &crate::driver::command::GraphicsPipelineStateUpdate,
+        cmd: &crate::gpu::driver::command::GraphicsPipelineStateUpdate,
     ) {
         self.apply_graphics_pipeline_state_update(cmd);
     }
 
-    fn blit_image(&mut self, cmd: &crate::driver::command::BlitImage) {
+    fn blit_image(&mut self, cmd: &crate::gpu::driver::command::BlitImage) {
         self.ensure_image_state(
             cmd.src,
             cmd.src_range,
@@ -950,7 +950,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn draw(&mut self, cmd: &crate::driver::command::Draw) {
+    fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1016,7 +1016,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn draw_indexed(&mut self, cmd: &crate::driver::command::DrawIndexed) {
+    fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
@@ -1095,7 +1095,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn dispatch(&mut self, cmd: &crate::driver::command::Dispatch) {
+    fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) {
         unsafe {
             self.ctx_ref()
                 .device
@@ -1107,7 +1107,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn copy_buffer(&mut self, cmd: &crate::driver::command::CopyBuffer) {
+    fn copy_buffer(&mut self, cmd: &crate::gpu::driver::command::CopyBuffer) {
         self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
         self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
         unsafe {
@@ -1134,7 +1134,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn copy_buffer_to_image(&mut self, cmd: &crate::driver::command::CopyBufferImage) {
+    fn copy_buffer_to_image(&mut self, cmd: &crate::gpu::driver::command::CopyBufferImage) {
         self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
         self.ensure_image_state(cmd.dst, cmd.range, UsageBits::COPY_DST, Layout::TransferDst);
         unsafe {
@@ -1180,7 +1180,7 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn copy_image_to_buffer(&mut self, cmd: &crate::driver::command::CopyImageBuffer) {
+    fn copy_image_to_buffer(&mut self, cmd: &crate::gpu::driver::command::CopyImageBuffer) {
         self.ensure_image_state(cmd.src, cmd.range, UsageBits::COPY_SRC, Layout::TransferSrc);
         self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
         unsafe {
@@ -1227,11 +1227,11 @@ impl CommandSink for CommandQueue {
         }
     }
 
-    fn copy_image(&mut self, _cmd: &crate::driver::command::CopyImage) {
+    fn copy_image(&mut self, _cmd: &crate::gpu::driver::command::CopyImage) {
         todo!()
     }
 
-    fn transition_image(&mut self, cmd: &crate::driver::command::TransitionImage) {
+    fn transition_image(&mut self, cmd: &crate::gpu::driver::command::TransitionImage) {
         self.ensure_image_state(cmd.image, cmd.range, cmd.usage, cmd.layout);
     }
 
@@ -1239,7 +1239,7 @@ impl CommandSink for CommandQueue {
         self.submit(cmd).unwrap()
     }
 
-    fn debug_marker_begin(&mut self, _cmd: &crate::driver::command::DebugMarkerBegin) {
+    fn debug_marker_begin(&mut self, _cmd: &crate::gpu::driver::command::DebugMarkerBegin) {
         // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
         unsafe {
             self.ctx_ref().device.cmd_pipeline_barrier(
@@ -1254,7 +1254,7 @@ impl CommandSink for CommandQueue {
         };
     }
 
-    fn debug_marker_end(&mut self, _cmd: &crate::driver::command::DebugMarkerEnd) {
+    fn debug_marker_end(&mut self, _cmd: &crate::gpu::driver::command::DebugMarkerEnd) {
         unsafe {
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,

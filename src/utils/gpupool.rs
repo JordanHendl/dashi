@@ -1,5 +1,5 @@
 use crate::{
-    driver::command::CopyBuffer,
+    gpu::driver::command::CopyBuffer,
     Buffer,
     BufferInfo,
     CommandQueue,
