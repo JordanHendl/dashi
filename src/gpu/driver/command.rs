@@ -36,6 +36,7 @@ pub enum Op {
     DebugMarkerEnd = 15,
     TransitionImage = 16,
     BeginRenderPass = 17,
+    NextSubpass = 18,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -95,6 +96,12 @@ pub struct BeginDrawing {
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct EndDrawing {
+    padding: u64,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct NextSubpass {
     padding: u64,
 }
 
@@ -349,6 +356,10 @@ impl CommandEncoder {
         self.push(Op::BeginRenderPass, desc);
     }
 
+    pub fn next_subpass(&mut self) {
+        self.push(Op::NextSubpass, &NextSubpass::default());
+    }
+
     /// Begin a render pass with the provided attachments.
     pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
         self.push(Op::BeginDrawing, desc);
@@ -466,6 +477,7 @@ impl CommandEncoder {
                 Op::DispatchIndirect => todo!(),
                 Op::TransitionImage => sink.transition_image(cmd.payload()),
                 Op::BeginRenderPass => sink.begin_render_pass(cmd.payload()),
+                Op::NextSubpass => sink.next_subpass(cmd.payload()),
             }
         }
         cnt
@@ -627,6 +639,7 @@ impl Op {
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
+            x if x == Op::NextSubpass as u16 => Some(Op::NextSubpass),
             x if x == Op::TransitionImage as u16 => Some(Op::TransitionImage),
             _ => None,
         }
@@ -653,6 +666,7 @@ pub trait CommandSink {
         self.copy_image(cmd)
     }
     fn transition_image(&mut self, cmd: &TransitionImage);
+    fn next_subpass(&mut self, cmd: &NextSubpass);
     fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);

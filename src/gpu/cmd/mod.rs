@@ -182,6 +182,10 @@ impl CommandStream<PendingGraphics> {
         self.enc.blit_image(cmd);
     }
 
+    pub fn next_subpass(&mut self) {
+        self.enc.next_subpass();
+    }
+
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {
         self.enc.end_drawing();
         CommandStream {
@@ -217,6 +221,10 @@ impl CommandStream<Graphics> {
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
         self.enc.blit_image(cmd);
+    }
+
+    pub fn next_subpass(&mut self) {
+        self.enc.next_subpass();
     }
 
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {

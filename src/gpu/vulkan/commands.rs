@@ -102,6 +102,7 @@ impl CommandQueue {
 
         self.dirty = true;
         self.curr_rp = None;
+        self.curr_subpass = None;
         self.curr_pipeline = None;
         Ok(())
     }
@@ -534,6 +535,7 @@ impl CommandSink for CommandQueue {
         }
 
         self.curr_rp = Some(cmd.render_pass);
+        self.curr_subpass = Some(0);
 
         let rp_obj = self
             .ctx_ref()
@@ -676,6 +678,7 @@ impl CommandSink for CommandQueue {
         }
 
         self.curr_rp = Some(pipeline_rp);
+        self.curr_subpass = Some(0);
 
         let rp_obj = self
             .ctx_ref()
@@ -801,7 +804,50 @@ impl CommandSink for CommandQueue {
         }
 
         self.curr_rp = None;
+        self.curr_subpass = None;
         self.curr_pipeline = None;
+    }
+
+    fn next_subpass(&mut self, _cmd: &crate::driver::command::NextSubpass) {
+        let curr = self.curr_subpass.unwrap_or(0);
+        let rp = self
+            .curr_rp
+            .ok_or_else(|| GPUError::InvalidSubpass {
+                subpass: curr as u32,
+                available: 0,
+            })
+            .unwrap();
+
+        let rp_obj = self
+            .ctx_ref()
+            .render_passes
+            .get_ref(rp)
+            .ok_or(GPUError::SlotError())
+            .unwrap();
+
+        let next = curr + 1;
+        let available = rp_obj.subpass_samples.len();
+        if next >= available {
+            panic!(
+                "{}",
+                GPUError::InvalidSubpass {
+                    subpass: next as u32,
+                    available: available as u32,
+                }
+            );
+        }
+
+        unsafe {
+            self.ctx_ref().device.cmd_next_subpass(
+                self.cmd_buf,
+                vk::SubpassContents::INLINE,
+            );
+        }
+
+        self.curr_subpass = Some(next);
+        self.curr_pipeline = None;
+        self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+        self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
     }
 
     fn bind_graphics_pipeline(&mut self, cmd: &crate::driver::command::BindGraphicsPipeline) {

@@ -137,14 +137,16 @@ impl Renderer {
         self.ring.record(|cmd| {
             let mut stream = CommandStream::new().begin();
             let mut draw = stream.begin_render_pass(info.begin);
-            let s = self.pool.install(|| {
-                let streams = (0..threads)
-                    .into_par_iter()
-                    .map(|thread_index| {
-                        let mut stream = CommandStream::<PendingGraphics>::new_pending_graphics();
-                        for (sp_idx, callbacks) in subpasses.iter().enumerate() {
+
+            for (sp_idx, callbacks) in subpasses.iter().enumerate() {
+                let streams = self.pool.install(|| {
+                    (0..threads)
+                        .into_par_iter()
+                        .map(|thread_index| {
+                            let mut stream =
+                                CommandStream::<PendingGraphics>::new_pending_graphics();
                             if callbacks.is_empty() {
-                                continue;
+                                return stream;
                             }
                             let ctx = SubpassCtx {
                                 render_pass,
@@ -157,16 +159,18 @@ impl Renderer {
                                 let s2 = (cb)(ctx, s);
                                 stream.combine(s2);
                             }
-                        }
-                        return stream;
-                    })
-                    .collect::<Vec<_>>();
+                            stream
+                        })
+                        .collect::<Vec<_>>()
+                });
 
-                return streams;
-            });
+                for c in streams {
+                    draw.combine(c);
+                }
 
-            for c in s {
-                draw.combine(c);
+                if sp_idx + 1 < subpasses.len() {
+                    draw.next_subpass();
+                }
             }
 
             // End drawing.
