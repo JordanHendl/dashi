@@ -1,12 +1,14 @@
+mod common;
+
+use common::ValidationContext;
 use dashi::gpu::vulkan::*;
 use serial_test::serial;
 
 #[test]
 #[serial]
 fn test_context() {
-    let ctx = Context::headless(&Default::default());
+    let ctx = ValidationContext::headless(&Default::default());
     assert!(ctx.is_ok());
-    ctx.unwrap().destroy();
 }
 
 #[test]
@@ -14,7 +16,7 @@ fn test_context() {
 fn test_buffer() {
     let c_buffer_size = 1280;
     let c_test_val = 8 as u8;
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
     let initial_data = vec![c_test_val as u8; c_buffer_size as usize];
     let buffer_res = ctx.make_buffer(&BufferInfo {
@@ -41,7 +43,6 @@ fn test_buffer() {
     assert!(res.is_ok());
 
     ctx.destroy_buffer(buffer);
-    ctx.destroy();
 }
 
 #[test]
@@ -53,7 +54,7 @@ fn test_image() {
     let c_test_val = 8 as u8;
     let initial_data =
         vec![c_test_val as u8; (c_test_dim[0] * c_test_dim[1] * c_test_dim[2] * 4) as usize];
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
     let image_res = ctx.make_image(&ImageInfo {
         debug_name: "Test Image",
         dim: c_test_dim,
@@ -66,14 +67,13 @@ fn test_image() {
     assert!(image_res.is_ok());
     let image = image_res.unwrap();
     ctx.destroy_image(image);
-    ctx.destroy();
 }
 
 #[test]
 #[serial]
 fn test_headless_context_creation() {
     // headless() should succeed...
-    let ctx = Context::headless(&ContextInfo::default());
+    let ctx = ValidationContext::headless(&ContextInfo::default());
     assert!(ctx.is_ok(), "Context::headless() failed to create");
     let mut ctx = ctx.unwrap();
 
@@ -98,7 +98,6 @@ fn test_headless_context_creation() {
     ctx.destroy_buffer(buf);
 
     // And we can clean up without panicking
-    ctx.destroy();
 }
 
 #[test]
@@ -106,7 +105,7 @@ fn test_headless_context_creation() {
 #[cfg(not(feature = "dashi-openxr"))]
 fn test_headless_rejects_display() {
     let mut ctx =
-        Context::headless(&ContextInfo::default()).expect("headless() should succeed");
+        ValidationContext::headless(&ContextInfo::default()).expect("headless() should succeed");
 
     // Try to call the windowed API -- should panic or error
     let info = DisplayInfo {
@@ -126,15 +125,13 @@ fn test_headless_rejects_display() {
         "expected HeadlessDisplayNotSupported, got {:?}",
         err
     );
-
-    ctx.destroy();
 }
 
 #[test]
 #[serial]
 fn compute_test() {
     // The GPU context that holds all the data.
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
     // Make the bind group layout. This describes the bindings into a shader.
     let bg_layout = ctx
@@ -259,43 +256,41 @@ outputData[index] = inputData[index] + num_to_add;
     allocator.reset();
 
     // Begin recording commands
-//    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
-//
-//    // Bump alloc some data to write the triangle position to.
-//    let mut buf = allocator.bump().unwrap();
-//    buf.slice::<f32>()[0] = 5.0;
-//
-//    list.dispatch_compute(Dispatch {
-//        compute: pipeline,
-//        workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
-//        bindings: Bindings {
-//            bind_groups: [Some(bind_group), None, None, None],
-//            dynamic_buffers: [Some(buf), None, None, None],
-//            ..Default::default()
-//        },
-//        ..Default::default()
-//    });
-//
-//    // Submit our recorded commands
-//    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-//
-//    ctx.wait(fence).unwrap();
+    //    let mut list = ctx.begin_command_queue(&Default::default()).unwrap();
+    //
+    //    // Bump alloc some data to write the triangle position to.
+    //    let mut buf = allocator.bump().unwrap();
+    //    buf.slice::<f32>()[0] = 5.0;
+    //
+    //    list.dispatch_compute(Dispatch {
+    //        compute: pipeline,
+    //        workgroup_size: [BUFF_SIZE / std::mem::size_of::<f32>() as u32, 1, 1],
+    //        bindings: Bindings {
+    //            bind_groups: [Some(bind_group), None, None, None],
+    //            dynamic_buffers: [Some(buf), None, None, None],
+    //            ..Default::default()
+    //        },
+    //        ..Default::default()
+    //    });
+    //
+    //    // Submit our recorded commands
+    //    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+    //
+    //    ctx.wait(fence).unwrap();
 
-//    let data = ctx.map_buffer::<f32>(output).unwrap();
-//    for entry in data {
-//        assert!(*entry == 5.0);
-//    }
+    //    let data = ctx.map_buffer::<f32>(output).unwrap();
+    //    for entry in data {
+    //        assert!(*entry == 5.0);
+    //    }
 
-//    ctx.unmap_buffer(output).unwrap();
+    //    ctx.unmap_buffer(output).unwrap();
     ctx.destroy_dynamic_allocator(allocator);
-    ctx.destroy();
 }
 
 #[test]
 #[serial]
 fn bind_table_test() {
     // The GPU context that holds all the data.
-    let ctx = Context::headless(&Default::default()).unwrap();
+    let _ctx = ValidationContext::headless(&Default::default()).unwrap();
     // Bind table support is optional; ensure context can be created and cleaned up.
-    ctx.destroy();
 }

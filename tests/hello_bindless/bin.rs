@@ -1,10 +1,13 @@
+mod common;
+
 use dashi::builders::{BindTableBuilder, BindTableLayoutBuilder};
 use dashi::*;
+use common::ValidationContext;
 
 #[cfg(feature = "dashi-tests")]
 fn main() {
     // Create a headless context.
-    let mut ctx = gpu::Context::headless(&ContextInfo::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&ContextInfo::default()).unwrap();
 
     // One dynamic uniform at binding 0.
     let shader_info = ShaderInfo {
@@ -99,7 +102,6 @@ fn main() {
     ctx.wait(fence).unwrap();
 
     ctx.destroy_dynamic_allocator(allocator);
-    ctx.destroy();
 }
 
 #[cfg(not(feature = "dashi-tests"))]
