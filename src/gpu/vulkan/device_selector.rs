@@ -177,32 +177,38 @@ impl DeviceSelector {
 
         let pdevices = unsafe { instance.enumerate_physical_devices()? };
         for device in pdevices {
-            let mut info: DeviceInfo =
-                unsafe { instance.get_physical_device_properties(device) }.into();
+            let properties = unsafe { instance.get_physical_device_properties(device) };
+            let mut info: DeviceInfo = properties.into();
 
             let enabled_extensions =
                 unsafe { instance.enumerate_device_extension_properties(device) }?;
 
-            let mut descriptor_indexing =
-                vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
-            let features = vk::PhysicalDeviceFeatures::builder()
-                .shader_clip_distance(true)
-                .build();
+            let supports_vulkan11 = vk::api_version_major(properties.api_version) > 1
+                || (vk::api_version_major(properties.api_version) == 1
+                    && vk::api_version_minor(properties.api_version) >= 1);
 
-            let mut features2 = vk::PhysicalDeviceFeatures2::builder()
-                .features(features)
-                .push_next(&mut descriptor_indexing)
-                .build();
+            if supports_vulkan11 {
+                let mut descriptor_indexing =
+                    vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
+                let features = vk::PhysicalDeviceFeatures::builder()
+                    .shader_clip_distance(true)
+                    .build();
 
-            unsafe { instance.get_physical_device_features2(device, &mut features2) };
-            if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing > 0
-                && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind > 0
-                && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing > 0
-                && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind > 0
-                && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing > 0
-                && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind > 0
-            {
-                info.bind_table_capable = true;
+                let mut features2 = vk::PhysicalDeviceFeatures2::builder()
+                    .features(features)
+                    .push_next(&mut descriptor_indexing)
+                    .build();
+
+                unsafe { instance.get_physical_device_features2(device, &mut features2) };
+                if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing > 0
+                    && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind > 0
+                    && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing > 0
+                    && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind > 0
+                    && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing > 0
+                    && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind > 0
+                {
+                    info.bind_table_capable = true;
+                }
             }
 
             if Self::has_swapchain_extension(&enabled_extensions) {

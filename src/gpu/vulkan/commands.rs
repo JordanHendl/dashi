@@ -295,12 +295,15 @@ impl CommandQueue {
             .ok_or(GPUError::SlotError())
             .unwrap();
 
-        // Heuristic aspect selection. If you track format, prefer using that.
         let aspect = if cmd
             .new_usage
             .intersects(UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE)
         {
-            vk::ImageAspectFlags::DEPTH
+            if img_data.format == crate::gpu::Format::D24S8 {
+                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+            } else {
+                vk::ImageAspectFlags::DEPTH
+            }
         } else {
             vk::ImageAspectFlags::COLOR
         };
