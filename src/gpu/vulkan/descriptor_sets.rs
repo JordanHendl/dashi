@@ -30,13 +30,6 @@ pub struct BindTable {
     pub(super) set_id: u32,
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct IndexedBindGroup {
-    pub(super) set: vk::DescriptorSet,
-    pub(super) set_id: u32,
-}
-
 impl CommandQueue {
     pub(crate) fn bind_descriptor_set(
         &mut self,
