@@ -265,7 +265,7 @@ struct CmdHeader {
 /// payloads are written into a side buffer and referenced by index.  This keeps the
 /// hot path free of heap allocations and allows the encoder to be reused across
 /// frames without reallocating.
-pub struct CommandEncoder {
+pub(crate) struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
     queue: QueueType,
@@ -274,7 +274,7 @@ pub struct CommandEncoder {
 impl CommandEncoder {
     /// Create a new empty encoder. Some initial capacity is reserved to avoid
     /// frequent reallocations when recording many commands.
-    pub fn new(queue: QueueType) -> Self {
+    pub(crate) fn new(queue: QueueType) -> Self {
         Self {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
@@ -283,7 +283,7 @@ impl CommandEncoder {
     }
 
     /// Clear all recorded commands while retaining allocated arenas.
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.data.clear();
         self.side.clear();
     }
@@ -352,77 +352,82 @@ impl CommandEncoder {
     }
 
     /// Begin a render pass with the provided attachments.
-    pub fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
+    pub(crate) fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
         self.push(Op::BeginRenderPass, desc);
     }
 
-    pub fn next_subpass(&mut self) {
+    pub(crate) fn next_subpass(&mut self) {
         self.push(Op::NextSubpass, &NextSubpass::default());
     }
 
     /// Begin a render pass with the provided attachments.
-    pub fn begin_drawing(&mut self, desc: &BeginDrawing) {
+    pub(crate) fn begin_drawing(&mut self, desc: &BeginDrawing) {
         self.push(Op::BeginDrawing, desc);
     }
 
     /// End the current render pass.
-    pub fn end_drawing(&mut self) {
+    pub(crate) fn end_drawing(&mut self) {
         self.push(Op::EndDrawing, &EndDrawing::default());
     }
 
     /// Bind a graphics or compute pipeline.
-    pub fn bind_graphics_pipeline(&mut self, pipe: Handle<GraphicsPipeline>) {
+    pub(crate) fn bind_graphics_pipeline(&mut self, pipe: Handle<GraphicsPipeline>) {
         let payload = BindGraphicsPipeline { pipeline: pipe };
         self.push(Op::BindGraphicsPipeline, &payload);
     }
 
     /// Update the currently bound graphics pipeline state.
-    pub fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate) {
+    pub(crate) fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate) {
         self.push(Op::UpdateGraphicsPipelineState, cmd);
     }
 
     /// Issue a draw call.
-    pub fn draw(&mut self, cmd: &Draw) {
+    pub(crate) fn draw(&mut self, cmd: &Draw) {
         self.push(Op::Draw, cmd);
     }
 
-    pub fn draw_indexed(&mut self, cmd: &DrawIndexed) {
+    pub(crate) fn draw_indexed(&mut self, cmd: &DrawIndexed) {
         self.push(Op::DrawIndexed, cmd);
     }
 
     /// Issue a dispatch call.
-    pub fn dispatch(&mut self, cmd: &Dispatch) {
+    pub(crate) fn dispatch(&mut self, cmd: &Dispatch) {
         self.push(Op::Dispatch, cmd);
     }
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
-    pub fn copy_buffer(&mut self, cmd: &CopyBuffer) {
+    pub(crate) fn copy_buffer(&mut self, cmd: &CopyBuffer) {
         self.push(Op::CopyBuffer, cmd);
     }
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
-    pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
+    pub(crate) fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
         self.push(Op::CopyBufferToImage, cmd);
     }
 
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
-    pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
+    pub(crate) fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
         self.push(Op::CopyImageToBuffer, cmd);
     }
 
     /// Copy data between images, emitting required barriers.
-    pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, range: SubresourceRange) {
+    pub(crate) fn copy_image(
+        &mut self,
+        src: Handle<Image>,
+        dst: Handle<Image>,
+        range: SubresourceRange,
+    ) {
         let payload = CopyImage { src, dst };
         self.push(Op::CopyImage, &payload);
     }
 
     /// Copy data between images, emitting required barriers.
-    pub fn blit_image(&mut self, cmd: &BlitImage) {
+    pub(crate) fn blit_image(&mut self, cmd: &BlitImage) {
         self.push(Op::BlitImage, cmd);
     }
 
     /// Transition an image to presentation layout.
-    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+    pub(crate) fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         let range = SubresourceRange::default();
         let transition = TransitionImage {
             image,
@@ -433,26 +438,26 @@ impl CommandEncoder {
         self.transition_image(&transition);
     }
 
-    pub fn transition_image(&mut self, cmd: &TransitionImage) {
+    pub(crate) fn transition_image(&mut self, cmd: &TransitionImage) {
         self.push(Op::TransitionImage, cmd);
     }
 
     /// Begin a debug marker region.
-    pub fn begin_debug_marker(&mut self) {
+    pub(crate) fn begin_debug_marker(&mut self) {
         self.push(Op::DebugMarkerBegin, &DebugMarkerBegin {});
     }
 
     /// End a debug marker region.
-    pub fn end_debug_marker(&mut self) {
+    pub(crate) fn end_debug_marker(&mut self) {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
 
-    pub fn combine(&mut self, other: &CommandEncoder) {
+    pub(crate) fn combine(&mut self, other: &CommandEncoder) {
         self.data.extend_from_slice(&other.data);
         self.side.extend_from_slice(&other.side);
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
-    pub fn append<S: CommandSink>(&self, sink: &mut S) -> usize {
+    pub(crate) fn append<S: CommandSink>(&self, sink: &mut S) -> usize {
         let mut cnt = 0;
         for cmd in self.iter() {
             cnt += 1;
@@ -484,7 +489,7 @@ impl CommandEncoder {
     }
 
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
-    pub fn submit<S: CommandSink>(
+    pub(crate) fn submit<S: CommandSink>(
         &self,
         sink: &mut S,
         submit: &SubmitInfo2,
@@ -497,7 +502,7 @@ impl CommandEncoder {
     }
 
     /// Iterate over recorded commands.
-    pub fn iter(&self) -> CommandIter {
+    pub(crate) fn iter(&self) -> CommandIter {
         CommandIter {
             data: &self.data,
             side: &self.side,

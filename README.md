@@ -50,20 +50,16 @@ cargo run --no-default-features --features dashi-openxr --example openxr_simple_
 
 ### Command Submission
 
-Dashi can record commands directly or via the heap-free `CommandEncoder`. The
-`Recorder` trait unifies both paths. Submit work with either a reference to an
-encoder or a closure that records onto the provided command list:
+Commands are recorded through the typed, driver-backed `CommandStream`. The
+stream enforces valid state transitions while internally delegating to the
+encoder implementation layer. A simple record/submit flow looks like:
 
 ```rust
-let ctx_ptr = &mut ctx as *mut _;
-let mut list = ctx.pool_mut(QueueType::Graphics).begin(ctx_ptr, "", false)?;
-let encoder = CommandEncoder::new();
-ctx.submit_with(&mut list, &encoder, &SubmitInfo::default())?;
-
-ctx.submit_with(&mut list, |cmd| {
-    // direct recording
-    cmd.draw(3, 1);
-}, &SubmitInfo::default())?;
+let mut stream = CommandStream::new().begin();
+// record commands with type-state guidance
+stream.copy_buffers(&CopyBuffer { /* ... */ });
+let (pending, fence) = stream.end().submit(&mut queue, &SubmitInfo2::default());
+// optionally wait on the returned fence
 ```
 
 Creating an image with `mip_levels` greater than 1 will automatically generate

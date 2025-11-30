@@ -1,12 +1,10 @@
 use std::marker::PhantomData;
 
-use crate::driver::command::{
-    BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
-};
-use crate::driver::types::Handle;
 use crate::gpu::driver::command::{
-    CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
+    BeginDrawing, BeginRenderPass, BlitImage, CommandEncoder, CommandSink, Dispatch, Draw,
+    DrawIndexed, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
+use crate::gpu::driver::types::Handle;
 use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2};
 
 /// Generic command buffer with type-state tracking.
