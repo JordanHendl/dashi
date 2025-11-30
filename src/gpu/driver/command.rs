@@ -21,20 +21,21 @@ pub enum Op {
     BeginDrawing = 0,
     EndDrawing = 1,
     BindGraphicsPipeline = 2,
-    Draw = 3,
-    DrawIndexed = 4,
-    DrawIndirect = 5,
-    Dispatch = 6,
-    DispatchIndirect = 7,
-    CopyBuffer = 8,
-    CopyBufferToImage = 9,
-    CopyImageToBuffer = 10,
-    CopyImage = 11,
-    BlitImage = 12,
-    DebugMarkerBegin = 13,
-    DebugMarkerEnd = 14,
-    TransitionImage = 15,
-    BeginRenderPass = 16,
+    UpdateGraphicsPipelineState = 3,
+    Draw = 4,
+    DrawIndexed = 5,
+    DrawIndirect = 6,
+    Dispatch = 7,
+    DispatchIndirect = 8,
+    CopyBuffer = 9,
+    CopyBufferToImage = 10,
+    CopyImageToBuffer = 11,
+    CopyImage = 12,
+    BlitImage = 13,
+    DebugMarkerBegin = 14,
+    DebugMarkerEnd = 15,
+    TransitionImage = 16,
+    BeginRenderPass = 17,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -364,6 +365,11 @@ impl CommandEncoder {
         self.push(Op::BindGraphicsPipeline, &payload);
     }
 
+    /// Update the currently bound graphics pipeline state.
+    pub fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate) {
+        self.push(Op::UpdateGraphicsPipelineState, cmd);
+    }
+
     /// Issue a draw call.
     pub fn draw(&mut self, cmd: &Draw) {
         self.push(Op::Draw, cmd);
@@ -443,6 +449,9 @@ impl CommandEncoder {
                 Op::BeginDrawing => sink.begin_drawing(cmd.payload()),
                 Op::EndDrawing => sink.end_drawing(cmd.payload()),
                 Op::BindGraphicsPipeline => sink.bind_graphics_pipeline(cmd.payload()),
+                Op::UpdateGraphicsPipelineState => {
+                    sink.update_graphics_pipeline_state(cmd.payload())
+                }
                 Op::Draw => sink.draw(cmd.payload()),
                 Op::Dispatch => sink.dispatch(cmd.payload()),
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
@@ -603,6 +612,9 @@ impl Op {
             x if x == Op::BeginDrawing as u16 => Some(Op::BeginDrawing),
             x if x == Op::EndDrawing as u16 => Some(Op::EndDrawing),
             x if x == Op::BindGraphicsPipeline as u16 => Some(Op::BindGraphicsPipeline),
+            x if x == Op::UpdateGraphicsPipelineState as u16 => {
+                Some(Op::UpdateGraphicsPipelineState)
+            }
             x if x == Op::Draw as u16 => Some(Op::Draw),
             x if x == Op::DrawIndexed as u16 => Some(Op::DrawIndexed),
             x if x == Op::DrawIndirect as u16 => Some(Op::DrawIndirect),
@@ -626,6 +638,7 @@ pub trait CommandSink {
     fn begin_drawing(&mut self, pass: &BeginDrawing);
     fn end_drawing(&mut self, pass: &EndDrawing);
     fn bind_graphics_pipeline(&mut self, cmd: &BindGraphicsPipeline);
+    fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate);
     fn blit_image(&mut self, cmd: &BlitImage);
     fn draw(&mut self, cmd: &Draw);
     fn draw_indexed(&mut self, cmd: &DrawIndexed);
