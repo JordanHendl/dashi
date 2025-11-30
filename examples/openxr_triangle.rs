@@ -171,10 +171,16 @@ void main() { out_color = vec4(frag_color.xy, 0, 1); }", frag),
         })
         .unwrap();
 
+    let subpass_info = ctx
+        .render_pass_subpass_info(render_pass, 0)
+        .expect("render pass subpass info");
+
     let graphics_pipeline = ctx
         .make_graphics_pipeline(&GraphicsPipelineInfo {
             layout: pipeline_layout,
-            render_pass,
+            attachment_formats: subpass_info.color_formats,
+            depth_format: subpass_info.depth_format,
+            subpass_samples: subpass_info.samples,
             debug_name: "Pipeline",
             ..Default::default()
         })

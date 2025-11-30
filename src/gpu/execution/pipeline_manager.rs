@@ -98,7 +98,6 @@ impl PipelineManager {
     pub fn register_graphics_pipeline(
         &self,
         name: impl Into<String>,
-        render_pass: Handle<RenderPass>,
         info: &GraphicsPipelineInfo<'_>,
     ) -> Result<Handle<GraphicsPipeline>> {
         let name = name.into();
@@ -107,7 +106,7 @@ impl PipelineManager {
         }
 
         let handle = unsafe { &mut *self.ctx }
-            .make_graphics_pipeline(render_pass, info)
+            .make_graphics_pipeline(info)
             .with_context(|| format!("creating graphics pipeline '{}'", name))?;
 
         self.graphics_pipelines
@@ -419,7 +418,7 @@ mod serde_support {
                 .map_err(|err| anyhow!(err))?;
             drop(layouts_guard);
 
-            self.register_graphics_pipeline(name, render_pass, &info)
+            self.register_graphics_pipeline(name, &info)
         }
 
         fn register_compute_pipeline_cfg(

@@ -230,17 +230,14 @@ void main() {
         .render_pass_subpass_info(render_pass, 0)
         .expect("render pass subpass info");
     let graphics_pipeline = ctx
-        .make_graphics_pipeline(
-            render_pass,
-            &GraphicsPipelineInfo {
-                layout: pipeline_layout,
-                attachment_formats: subpass_info.color_formats,
-                depth_format: subpass_info.depth_format,
-                subpass_samples: subpass_info.samples,
-                debug_name: "Pipeline",
-                ..Default::default()
-            },
-        )
+        .make_graphics_pipeline(&GraphicsPipelineInfo {
+            layout: pipeline_layout,
+            attachment_formats: subpass_info.color_formats,
+            depth_format: subpass_info.depth_format,
+            subpass_samples: subpass_info.samples,
+            debug_name: "Pipeline",
+            ..Default::default()
+        })
         .unwrap();
 
     // Make dynamic allocator to use for dynamic buffers.

@@ -89,7 +89,6 @@ pub struct SubpassAttachmentFormats {
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) fb: vk::Framebuffer,
-    pub(super) viewport: Viewport,
     pub(super) attachment_formats: Vec<Format>,
     pub(super) subpass_samples: Vec<SubpassSampleInfo>,
     pub(super) subpass_formats: Vec<SubpassAttachmentFormats>,
@@ -628,17 +627,14 @@ mod tests {
             .expect("query render pass subpass info");
 
         let pipeline = ctx
-            .make_graphics_pipeline(
-                render_pass,
-                &GraphicsPipelineInfo {
-                    debug_name: "validation_draw_pipeline",
-                    layout: pipeline_layout,
-                    attachment_formats: subpass_info.color_formats,
-                    depth_format: subpass_info.depth_format,
-                    subpass_samples: subpass_info.samples,
-                    ..Default::default()
-                },
-            )
+            .make_graphics_pipeline(&GraphicsPipelineInfo {
+                debug_name: "validation_draw_pipeline",
+                layout: pipeline_layout,
+                attachment_formats: subpass_info.color_formats,
+                depth_format: subpass_info.depth_format,
+                subpass_samples: subpass_info.samples,
+                ..Default::default()
+            })
             .expect("create graphics pipeline");
 
         let color0 = ctx
@@ -3323,8 +3319,8 @@ impl Context {
         let render_pass = unsafe { self.device.create_render_pass(&render_pass_info, None) }?;
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
-        let width = info.viewport.scissor.w;
-        let height = info.viewport.scissor.h;
+        let width = 1;
+        let height = 1;
 
         let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
         let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
@@ -3370,7 +3366,6 @@ impl Context {
             .insert(RenderPass {
                 raw: render_pass,
                 fb,
-                viewport: info.viewport,
                 attachment_formats,
                 subpass_samples,
                 subpass_formats,
@@ -3389,7 +3384,6 @@ impl Context {
         let samples = rp.subpass_samples.get(index)?.clone();
 
         Some(RenderPassSubpassInfo {
-            viewport: rp.viewport,
             color_formats: formats.color_formats,
             depth_format: formats.depth_format,
             samples,
@@ -3545,12 +3539,15 @@ impl Context {
             .map(|c| c.clone().into())
             .collect();
 
-        let dynamic_states: Vec<vk::DynamicState> = info
-            .details
-            .dynamic_states
-            .iter()
-            .map(|s| (*s).into())
-            .collect();
+        let mut dynamic_states = info.details.dynamic_states.clone();
+        for required in [DynamicState::Viewport, DynamicState::Scissor] {
+            if !dynamic_states.contains(&required) {
+                dynamic_states.push(required);
+            }
+        }
+
+        let dynamic_states: Vec<vk::DynamicState> =
+            dynamic_states.iter().map(|s| (*s).into()).collect();
 
         return Ok(self
             .gfx_pipeline_layouts
@@ -3621,20 +3618,11 @@ impl Context {
     /// - Synchronization primitives are handled during presentation.
     pub fn make_graphics_pipeline(
         &mut self,
-        render_pass: Handle<RenderPass>,
         info: &GraphicsPipelineInfo,
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
-        let rp_ref = self.render_passes.get_ref(render_pass).unwrap();
         let subpass_index = info.subpass_id as usize;
-        let expected_subpass =
-            rp_ref
-                .subpass_samples
-                .get(subpass_index)
-                .ok_or_else(|| GPUError::InvalidSubpass {
-                    subpass: info.subpass_id as u32,
-                    available: rp_ref.subpass_samples.len() as u32,
-                })?;
+        let expected_subpass = &info.subpass_samples;
 
         for (attachment_idx, expected) in expected_subpass.color_samples.iter().enumerate() {
             if layout.sample_count != *expected {
@@ -3659,13 +3647,6 @@ impl Context {
             }
         }
 
-        let rp_viewport = self
-            .render_passes
-            .get_ref(render_pass)
-            .unwrap()
-            .viewport
-            .clone();
-
         if info.attachment_formats.len() != info.subpass_samples.color_samples.len() {
             return Err(GPUError::LibraryError());
         }
@@ -3675,6 +3656,7 @@ impl Context {
         }
 
         let mut attachments = Vec::with_capacity(info.attachment_formats.len() + 1);
+        let mut attachment_formats = Vec::with_capacity(info.attachment_formats.len() + 1);
         let mut color_attachment_refs = Vec::with_capacity(info.attachment_formats.len());
 
         for (index, (format, samples)) in info
@@ -3702,6 +3684,7 @@ impl Context {
 
             attachments.push(attachment_desc);
             color_attachment_refs.push(attachment_ref);
+            attachment_formats.push(*format);
         }
 
         let mut depth_attachment_ref = None;
@@ -3726,6 +3709,7 @@ impl Context {
                 layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             });
             attachments.push(depth_attachment);
+            attachment_formats.push(depth_format);
         }
 
         let target_subpass = info.subpass_id as usize;
@@ -3758,6 +3742,49 @@ impl Context {
             .build();
 
         let dummy_render_pass = unsafe { self.device.create_render_pass(&dummy_rp_info, None) }?;
+        self.set_name(dummy_render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
+
+        let width = 1;
+        let height = 1;
+
+        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
+        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
+        for fmt in &attachment_formats {
+            let mut usage = vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::SAMPLED;
+
+            if matches!(fmt, Format::D24S8) {
+                usage |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+            } else {
+                usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            }
+
+            let vk_fmt = lib_to_vk_image_format(fmt);
+            view_formats_vk.push(vk_fmt);
+            let info = vk::FramebufferAttachmentImageInfo::builder()
+                .usage(usage)
+                .width(width)
+                .height(height)
+                .layer_count(1)
+                .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
+                .build();
+            attachment_image_infos.push(info);
+        }
+
+        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
+            .attachment_image_infos(&attachment_image_infos);
+
+        let fb_info = vk::FramebufferCreateInfo::builder()
+            .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
+            .render_pass(dummy_render_pass)
+            .width(width)
+            .height(height)
+            .layers(1)
+            .attachment_count(attachment_formats.len() as u32)
+            .push_next(&mut attachments_info);
+
+        let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&[layout.vertex_input])
@@ -3766,23 +3793,17 @@ impl Context {
 
         // Step 4: Viewport and Scissor State
         let viewport = vk::Viewport::builder()
-            .x(rp_viewport.area.x)
-            .y(rp_viewport.area.y)
-            .width(rp_viewport.area.w)
-            .height(rp_viewport.area.h)
+            .x(0.0)
+            .y(0.0)
+            .width(1.0)
+            .height(1.0)
             .min_depth(0.0)
             .max_depth(1.0)
             .build();
 
         let scissor = vk::Rect2D::builder()
-            .offset(vk::Offset2D {
-                x: rp_viewport.scissor.x as i32,
-                y: rp_viewport.scissor.y as i32,
-            })
-            .extent(vk::Extent2D {
-                width: rp_viewport.scissor.w,
-                height: rp_viewport.scissor.h,
-            })
+            .offset(vk::Offset2D { x: 0, y: 0 })
+            .extent(vk::Extent2D { width: 1, height: 1 })
             .build();
 
         let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
@@ -3832,9 +3853,25 @@ impl Context {
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
         };
 
-        unsafe {
-            self.device.destroy_render_pass(dummy_render_pass, None);
-        }
+        let mut subpass_samples = vec![SubpassSampleInfo::default(); target_subpass + 1];
+        subpass_samples[target_subpass] = info.subpass_samples.clone();
+
+        let mut subpass_formats = vec![SubpassAttachmentFormats::default(); target_subpass + 1];
+        subpass_formats[target_subpass] = SubpassAttachmentFormats {
+            color_formats: info.attachment_formats.clone(),
+            depth_format: info.depth_format,
+        };
+
+        let render_pass_handle = self
+            .render_passes
+            .insert(RenderPass {
+                raw: dummy_render_pass,
+                fb,
+                attachment_formats,
+                subpass_samples,
+                subpass_formats,
+            })
+            .unwrap();
 
         let graphics_pipelines = graphics_pipelines_result?;
 
@@ -3848,7 +3885,7 @@ impl Context {
             .gfx_pipelines
             .insert(GraphicsPipeline {
                 raw: graphics_pipelines[0],
-                render_pass,
+                render_pass: render_pass_handle,
                 layout: info.layout,
                 subpass: info.subpass_id,
                 subpass_formats: SubpassAttachmentFormats {
