@@ -29,6 +29,7 @@ pub enum GPUError {
     SlotError(),
     HeadlessDisplayNotSupported,
     UnsupportedFormat(vk::Format),
+    SwapchainConfigError(&'static str),
     UnsupportedShaderStage(ShaderType),
     Unimplemented(&'static str),
     MismatchedSampleCount {
@@ -75,6 +76,9 @@ impl fmt::Display for GPUError {
             GPUError::SlotError() => write!(f, "Slot Error"),
             GPUError::HeadlessDisplayNotSupported => write!(f, "Headless Display not supported"),
             GPUError::UnsupportedFormat(format) => write!(f, "Format {:?} not supported", format),
+            GPUError::SwapchainConfigError(msg) => {
+                write!(f, "Swapchain configuration error: {}", msg)
+            }
             GPUError::UnsupportedShaderStage(stage) => write!(f, "Shader Stage {:?} not supported", stage),
             GPUError::Unimplemented(feature) => write!(f, "Unimplemented Feature: {}", feature),
             GPUError::MismatchedSampleCount {
