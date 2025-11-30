@@ -2,8 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
+    BindGroup, BindTable, Buffer, ClearValue, ColorBlendState, ComputePipeline, CullMode, DepthInfo, DynamicBuffer, DynamicState, Fence, Filter, GraphicsPipeline, GraphicsPipelineDetails, Image, ImageView, QueueType, Rect2D, RenderPass, SampleCount, SubmitInfo2, Topology, VertexOrdering, Viewport
 };
 
 use super::{
@@ -72,6 +71,13 @@ pub struct BeginRenderPass {
     pub color_attachments: [Option<ImageView>; 4],
     pub depth_attachment: Option<ImageView>,
     pub clear_values: [Option<ClearValue>; 4],
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Debug)]
+pub struct GraphicsPipelineStateUpdate {
+    pub viewport: Option<Viewport>,
+//    ... others
 }
 
 #[repr(C)]

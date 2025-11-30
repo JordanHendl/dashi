@@ -68,7 +68,7 @@ impl ImagePool {
             && request.format == info.info.format
             && request.samples == info.info.samples
     }
-
+    
     pub fn make_image(&mut self, request: &ImageRequest) -> Result<ImageData, GPUError> {
         let ctx: &mut Context = unsafe { self.ctx.as_mut() };
         let mut best_fit: Option<ImageData> = None;
