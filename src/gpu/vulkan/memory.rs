@@ -1,6 +1,7 @@
 use crate::utils::Handle;
 use ash::vk;
 use offset_allocator;
+use std::hash::{Hash, Hasher};
 use vk_mem;
 
 #[derive(Debug)]
@@ -64,19 +65,25 @@ impl DynamicBuffer {
     pub fn slice<T>(&mut self) -> &mut [T] {
         let typed_map: *mut T = unsafe { std::mem::transmute(self.ptr) };
         unsafe {
-            std::slice::from_raw_parts_mut(
-                typed_map,
-                self.size as usize / std::mem::size_of::<T>(),
-            )
+            std::slice::from_raw_parts_mut(typed_map, self.size as usize / std::mem::size_of::<T>())
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct  DynamicAllocatorState {
+pub struct DynamicAllocatorState {
     pub pool: Handle<Buffer>,
     pub report: offset_allocator::StorageReport,
     pub min_alloc_size: u32,
+}
+
+impl Hash for DynamicAllocatorState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.pool.hash(state);
+        self.report.total_free_space.hash(state);
+        self.report.largest_free_region.hash(state);
+        self.min_alloc_size.hash(state);
+    }
 }
 
 #[derive(Clone)]
@@ -107,7 +114,7 @@ impl DynamicAllocator {
     pub fn reset(&mut self) {
         self.allocator.reset();
     }
-    
+
     pub fn state(&self) -> DynamicAllocatorState {
         DynamicAllocatorState {
             pool: self.pool,
@@ -132,4 +139,3 @@ impl DynamicAllocator {
         })
     }
 }
-
