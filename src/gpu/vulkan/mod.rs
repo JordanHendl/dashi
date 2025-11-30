@@ -867,33 +867,45 @@ impl Context {
             })
             .collect();
 
+        let supports_vulkan11 = vk::api_version_major(device_prop.api_version) > 1
+            || (vk::api_version_major(device_prop.api_version) == 1
+                && vk::api_version_minor(device_prop.api_version) >= 1);
+
         let mut descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
         let features = vk::PhysicalDeviceFeatures::builder()
             .shader_clip_distance(true)
             .build();
 
-        let mut features2 = vk::PhysicalDeviceFeatures2::builder()
-            .features(features)
-            .push_next(&mut descriptor_indexing)
-            .build();
+        let mut features2 = supports_vulkan11.then(|| {
+            let mut f2 = vk::PhysicalDeviceFeatures2::builder()
+                .features(features)
+                .push_next(&mut descriptor_indexing)
+                .build();
 
-        unsafe { instance.get_physical_device_features2(pdevice, &mut features2) };
+            unsafe { instance.get_physical_device_features2(pdevice, &mut f2) };
 
-        let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::builder()
-            .uniform_and_storage_buffer16_bit_access(true)
-            .build();
+            // Bind table enabled
+            if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
+                && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind <= 0
+                && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing <= 0
+                && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind <= 0
+                && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing <= 0
+                && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind <= 0
+            {
+                f2 = Default::default();
+            }
 
-        // Bind table enabled
-        if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
-            && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind <= 0
-            && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing <= 0
-            && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind <= 0
-            && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing <= 0
-            && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind <= 0
-        {
-            features2 = Default::default();
-        }
+            f2
+        });
+
+        let mut features16bit = supports_vulkan11
+            .then(|| {
+                vk::PhysicalDevice16BitStorageFeatures::builder()
+                    .uniform_and_storage_buffer16_bit_access(true)
+                    .build()
+            })
+            .unwrap_or_default();
 
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
@@ -941,19 +953,21 @@ impl Context {
         let mut imageless = vk::PhysicalDeviceImagelessFramebufferFeatures::default();
         imageless.imageless_framebuffer = vk::TRUE;
 
-        let device = unsafe {
-            instance.create_device(
-                pdevice,
-                &vk::DeviceCreateInfo::builder()
-                    .enabled_extension_names(&extensions_to_enable)
-                    .queue_create_infos(&queue_infos)
-                    .push_next(&mut features2)
-                    .push_next(&mut features16bit)
-                    .push_next(&mut imageless)
-                    .build(),
-                None,
-            )
-        }?;
+        let mut device_ci = vk::DeviceCreateInfo::builder()
+            .enabled_extension_names(&extensions_to_enable)
+            .queue_create_infos(&queue_infos);
+
+        if let Some(ref mut f2) = features2 {
+            device_ci = device_ci.push_next(f2);
+            if supports_vulkan11 {
+                device_ci = device_ci.push_next(&mut features16bit);
+                device_ci = device_ci.push_next(&mut imageless);
+            }
+        } else {
+            device_ci = device_ci.enabled_features(&features);
+        }
+
+        let device = unsafe { instance.create_device(pdevice, &device_ci.build(), None) }?;
 
         gfx_queue.queue = unsafe { device.get_device_queue(gfx_family, 0) };
         if let Some(ref mut q) = compute_queue {
