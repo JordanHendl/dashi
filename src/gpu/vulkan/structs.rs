@@ -12,6 +12,17 @@ use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
 use serde::{Deserialize, Serialize};
 
+#[inline]
+fn hash64<T: Hash>(value: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_f32<H: Hasher>(value: f32, state: &mut H) {
+    state.write(&value.to_bits().to_le_bytes());
+}
+
 #[repr(C)]
 #[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
@@ -290,7 +301,7 @@ pub struct Extent {
     pub height: u32,
 }
 #[repr(C)]
-#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct Rect2D {
     pub x: u32,
@@ -307,6 +318,15 @@ pub struct FRect2D {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+}
+
+impl Hash for FRect2D {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_f32(self.x, state);
+        hash_f32(self.y, state);
+        hash_f32(self.w, state);
+        hash_f32(self.h, state);
+    }
 }
 
 #[repr(C)]
@@ -344,6 +364,16 @@ pub struct ImageInfo<'a> {
     pub mip_levels: u32,
     pub samples: SampleCount,
     pub initial_data: Option<&'a [u8]>,
+}
+
+impl Hash for ImageInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.dim.hash(state);
+        self.layers.hash(state);
+        self.format.hash(state);
+        self.mip_levels.hash(state);
+        self.samples.hash(state);
+    }
 }
 
 impl<'a> Default for ImageInfo<'a> {
@@ -391,13 +421,21 @@ impl Default for ImageView {
     }
 }
 
-#[derive(Hash, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct BufferInfo<'a> {
     pub debug_name: &'a str,
     pub byte_size: u32,
     pub visibility: MemoryVisibility,
     pub usage: BufferUsage,
     pub initial_data: Option<&'a [u8]>,
+}
+
+impl Hash for BufferInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.byte_size.hash(state);
+        self.visibility.hash(state);
+        self.usage.hash(state);
+    }
 }
 
 impl<'a> Default for BufferInfo<'a> {
@@ -411,13 +449,22 @@ impl<'a> Default for BufferInfo<'a> {
         }
     }
 }
-#[derive(Hash, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DynamicAllocatorInfo<'a> {
     pub debug_name: &'a str,
     pub usage: BufferUsage,
     pub num_allocations: u32,
     pub byte_size: u32,
     pub allocation_size: u32,
+}
+
+impl Hash for DynamicAllocatorInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.usage.hash(state);
+        self.num_allocations.hash(state);
+        self.byte_size.hash(state);
+        self.allocation_size.hash(state);
+    }
 }
 
 impl<'a> Default for DynamicAllocatorInfo<'a> {
@@ -432,7 +479,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
     }
 }
 
-#[derive(Hash)]
+#[derive(Clone, Copy)]
 pub struct CommandQueueInfo<'a> {
     pub debug_name: &'a str,
     pub should_cleanup: bool,
@@ -444,6 +491,21 @@ pub struct CommandQueueInfo2<'a> {
     pub debug_name: &'a str,
     pub parent: Option<&'a CommandQueue>,
     pub queue_type: QueueType,
+}
+
+impl Hash for CommandQueueInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.should_cleanup.hash(state);
+        self.queue_type.hash(state);
+    }
+}
+
+impl Hash for CommandQueueInfo2<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let parent_ptr = self.parent.map(|p| p as *const CommandQueue as usize);
+        parent_ptr.hash(state);
+        self.queue_type.hash(state);
+    }
 }
 
 impl<'a> Default for CommandQueueInfo<'a> {
@@ -461,6 +523,13 @@ pub struct SubmitInfo<'a> {
     pub signal_sems: &'a [Handle<Semaphore>],
 }
 
+impl Hash for SubmitInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.wait_sems.hash(state);
+        self.signal_sems.hash(state);
+    }
+}
+
 impl<'a> Default for SubmitInfo<'a> {
     fn default() -> Self {
         Self {
@@ -471,7 +540,7 @@ impl<'a> Default for SubmitInfo<'a> {
 }
 
 #[repr(C)]
-#[derive(Pod, Zeroable, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Pod, Zeroable, Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SubmitInfo2 {
     pub wait_sems: [Handle<Semaphore>; 4],
     pub signal_sems: [Handle<Semaphore>; 4],
@@ -556,16 +625,28 @@ pub struct ShaderInfo<'a> {
     pub variables: &'a [BindGroupVariable],
 }
 
-#[derive(Hash, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct BindGroupLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub shaders: &'a [ShaderInfo<'a>],
 }
 
-#[derive(Hash, Clone, Debug)]
+impl Hash for BindGroupLayoutInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_from_shaders(self.shaders).hash(state);
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct BindTableLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub shaders: &'a [ShaderInfo<'a>],
+}
+
+impl Hash for BindTableLayoutInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_from_shaders(self.shaders).hash(state);
+    }
 }
 
 impl<'a> Default for BindTableLayoutInfo<'a> {
@@ -622,9 +703,7 @@ fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
         .collect();
 
     // Hash the normalized list
-    let mut hasher = DefaultHasher::new();
-    norm.hash(&mut hasher);
-    hasher.finish()
+    hash64(&norm)
 }
 
 /// Stable, order-independent hash for a BindGroupLayoutInfo (ignores `debug_name`).
@@ -637,7 +716,7 @@ pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
     hash_from_shaders(info.shaders)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub struct BufferView {
     pub handle: Handle<Buffer>,
     pub size: u64,
@@ -646,11 +725,15 @@ pub struct BufferView {
 
 impl BufferView {
     pub fn new(handle: Handle<Buffer>) -> Self {
-        Self { handle, size: 0, offset: 0 }
+        Self {
+            handle,
+            size: 0,
+            offset: 0,
+        }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub enum ShaderResource {
     Buffer(Handle<Buffer>),
     ConstBuffer(BufferView),
@@ -660,18 +743,19 @@ pub enum ShaderResource {
     SampledImage(ImageView, Handle<Sampler>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct BindingInfo {
     pub resource: ShaderResource,
     pub binding: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct IndexedResource {
     pub resource: ShaderResource,
     pub slot: u32,
 }
 
+#[derive(Hash)]
 pub struct IndexedBindingInfo<'a> {
     pub resources: &'a [IndexedResource],
     pub binding: u32,
@@ -686,21 +770,32 @@ impl<'a> Default for IndexedBindingInfo<'a> {
     }
 }
 
+#[derive(Hash)]
 pub struct BindGroupUpdateInfo<'a> {
     pub bg: Handle<BindGroup>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
 }
 
+#[derive(Hash)]
 pub struct BindTableUpdateInfo<'a> {
     pub table: Handle<BindTable>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
 }
 
+#[derive(Clone)]
 pub struct IndexedBindGroupInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
     pub set: u32,
+}
+
+impl Hash for IndexedBindGroupInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layout.hash(state);
+        self.bindings.hash(state);
+        self.set.hash(state);
+    }
 }
 
 impl<'a> Default for IndexedBindGroupInfo<'a> {
@@ -714,6 +809,7 @@ impl<'a> Default for IndexedBindGroupInfo<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct BindGroupInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindGroupLayout>,
@@ -721,11 +817,28 @@ pub struct BindGroupInfo<'a> {
     pub set: u32,
 }
 
+#[derive(Clone)]
 pub struct BindTableInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindTableLayout>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
     pub set: u32,
+}
+
+impl Hash for BindGroupInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layout.hash(state);
+        self.bindings.hash(state);
+        self.set.hash(state);
+    }
+}
+
+impl Hash for BindTableInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layout.hash(state);
+        self.bindings.hash(state);
+        self.set.hash(state);
+    }
 }
 
 impl<'a> Default for BindGroupInfo<'a> {
@@ -757,6 +870,15 @@ pub struct Viewport {
     pub scissor: Rect2D,
     pub min_depth: f32,
     pub max_depth: f32,
+}
+
+impl Hash for Viewport {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.area.hash(state);
+        self.scissor.hash(state);
+        hash_f32(self.min_depth, state);
+        hash_f32(self.max_depth, state);
+    }
 }
 
 impl Default for Viewport {
@@ -806,14 +928,14 @@ pub enum DynamicState {
     Scissor,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DepthInfo {
     pub should_test: bool,
     pub should_write: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct WriteMask {
     pub r: bool,
@@ -833,7 +955,7 @@ impl Default for WriteMask {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct ColorBlendState {
     pub enable: bool,
@@ -873,6 +995,20 @@ pub struct GraphicsPipelineDetails {
     pub min_sample_shading: f32,
     /// Pipeline states that will be configured dynamically at draw time.
     pub dynamic_states: Vec<DynamicState>,
+}
+
+impl Hash for GraphicsPipelineDetails {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.subpass.hash(state);
+        self.color_blend_states.hash(state);
+        self.topology.hash(state);
+        self.culling.hash(state);
+        self.front_face.hash(state);
+        self.depth_test.hash(state);
+        self.sample_count.hash(state);
+        hash_f32(self.min_sample_shading, state);
+        self.dynamic_states.hash(state);
+    }
 }
 
 impl Default for GraphicsPipelineDetails {
@@ -933,6 +1069,14 @@ pub struct SubpassDescription<'a> {
     pub color_attachments: &'a [AttachmentDescription],
     pub depth_stencil_attachment: Option<&'a AttachmentDescription>,
     pub subpass_dependencies: &'a [SubpassDependency],
+}
+
+impl Hash for SubpassDescription<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.color_attachments.hash(state);
+        self.depth_stencil_attachment.hash(state);
+        self.subpass_dependencies.hash(state);
+    }
 }
 
 #[repr(C)]
@@ -1110,10 +1254,25 @@ pub struct RenderPassAttachmentInfo {
     pub description: AttachmentDescription,
 }
 
+impl Hash for RenderPassAttachmentInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.view.hash(state);
+        self.clear_value.hash(state);
+        self.description.hash(state);
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RenderPassSubpassTargets {
     pub color_attachments: [Option<RenderPassAttachmentInfo>; 4],
     pub depth_attachment: Option<RenderPassAttachmentInfo>,
+}
+
+impl Hash for RenderPassSubpassTargets {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.color_attachments.hash(state);
+        self.depth_attachment.hash(state);
+    }
 }
 
 impl RenderPassSubpassTargets {
@@ -1172,6 +1331,13 @@ pub struct RenderPassInfo<'a> {
     pub subpasses: &'a [SubpassDescription<'a>],
 }
 
+impl Hash for RenderPassInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.viewport.hash(state);
+        self.subpasses.hash(state);
+    }
+}
+
 #[derive(Hash, Debug, Clone)]
 pub struct VertexDescriptionInfo<'a> {
     pub entries: &'a [VertexEntryInfo], // ConstSlice in Rust can be a reference slice
@@ -1193,6 +1359,14 @@ pub struct ComputePipelineLayoutInfo<'a> {
     pub shader: &'a PipelineShaderInfo<'a>,
 }
 
+impl Hash for ComputePipelineLayoutInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.bg_layouts.hash(state);
+        self.bt_layouts.hash(state);
+        self.shader.hash(state);
+    }
+}
+
 #[derive(Debug)]
 pub struct GraphicsPipelineLayoutInfo<'a> {
     pub debug_name: &'a str,
@@ -1201,6 +1375,16 @@ pub struct GraphicsPipelineLayoutInfo<'a> {
     pub bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
+}
+
+impl Hash for GraphicsPipelineLayoutInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.vertex_info.hash(state);
+        self.bg_layouts.hash(state);
+        self.bt_layouts.hash(state);
+        self.shaders.hash(state);
+        self.details.hash(state);
+    }
 }
 
 pub struct ComputePipelineInfo<'a> {
@@ -1213,6 +1397,20 @@ pub struct GraphicsPipelineInfo<'a> {
     pub layout: Handle<GraphicsPipelineLayout>,
     pub render_pass: Handle<RenderPass>,
     pub subpass_id: u8,
+}
+
+impl Hash for ComputePipelineInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layout.hash(state);
+    }
+}
+
+impl Hash for GraphicsPipelineInfo<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.layout.hash(state);
+        self.render_pass.hash(state);
+        self.subpass_id.hash(state);
+    }
 }
 
 impl<'a> Default for GraphicsPipelineInfo<'a> {
@@ -1234,6 +1432,13 @@ pub struct WindowInfo {
     pub resizable: bool,
 }
 
+impl Hash for WindowInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.size.hash(state);
+        self.resizable.hash(state);
+    }
+}
+
 impl Default for WindowInfo {
     fn default() -> Self {
         Self {
@@ -1249,6 +1454,14 @@ pub struct DisplayInfo {
     pub window: WindowInfo,
     pub vsync: bool,
     pub buffering: WindowBuffering,
+}
+
+impl Hash for DisplayInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.window.hash(state);
+        self.vsync.hash(state);
+        self.buffering.hash(state);
+    }
 }
 
 impl Default for DisplayInfo {
