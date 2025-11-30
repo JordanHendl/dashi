@@ -660,16 +660,26 @@ pub trait CommandSink {
     fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage);
     fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer);
     fn copy_image(&mut self, cmd: &CopyImage);
-    #[deprecated(note = "renamed to copy_image")]
-    /// Deprecated: renamed to [`copy_image`].
-    fn copy_texture(&mut self, cmd: &CopyImage) {
-        self.copy_image(cmd)
-    }
     fn transition_image(&mut self, cmd: &TransitionImage);
     fn next_subpass(&mut self, cmd: &NextSubpass);
     fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);
+}
+
+#[cfg(feature = "copy_texture_compat")]
+pub mod compat {
+    use super::{CommandSink, CopyImage};
+
+    #[deprecated(note = "renamed to copy_image")]
+    /// Deprecated: renamed to [`CommandSink::copy_image`].
+    pub trait CommandSinkCopyTexture: CommandSink {
+        fn copy_texture(&mut self, cmd: &CopyImage) {
+            self.copy_image(cmd)
+        }
+    }
+
+    impl<T: CommandSink + ?Sized> CommandSinkCopyTexture for T {}
 }
 
 //===----------------------------------------------------------------------===//
