@@ -380,7 +380,7 @@ impl CommandQueue {
         &mut self,
         subpass_samples: &[SubpassSampleInfo],
         subpass_index: usize,
-        color_attachments: &[Option<crate::ImageView>; 4],
+        color_attachments: &[Option<crate::ImageView>],
         depth_attachment: Option<crate::ImageView>,
         pipeline_samples: Option<SampleCount>,
     ) -> Result<(), GPUError> {
@@ -672,7 +672,7 @@ impl CommandSink for CommandQueue {
             if let Err(err) = self.validate_subpass_samples(
                 &subpass_samples,
                 pipeline_subpass,
-                cmd.color_attachments[0..4].try_into().expect("What"),
+                &cmd.color_attachments,
                 cmd.depth_attachment,
                 Some(pipeline_samples),
             ) {
@@ -721,12 +721,16 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let clears: Vec<vk::ClearValue> = cmd
+        let mut clears: Vec<vk::ClearValue> = cmd
             .clear_values
             .iter()
             .flatten()
             .map(clear_value_to_vk)
             .collect();
+
+        if let Some(depth_clear) = cmd.depth_clear.as_ref() {
+            clears.push(clear_value_to_vk(depth_clear));
+        }
 
         unsafe {
             self.ctx_ref().device.cmd_begin_render_pass(
