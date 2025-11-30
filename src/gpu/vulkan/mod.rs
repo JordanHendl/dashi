@@ -3666,6 +3666,99 @@ impl Context {
             .viewport
             .clone();
 
+        if info.attachment_formats.len() != info.subpass_samples.color_samples.len() {
+            return Err(GPUError::LibraryError());
+        }
+
+        if info.depth_format.is_some() != info.subpass_samples.depth_sample.is_some() {
+            return Err(GPUError::LibraryError());
+        }
+
+        let mut attachments = Vec::with_capacity(info.attachment_formats.len() + 1);
+        let mut color_attachment_refs = Vec::with_capacity(info.attachment_formats.len());
+
+        for (index, (format, samples)) in info
+            .attachment_formats
+            .iter()
+            .zip(info.subpass_samples.color_samples.iter())
+            .enumerate()
+        {
+            let attachment_desc = vk::AttachmentDescription {
+                format: lib_to_vk_image_format(format),
+                samples: convert_sample_count(*samples),
+                load_op: vk::AttachmentLoadOp::DONT_CARE,
+                store_op: vk::AttachmentStoreOp::DONT_CARE,
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: vk::ImageLayout::UNDEFINED,
+                final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                ..Default::default()
+            };
+
+            let attachment_ref = vk::AttachmentReference {
+                attachment: index as u32,
+                layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            };
+
+            attachments.push(attachment_desc);
+            color_attachment_refs.push(attachment_ref);
+        }
+
+        let mut depth_attachment_ref = None;
+        if let Some(depth_format) = info.depth_format {
+            let depth_samples = info
+                .subpass_samples
+                .depth_sample
+                .ok_or(GPUError::LibraryError())?;
+            let depth_attachment = vk::AttachmentDescription {
+                format: lib_to_vk_image_format(&depth_format),
+                samples: convert_sample_count(depth_samples),
+                load_op: vk::AttachmentLoadOp::DONT_CARE,
+                store_op: vk::AttachmentStoreOp::DONT_CARE,
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: vk::ImageLayout::UNDEFINED,
+                final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                ..Default::default()
+            };
+            depth_attachment_ref = Some(vk::AttachmentReference {
+                attachment: attachments.len() as u32,
+                layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+            attachments.push(depth_attachment);
+        }
+
+        let target_subpass = info.subpass_id as usize;
+        let mut subpasses = Vec::with_capacity(target_subpass + 1);
+        for idx in 0..=target_subpass {
+            if idx == target_subpass {
+                subpasses.push(match depth_attachment_ref.as_ref() {
+                    Some(depth) => vk::SubpassDescription::builder()
+                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                        .color_attachments(&color_attachment_refs)
+                        .depth_stencil_attachment(depth)
+                        .build(),
+                    None => vk::SubpassDescription::builder()
+                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                        .color_attachments(&color_attachment_refs)
+                        .build(),
+                });
+            } else {
+                subpasses.push(
+                    vk::SubpassDescription::builder()
+                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                        .build(),
+                );
+            }
+        }
+
+        let dummy_rp_info = vk::RenderPassCreateInfo::builder()
+            .attachments(&attachments)
+            .subpasses(&subpasses)
+            .build();
+
+        let dummy_render_pass = unsafe { self.device.create_render_pass(&dummy_rp_info, None) }?;
+
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&[layout.vertex_input])
             .vertex_attribute_descriptions(&layout.vertex_attribs)
@@ -3721,7 +3814,7 @@ impl Context {
             .multisample_state(&layout.multisample)
             .color_blend_state(&color_blend_state)
             .layout(layout.layout)
-            .render_pass(rp_ref.raw)
+            .render_pass(dummy_render_pass)
             .subpass(info.subpass_id as u32);
 
         if let Some(d) = layout.depth_stencil.as_ref() {
@@ -3734,13 +3827,16 @@ impl Context {
 
         let pipeline_info = pipeline_builder.build();
 
-        let graphics_pipelines = unsafe {
-            self.device.create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &[pipeline_info],
-                None,
-            )?
+        let graphics_pipelines_result = unsafe {
+            self.device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
         };
+
+        unsafe {
+            self.device.destroy_render_pass(dummy_render_pass, None);
+        }
+
+        let graphics_pipelines = graphics_pipelines_result?;
 
         self.set_name(
             graphics_pipelines[0],
@@ -3751,10 +3847,14 @@ impl Context {
         return Ok(self
             .gfx_pipelines
             .insert(GraphicsPipeline {
-                render_pass,
                 raw: graphics_pipelines[0],
+                render_pass,
                 layout: info.layout,
                 subpass: info.subpass_id,
+                attachment_formats: info.attachment_formats.clone(),
+                depth_format: info.depth_format,
+                sample_count: layout.sample_count,
+                subpass_samples: info.subpass_samples.clone(),
             })
             .unwrap());
     }
