@@ -219,6 +219,9 @@ mod tests {
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use crate::driver::command::{
+        BeginDrawing, CommandEncoder, Draw, GraphicsPipelineStateUpdate,
+    };
 
     unsafe extern "system" fn validation_flag_callback(
         _message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,

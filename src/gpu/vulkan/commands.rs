@@ -225,6 +225,37 @@ impl CommandQueue {
         Ok(())
     }
 
+    fn apply_graphics_pipeline_state_update(
+        &mut self,
+        update: &crate::driver::command::GraphicsPipelineStateUpdate,
+    ) {
+        let Some(pipeline) = self.curr_pipeline else { return };
+        let ctx = self.ctx_ref();
+        let Some(gfx) = ctx.gfx_pipelines.get_ref(pipeline) else { return };
+        let Some(layout) = ctx.gfx_pipeline_layouts.get_ref(gfx.layout) else { return };
+
+        if let Some(viewport) = update.viewport {
+            unsafe {
+                if layout.dynamic_states.contains(&vk::DynamicState::VIEWPORT) {
+                    let vk_viewport = vk::Viewport {
+                        x: viewport.area.x,
+                        y: viewport.area.y,
+                        width: viewport.area.w,
+                        height: viewport.area.h,
+                        min_depth: viewport.min_depth,
+                        max_depth: viewport.max_depth,
+                    };
+                    ctx.device.cmd_set_viewport(self.cmd_buf, 0, &[vk_viewport]);
+                }
+
+                if layout.dynamic_states.contains(&vk::DynamicState::SCISSOR) {
+                    let vk_scissor = convert_rect2d_to_vulkan(viewport.scissor);
+                    ctx.device.cmd_set_scissor(self.cmd_buf, 0, &[vk_scissor]);
+                }
+            }
+        }
+    }
+
     fn update_last_access(&mut self, stage: vk::PipelineStageFlags, access: vk::AccessFlags) {
         self.last_op_stage = stage;
         self.last_op_access = access;
@@ -775,6 +806,13 @@ impl CommandSink for CommandQueue {
 
     fn bind_graphics_pipeline(&mut self, cmd: &crate::driver::command::BindGraphicsPipeline) {
         let _ = self.bind_graphics_pipeline(cmd.pipeline);
+    }
+
+    fn update_graphics_pipeline_state(
+        &mut self,
+        cmd: &crate::driver::command::GraphicsPipelineStateUpdate,
+    ) {
+        self.apply_graphics_pipeline_state_update(cmd);
     }
 
     fn blit_image(&mut self, cmd: &crate::driver::command::BlitImage) {
