@@ -3851,6 +3851,10 @@ impl Context {
                 render_pass,
                 layout: info.layout,
                 subpass: info.subpass_id,
+                subpass_formats: SubpassAttachmentFormats {
+                    color_formats: info.attachment_formats.clone(),
+                    depth_format: info.depth_format,
+                },
                 attachment_formats: info.attachment_formats.clone(),
                 depth_format: info.depth_format,
                 sample_count: layout.sample_count,

@@ -2,7 +2,7 @@
 
 use ash::vk;
 
-use super::{convert_rect2d_to_vulkan, SampleCount, SubpassSampleInfo};
+use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
 use crate::gpu::driver::command::CommandSink;
 use crate::gpu::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
@@ -86,6 +86,114 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
             },
         },
     }
+}
+
+#[cfg(debug_assertions)]
+fn validate_render_pass_compatibility(
+    pipeline: &GraphicsPipeline,
+    render_pass: &RenderPass,
+    subpass_index: usize,
+) -> Result<(), GPUError> {
+    let subpass_formats = render_pass
+        .subpass_formats
+        .get(subpass_index)
+        .ok_or_else(|| GPUError::InvalidSubpass {
+            subpass: subpass_index as u32,
+            available: render_pass.subpass_formats.len() as u32,
+        })?;
+
+    let subpass_samples = render_pass
+        .subpass_samples
+        .get(subpass_index)
+        .ok_or_else(|| GPUError::InvalidSubpass {
+            subpass: subpass_index as u32,
+            available: render_pass.subpass_samples.len() as u32,
+        })?;
+
+    if pipeline.subpass as usize != subpass_index {
+        return Err(GPUError::InvalidSubpass {
+            subpass: subpass_index as u32,
+            available: render_pass.subpass_samples.len() as u32,
+        });
+    }
+
+    if pipeline.subpass_formats.color_formats.len() != subpass_formats.color_formats.len() {
+        return Err(GPUError::LibraryError());
+    }
+
+    for (attachment_idx, (expected, actual)) in pipeline
+        .subpass_formats
+        .color_formats
+        .iter()
+        .zip(subpass_formats.color_formats.iter())
+        .enumerate()
+    {
+        if expected != actual {
+            return Err(GPUError::MismatchedAttachmentFormat {
+                context: format!(
+                    "render pass subpass {} color attachment {}",
+                    subpass_index, attachment_idx
+                ),
+                expected: *expected,
+                actual: *actual,
+            });
+        }
+    }
+
+    for (attachment_idx, (expected, actual)) in pipeline
+        .subpass_samples
+        .color_samples
+        .iter()
+        .zip(subpass_samples.color_samples.iter())
+        .enumerate()
+    {
+        if expected != actual {
+            return Err(GPUError::MismatchedSampleCount {
+                context: format!(
+                    "render pass subpass {} color attachment {}",
+                    subpass_index, attachment_idx
+                ),
+                expected: *expected,
+                actual: *actual,
+            });
+        }
+    }
+
+    match (
+        pipeline.subpass_formats.depth_format,
+        subpass_formats.depth_format,
+    ) {
+        (Some(expected), Some(actual)) if expected != actual => {
+            return Err(GPUError::MismatchedAttachmentFormat {
+                context: format!("render pass subpass {} depth attachment", subpass_index),
+                expected,
+                actual,
+            });
+        }
+        (None, Some(_)) | (Some(_), None) => {
+            return Err(GPUError::LibraryError());
+        }
+        _ => {}
+    }
+
+    match (
+        pipeline.subpass_samples.depth_sample,
+        subpass_samples.depth_sample,
+    ) {
+        (Some(expected), Some(actual)) if expected != actual => {
+            return Err(GPUError::MismatchedSampleCount {
+                context: format!("render pass subpass {} depth attachment", subpass_index),
+                expected,
+                actual,
+            });
+        }
+        (None, Some(_)) | (Some(_), None) => {
+            return Err(GPUError::LibraryError());
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 impl CommandQueue {
@@ -204,19 +312,33 @@ impl CommandQueue {
 
     /// Bind a graphics pipeline for subsequent draw calls.
     fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
-        if self.curr_rp.is_none() {
-            return Err(GPUError::LibraryError());
-        }
+        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError())?;
         if self.curr_pipeline == Some(pipeline) {
             return Ok(());
         }
+        let gfx = self
+            .ctx_ref()
+            .gfx_pipelines
+            .get_ref(pipeline)
+            .ok_or(GPUError::SlotError())?;
+
+        #[cfg(debug_assertions)]
+        {
+            if curr_rp != gfx.render_pass {
+                return Err(GPUError::LibraryError());
+            }
+
+            let rp = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(curr_rp)
+                .ok_or(GPUError::SlotError())?;
+            let active_subpass = self.curr_subpass.unwrap_or(gfx.subpass as usize);
+
+            validate_render_pass_compatibility(gfx, rp, active_subpass)?;
+        }
         self.curr_pipeline = Some(pipeline);
         unsafe {
-            let gfx = self
-                .ctx_ref()
-                .gfx_pipelines
-                .get_ref(pipeline)
-                .ok_or(GPUError::SlotError())?;
             self.ctx_ref().device.cmd_bind_pipeline(
                 self.cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
@@ -230,10 +352,16 @@ impl CommandQueue {
         &mut self,
         update: &crate::gpu::driver::command::GraphicsPipelineStateUpdate,
     ) {
-        let Some(pipeline) = self.curr_pipeline else { return };
+        let Some(pipeline) = self.curr_pipeline else {
+            return;
+        };
         let ctx = self.ctx_ref();
-        let Some(gfx) = ctx.gfx_pipelines.get_ref(pipeline) else { return };
-        let Some(layout) = ctx.gfx_pipeline_layouts.get_ref(gfx.layout) else { return };
+        let Some(gfx) = ctx.gfx_pipelines.get_ref(pipeline) else {
+            return;
+        };
+        let Some(layout) = ctx.gfx_pipeline_layouts.get_ref(gfx.layout) else {
+            return;
+        };
 
         if let Some(viewport) = update.viewport {
             unsafe {
@@ -841,10 +969,9 @@ impl CommandSink for CommandQueue {
         }
 
         unsafe {
-            self.ctx_ref().device.cmd_next_subpass(
-                self.cmd_buf,
-                vk::SubpassContents::INLINE,
-            );
+            self.ctx_ref()
+                .device
+                .cmd_next_subpass(self.cmd_buf, vk::SubpassContents::INLINE);
         }
 
         self.curr_subpass = Some(next);
