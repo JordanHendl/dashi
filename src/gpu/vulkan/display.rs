@@ -196,7 +196,11 @@ impl Context {
     fn make_window(
         &mut self,
         info: &WindowInfo,
-    ) -> (winit::event_loop::EventLoop<()>, winit::window::Window, vk::SurfaceKHR) {
+    ) -> (
+        winit::event_loop::EventLoop<()>,
+        winit::window::Window,
+        vk::SurfaceKHR,
+    ) {
         winit_window::create_window(&self.entry, &self.instance, info).unwrap()
     }
 
@@ -219,15 +223,11 @@ impl Context {
         let (window, surface) = self.make_window(&info.window);
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
-        let capabilities = unsafe {
-            loader.get_physical_device_surface_capabilities(self.pdevice, surface)?
-        };
-        let _formats = unsafe {
-            loader.get_physical_device_surface_formats(self.pdevice, surface)?
-        };
-        let _present_modes = unsafe {
-            loader.get_physical_device_surface_present_modes(self.pdevice, surface)?
-        };
+        let capabilities =
+            unsafe { loader.get_physical_device_surface_capabilities(self.pdevice, surface)? };
+        let formats = unsafe { loader.get_physical_device_surface_formats(self.pdevice, surface)? };
+        let present_modes =
+            unsafe { loader.get_physical_device_surface_present_modes(self.pdevice, surface)? };
 
         // Choose extent
         let size = info.window.size;
@@ -249,14 +249,43 @@ impl Context {
         }
 
         // Select a present mode.
-        let present_mode = if info.vsync {
+        let requested_present_mode = if info.vsync {
             vk::PresentModeKHR::FIFO
         } else {
             vk::PresentModeKHR::IMMEDIATE
         };
 
+        let present_mode = present_modes
+            .iter()
+            .copied()
+            .find(|mode| *mode == requested_present_mode)
+            .or_else(|| {
+                present_modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == vk::PresentModeKHR::FIFO)
+            })
+            .ok_or(GPUError::SwapchainConfigError(
+                "No compatible present mode available",
+            ))?;
+
         let wanted_format = vk::Format::B8G8R8A8_SRGB;
         let wanted_color_space = vk::ColorSpaceKHR::SRGB_NONLINEAR;
+        let surface_format = formats
+            .iter()
+            .copied()
+            .find(|format| {
+                format.format == wanted_format && format.color_space == wanted_color_space
+            })
+            .or_else(|| {
+                formats
+                    .iter()
+                    .copied()
+                    .find(|format| format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+            })
+            .ok_or(GPUError::SwapchainConfigError(
+                "No compatible SRGB surface format available",
+            ))?;
 
         let image_usage = vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::TRANSFER_SRC
@@ -272,9 +301,9 @@ impl Context {
                 &vk::SwapchainCreateInfoKHR::builder()
                     .surface(surface)
                     .present_mode(present_mode)
-                    .image_format(wanted_format)
+                    .image_format(surface_format.format)
                     .image_array_layers(1)
-                    .image_color_space(wanted_color_space)
+                    .image_color_space(surface_format.color_space)
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .image_extent(chosen_extent)
                     .image_usage(image_usage)
@@ -306,14 +335,11 @@ impl Context {
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .build(),
                 dim: [chosen_extent.width, chosen_extent.height, 1],
-                format: super::vk_to_lib_image_format(wanted_format)?,
+                format: super::vk_to_lib_image_format(surface_format.format)?,
                 samples: SampleCount::S1,
             }) {
                 Some(handle) => {
-                    self.oneshot_transition_image_noview(
-                        handle,
-                        vk::ImageLayout::PRESENT_SRC_KHR,
-                    );
+                    self.oneshot_transition_image_noview(handle, vk::ImageLayout::PRESENT_SRC_KHR);
                     let sub_range = vk::ImageSubresourceRange::builder()
                         .base_array_layer(0)
                         .layer_count(1)
@@ -325,7 +351,7 @@ impl Context {
                         self.device.create_image_view(
                             &vk::ImageViewCreateInfo::builder()
                                 .image(raw_img)
-                                .format(wanted_format)
+                                .format(surface_format.format)
                                 .subresource_range(sub_range)
                                 .view_type(vk::ImageViewType::TYPE_2D)
                                 .build(),
@@ -433,7 +459,11 @@ impl Context {
         }?;
 
         dsp.frame_idx = res.0;
-        let view = ImageView { img: dsp.images[res.0 as usize], range: Default::default(), aspect: Default::default() };
+        let view = ImageView {
+            img: dsp.images[res.0 as usize],
+            range: Default::default(),
+            aspect: Default::default(),
+        };
         Ok((view, signal_sem_handle, res.0, res.1))
     }
 
@@ -483,10 +513,7 @@ impl Context {
         &mut self,
         dsp: &mut Display,
     ) -> Result<(u32, xr::FrameState), GPUError> {
-        let state = dsp
-            .xr_waiter
-            .wait()
-            .map_err(|_| GPUError::LibraryError())?;
+        let state = dsp.xr_waiter.wait().map_err(|_| GPUError::LibraryError())?;
         dsp.xr_stream
             .begin()
             .map_err(|_| GPUError::LibraryError())?;
@@ -518,9 +545,12 @@ impl Context {
             .release_image()
             .map_err(|_| GPUError::LibraryError())?;
         dsp.xr_stream
-            .end(state.predicted_display_time, xr::EnvironmentBlendMode::OPAQUE, &[])
+            .end(
+                state.predicted_display_time,
+                xr::EnvironmentBlendMode::OPAQUE,
+                &[],
+            )
             .map_err(|_| GPUError::LibraryError())?;
         Ok(())
     }
 }
-
