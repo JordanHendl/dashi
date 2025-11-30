@@ -217,8 +217,8 @@ impl Drop for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::driver::command::{BeginDrawing, CommandSink, EndDrawing};
-    use crate::driver::command::{CommandEncoder, Draw, GraphicsPipelineStateUpdate};
+    use crate::gpu::driver::command::{BeginDrawing, CommandSink, EndDrawing};
+    use crate::gpu::driver::command::{CommandEncoder, Draw, GraphicsPipelineStateUpdate};
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
