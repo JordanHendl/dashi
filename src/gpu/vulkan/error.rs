@@ -1,4 +1,4 @@
-use super::structs::{SampleCount, ShaderType};
+use super::structs::{Format, SampleCount, ShaderType};
 use ash::vk;
 use std::fmt;
 
@@ -32,6 +32,11 @@ pub enum GPUError {
     SwapchainConfigError(&'static str),
     UnsupportedShaderStage(ShaderType),
     Unimplemented(&'static str),
+    MismatchedAttachmentFormat {
+        context: String,
+        expected: Format,
+        actual: Format,
+    },
     MismatchedSampleCount {
         context: String,
         expected: SampleCount,
@@ -81,6 +86,15 @@ impl fmt::Display for GPUError {
             }
             GPUError::UnsupportedShaderStage(stage) => write!(f, "Shader Stage {:?} not supported", stage),
             GPUError::Unimplemented(feature) => write!(f, "Unimplemented Feature: {}", feature),
+            GPUError::MismatchedAttachmentFormat {
+                context,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "Attachment format mismatch for {}: expected {:?}, got {:?}.",
+                context, expected, actual
+            ),
             GPUError::MismatchedSampleCount {
                 context,
                 expected,
