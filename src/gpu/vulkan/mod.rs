@@ -1488,14 +1488,27 @@ impl Context {
         img: Handle<VkImageView>,
         layout: vk::ImageLayout,
     ) {
+        let (src_stage, src_access, dst_stage, dst_access) = {
+            let view = self.image_views.get_ref(img).unwrap();
+            let image = self.images.get_ref(view.img).unwrap();
+            let base = view.range.base_mip_level as usize;
+            let old_layout = image.layouts[base];
+            let new_layout = if layout == vk::ImageLayout::UNDEFINED {
+                vk::ImageLayout::GENERAL
+            } else {
+                layout
+            };
+            self.barrier_masks_for_transition(old_layout, new_layout)
+        };
+
         self.transition_image_stages(
             cmd,
             img,
             layout,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            Default::default(),
-            Default::default(),
+            src_stage,
+            dst_stage,
+            src_access,
+            dst_access,
         );
     }
 
