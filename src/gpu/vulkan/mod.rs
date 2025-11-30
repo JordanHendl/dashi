@@ -218,6 +218,9 @@ mod tests {
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use crate::driver::command::{
+        BeginDrawing, CommandEncoder, Draw, GraphicsPipelineStateUpdate,
+    };
 
     unsafe extern "system" fn validation_flag_callback(
         _message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -479,6 +482,200 @@ mod tests {
         ctx.destroy_buffer(storage_buffer);
         ctx.destroy_image(image);
         ctx.destroy_dynamic_allocator(allocator);
+        ctx.destroy();
+    }
+
+    #[test]
+    #[serial]
+    fn dynamic_state_updates_produce_no_validation_errors() {
+        let original_validation = std::env::var("DASHI_VALIDATION").ok();
+        std::env::set_var("DASHI_VALIDATION", "1");
+
+        let mut ctx = Context::headless(&ContextInfo::default()).expect("create headless context");
+
+        let validation_flag = Arc::new(AtomicBool::new(false));
+        let validation_ptr = Arc::into_raw(Arc::clone(&validation_flag));
+
+        let messenger = {
+            let debug_utils = ctx
+                .debug_utils
+                .as_ref()
+                .expect("validation layers should expose debug utils");
+
+            let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                )
+                .message_type(
+                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+                )
+                .pfn_user_callback(Some(validation_flag_callback))
+                .user_data(validation_ptr as *mut c_void);
+
+            unsafe {
+                debug_utils
+                    .create_debug_utils_messenger(&messenger_info, None)
+                    .expect("create debug messenger")
+            }
+        };
+
+        const WIDTH: u32 = 32;
+        const HEIGHT: u32 = 32;
+
+        let img = ctx
+            .make_image(&ImageInfo {
+                debug_name: "dynamic_state_fb",
+                dim: [WIDTH, HEIGHT, 1],
+                format: Format::RGBA8,
+                mip_levels: 1,
+                initial_data: Some(&vec![0u8; (WIDTH * HEIGHT * 4) as usize]),
+                ..Default::default()
+            })
+            .expect("create image");
+
+        let rp = ctx
+            .make_render_pass(&RenderPassInfo {
+                debug_name: "dynamic_state_rp",
+                viewport: Viewport {
+                    area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
+                    scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+                    ..Default::default()
+                },
+                subpasses: &[SubpassDescription {
+                    color_attachments: &[AttachmentDescription::default()],
+                    depth_stencil_attachment: None,
+                    subpass_dependencies: &[],
+                }],
+            })
+            .expect("create render pass");
+
+        let view = ImageView { img, ..Default::default() };
+
+        let vert = inline_spirv::inline_spirv!(
+            r"#version 450
+            vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
+            void main() {
+                gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+            }
+        ",
+            vert
+        );
+
+        let frag = inline_spirv::inline_spirv!(
+            r"#version 450
+            layout(location=0) out vec4 color;
+            void main() { color = vec4(0.0,0.5,1.0,1.0); }
+        ",
+            frag
+        );
+
+        let layout = ctx
+            .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
+                debug_name: "dynamic_state_layout",
+                vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
+                bg_layouts: [None, None, None, None],
+                bt_layouts: [None, None, None, None],
+                shaders: &[
+                    PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
+                    PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag, specialization: &[] },
+                ],
+                details: GraphicsPipelineDetails {
+                    dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
+                    ..Default::default()
+                },
+            })
+            .expect("create pipeline layout");
+
+        let pipeline = ctx
+            .make_graphics_pipeline(&GraphicsPipelineInfo {
+                debug_name: "dynamic_state_pipeline",
+                layout,
+                render_pass: rp,
+                ..Default::default()
+            })
+            .expect("create graphics pipeline");
+
+        let vertex_data = [0u8; 4 * 3];
+        let vb = ctx
+            .make_buffer(&BufferInfo {
+                debug_name: "dynamic_state_vb",
+                byte_size: vertex_data.len() as u32,
+                visibility: MemoryVisibility::Gpu,
+                usage: BufferUsage::VERTEX,
+                initial_data: Some(&vertex_data),
+            })
+            .expect("create vertex buffer");
+
+        let mut encoder = CommandEncoder::new(QueueType::Graphics);
+        encoder.begin_drawing(&BeginDrawing {
+            viewport: Viewport {
+                area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
+                scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+                ..Default::default()
+            },
+            pipeline,
+            color_attachments: [Some(view), None, None, None],
+            depth_attachment: None,
+            clear_values: [Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0])), None, None, None],
+        });
+
+        encoder.update_graphics_pipeline_state(&GraphicsPipelineStateUpdate {
+            viewport: Some(Viewport {
+                area: FRect2D { w: (WIDTH / 2) as f32, h: (HEIGHT / 2) as f32, ..Default::default() },
+                scissor: Rect2D { w: WIDTH / 2, h: HEIGHT / 2, ..Default::default() },
+                ..Default::default()
+            }),
+        });
+
+        encoder.draw(&Draw {
+            vertices: vb,
+            bind_groups: Default::default(),
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+            instance_count: 1,
+            count: 3,
+        });
+
+        encoder.end_drawing();
+
+        let ctx_ptr: *mut Context = &mut ctx;
+        let mut queue = ctx
+            .gfx_pool
+            .begin(ctx_ptr, "dynamic_state_validation", false)
+            .expect("allocate command queue");
+
+        let fence = encoder
+            .submit(&mut queue, &SubmitInfo2::default())
+            .expect("submit command buffer");
+
+        ctx.wait(fence).expect("wait for submit");
+        ctx.destroy_cmd_queue(queue);
+
+        ctx.destroy_buffer(vb);
+        ctx.destroy_image(img);
+        ctx.destroy_render_pass(rp);
+
+        if let Some(value) = original_validation {
+            std::env::set_var("DASHI_VALIDATION", value);
+        } else {
+            std::env::remove_var("DASHI_VALIDATION");
+        }
+
+        unsafe {
+            if let Some(debug_utils) = ctx.debug_utils.as_ref() {
+                debug_utils.destroy_debug_utils_messenger(messenger, None);
+            }
+            let _ = Arc::from_raw(validation_ptr);
+        }
+
+        assert!(
+            !validation_flag.load(Ordering::SeqCst),
+            "validation layers reported an error when updating dynamic state",
+        );
+
         ctx.destroy();
     }
 }
