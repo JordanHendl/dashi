@@ -2000,12 +2000,9 @@ impl Context {
         &self,
         info: &vk::DebugUtilsMessengerCreateInfoEXT,
     ) -> Result<vk::DebugUtilsMessengerEXT> {
-        let debug_utils = self
-            .debug_utils
-            .as_ref()
-            .ok_or(GPUError::Unimplemented(
-                "Debug utils unavailable; enable validation to install callbacks",
-            ))?;
+        let debug_utils = self.debug_utils.as_ref().ok_or(GPUError::Unimplemented(
+            "Debug utils unavailable; enable validation to install callbacks",
+        ))?;
 
         unsafe {
             debug_utils
@@ -2505,157 +2502,30 @@ impl Context {
         bg1.variables == bg2.variables
     }
 
-    /// Updates an existing bind group with new resource bindings.
-    fn update_bind_group(&mut self, info: &BindGroupUpdateInfo) -> Result<()> {
-        let bg = self.bind_groups.get_ref(info.bg).unwrap();
-        let descriptor_set = bg.set;
+    pub fn bind_group_compatible(
+        &self,
+        layout: Handle<BindGroupLayout>,
+        bindings: &[BindingInfo],
+    ) -> bool {
+        let layout = self.bind_group_layouts.get_ref(layout).unwrap();
+        bindings_compatible_with_layout(&layout.variables, bindings)
+    }
 
-        // Step 2: Prepare the write operations for the descriptor set
-        let mut write_descriptor_sets = Vec::new();
-        let mut buffer_infos = Vec::new();
-        let mut image_infos = Vec::new();
+    pub fn bind_table_compatible(
+        &self,
+        layout: Handle<BindTableLayout>,
+        bindings: &[IndexedBindingInfo],
+    ) -> bool {
+        let layout = self.bind_table_layouts.get_ref(layout).unwrap();
+        indexed_bindings_compatible_with_layout(&layout.variables, bindings)
+    }
 
-        for binding_info in info.bindings.iter() {
-            for res in binding_info.resources {
-                match &res.resource {
-                    ShaderResource::Buffer(handle) => {
-                        let buffer = self.buffers.get_ref(*handle).unwrap();
-                        let buffer_info = vk::DescriptorBufferInfo::builder()
-                            .buffer(buffer.buf)
-                            .offset(buffer.offset as u64)
-                            .range(buffer.size as u64)
-                            .build();
+    pub fn bind_group_info_compatible(&self, info: &BindGroupInfo) -> bool {
+        self.bind_group_compatible(info.layout, info.bindings)
+    }
 
-                        buffer_infos.push(buffer_info);
-
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
-                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                            .dst_array_element(res.slot)
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                    ShaderResource::SampledImage(image_view, sampler) => {
-                        let handle = self.get_or_create_image_view(image_view)?;
-                        let image = self.image_views.get_ref(handle).unwrap();
-                        let sampler = self.samplers.get_ref(*sampler).unwrap();
-
-                        let image_info = vk::DescriptorImageInfo::builder()
-                            .image_view(image.view)
-                            .image_layout(vk::ImageLayout::GENERAL)
-                            .sampler(sampler.sampler)
-                            .build();
-
-                        image_infos.push(image_info);
-
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER) // Assuming a sampled image
-                            .dst_array_element(res.slot)
-                            .image_info(&image_infos[image_infos.len() - 1..])
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                    ShaderResource::Dynamic(alloc) => {
-                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
-
-                        let buffer_info = vk::DescriptorBufferInfo::builder()
-                            .buffer(buffer.buf)
-                            .offset(0)
-                            .range(alloc.min_alloc_size as u64)
-                            .build();
-
-                        buffer_infos.push(buffer_info);
-
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
-                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                    ShaderResource::DynamicStorage(alloc) => {
-                        let buffer = self.buffers.get_ref(alloc.pool).unwrap();
-
-                        let buffer_info = vk::DescriptorBufferInfo::builder()
-                            .buffer(buffer.buf)
-                            .offset(0)
-                            .range(alloc.min_alloc_size as u64)
-                            .build();
-
-                        buffer_infos.push(buffer_info);
-
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
-                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                    ShaderResource::StorageBuffer(handle) => {
-                        let buffer = self.buffers.get_ref(*handle).unwrap();
-
-                        let buffer_info = vk::DescriptorBufferInfo::builder()
-                            .buffer(buffer.buf)
-                            .offset(buffer.offset as u64)
-                            .range(buffer.size as u64)
-                            .build();
-
-                        buffer_infos.push(buffer_info);
-
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                            .dst_array_element(res.slot)
-                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                    ShaderResource::ConstBuffer(view) => {
-                        let buffer = self.buffers.get_ref(view.handle).unwrap();
-
-                        let size = if view.size == 0 {
-                            buffer.size as u64
-                        } else {
-                            view.size
-                        };
-                        let buffer_info = vk::DescriptorBufferInfo::builder()
-                            .buffer(buffer.buf)
-                            .offset(view.offset as u64)
-                            .range(size as u64)
-                            .build();
-
-                        buffer_infos.push(buffer_info);
-                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                            .dst_set(descriptor_set)
-                            .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
-                            .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                            .build();
-
-                        write_descriptor_sets.push(write_descriptor_set);
-                    }
-                }
-            }
-        }
-
-        unsafe {
-            self.device
-                .update_descriptor_sets(&write_descriptor_sets, &[]);
-        }
-
-        Ok(())
+    pub fn bind_table_info_compatible(&self, info: &BindTableInfo) -> bool {
+        self.bind_table_compatible(info.layout, info.bindings)
     }
 
     /// Updates an existing bind table with new resource bindings.
@@ -2808,52 +2678,6 @@ impl Context {
         }
 
         Ok(())
-    }
-
-    /// Creates a bind group using indexed resources.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn make_indexed_bind_group(
-        &mut self,
-        info: &IndexedBindGroupInfo,
-    ) -> Result<Handle<BindGroup>, GPUError> {
-        // Retrieve the BindGroupLayout from the handle
-        let layout = self.bind_group_layouts.get_ref(info.layout).unwrap();
-
-        // Step 1: Allocate Descriptor Set
-        let alloc_info = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(layout.pool)
-            .set_layouts(&[layout.layout])
-            .build();
-
-        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
-
-        let descriptor_set = descriptor_sets[0]; // We are allocating one descriptor set
-
-        self.set_name(
-            descriptor_set,
-            info.debug_name,
-            vk::ObjectType::DESCRIPTOR_SET,
-        );
-
-        // Step 4: Create the BindGroup and return a handle
-        let bind_group = BindGroup {
-            set: descriptor_set,
-            set_id: info.set,
-        };
-
-        let bg = self.bind_groups.insert(bind_group).unwrap();
-        self.update_bind_group(&BindGroupUpdateInfo {
-            bg,
-            bindings: info.bindings,
-        })?;
-
-        Ok(bg)
     }
 
     /// Creates a bind group from the provided bindings.

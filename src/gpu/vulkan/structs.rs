@@ -3,10 +3,9 @@ use super::{
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
 };
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
+use std::collections::hash_map::{DefaultHasher, Entry};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-
-use std::collections::hash_map::DefaultHasher;
-use std::collections::BTreeMap;
 
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
@@ -581,7 +580,7 @@ impl Default for AttachmentDescription {
 }
 
 #[repr(u8)]
-#[derive(Hash, Clone, Debug, PartialEq, Eq)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum BindGroupVariableType {
     Uniform,
@@ -716,6 +715,205 @@ pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
     hash_from_shaders(info.shaders)
 }
 
+pub(crate) fn layout_binding_requirements(
+    variables: &[BindGroupVariable],
+) -> Option<HashMap<u32, (BindGroupVariableType, u32)>> {
+    let mut requirements = HashMap::new();
+
+    for var in variables {
+        match requirements.entry(var.binding) {
+            Entry::Vacant(entry) => {
+                entry.insert((var.var_type, var.count));
+            }
+            Entry::Occupied(entry) => {
+                let (expected_type, expected_count) = *entry.get();
+                if expected_type != var.var_type || expected_count != var.count {
+                    return None;
+                }
+            }
+        }
+    }
+
+    Some(requirements)
+}
+
+pub(crate) fn resource_var_type(resource: &ShaderResource) -> BindGroupVariableType {
+    match resource {
+        ShaderResource::Buffer(_) | ShaderResource::ConstBuffer(_) => {
+            BindGroupVariableType::Uniform
+        }
+        ShaderResource::Dynamic(_) => BindGroupVariableType::DynamicUniform,
+        ShaderResource::DynamicStorage(_) => BindGroupVariableType::DynamicStorage,
+        ShaderResource::StorageBuffer(_) => BindGroupVariableType::Storage,
+        ShaderResource::SampledImage(_, _) => BindGroupVariableType::SampledImage,
+    }
+}
+
+pub(crate) fn bindings_compatible_with_layout(
+    variables: &[BindGroupVariable],
+    bindings: &[BindingInfo],
+) -> bool {
+    let Some(requirements) = layout_binding_requirements(variables) else {
+        return false;
+    };
+
+    let mut seen_bindings = HashSet::new();
+
+    for binding in bindings {
+        let Some((expected_type, expected_count)) = requirements.get(&binding.binding) else {
+            return false;
+        };
+
+        if resource_var_type(&binding.resource) != *expected_type {
+            return false;
+        }
+
+        if *expected_count == 0 {
+            return false;
+        }
+
+        if !seen_bindings.insert(binding.binding) {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub(crate) fn indexed_bindings_compatible_with_layout(
+    variables: &[BindGroupVariable],
+    bindings: &[IndexedBindingInfo],
+) -> bool {
+    let Some(requirements) = layout_binding_requirements(variables) else {
+        return false;
+    };
+
+    let mut seen_slots: HashMap<u32, HashSet<u32>> = HashMap::new();
+
+    for binding in bindings {
+        let Some((expected_type, expected_count)) = requirements.get(&binding.binding) else {
+            return false;
+        };
+
+        let slots = seen_slots.entry(binding.binding).or_default();
+
+        for res in binding.resources {
+            if resource_var_type(&res.resource) != *expected_type {
+                return false;
+            }
+
+            if res.slot >= *expected_count {
+                return false;
+            }
+
+            if !slots.insert(res.slot) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod layout_validation_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_matching_bind_group_bindings() {
+        let layout_vars = vec![
+            BindGroupVariable {
+                var_type: BindGroupVariableType::Uniform,
+                binding: 0,
+                count: 1,
+            },
+            BindGroupVariable {
+                var_type: BindGroupVariableType::Storage,
+                binding: 1,
+                count: 3,
+            },
+        ];
+
+        let bindings = [
+            BindingInfo {
+                binding: 0,
+                resource: ShaderResource::Buffer(Handle::new(0, 0)),
+            },
+            BindingInfo {
+                binding: 1,
+                resource: ShaderResource::StorageBuffer(Handle::new(1, 0)),
+            },
+        ];
+
+        assert!(bindings_compatible_with_layout(&layout_vars, &bindings));
+    }
+
+    #[test]
+    fn rejects_mismatched_binding_type() {
+        let layout_vars = vec![BindGroupVariable {
+            var_type: BindGroupVariableType::SampledImage,
+            binding: 0,
+            count: 1,
+        }];
+
+        let bindings = [BindingInfo {
+            binding: 0,
+            resource: ShaderResource::Buffer(Handle::new(0, 0)),
+        }];
+
+        assert!(!bindings_compatible_with_layout(&layout_vars, &bindings));
+    }
+
+    #[test]
+    fn validates_indexed_slots_and_types() {
+        let layout_vars = vec![BindGroupVariable {
+            var_type: BindGroupVariableType::SampledImage,
+            binding: 2,
+            count: 2,
+        }];
+
+        let valid_bindings = [IndexedBindingInfo {
+            resources: &[IndexedResource {
+                resource: ShaderResource::SampledImage(
+                    ImageView {
+                        img: Handle::new(0, 0),
+                        range: Default::default(),
+                        aspect: AspectMask::Color,
+                    },
+                    Handle::new(1, 0),
+                ),
+                slot: 1,
+            }],
+            binding: 2,
+        }];
+
+        assert!(indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &valid_bindings,
+        ));
+
+        let invalid_bindings = [IndexedBindingInfo {
+            resources: &[IndexedResource {
+                resource: ShaderResource::SampledImage(
+                    ImageView {
+                        img: Handle::new(0, 0),
+                        range: Default::default(),
+                        aspect: AspectMask::Color,
+                    },
+                    Handle::new(1, 0),
+                ),
+                slot: 3,
+            }],
+            binding: 2,
+        }];
+
+        assert!(!indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &invalid_bindings,
+        ));
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct BufferView {
     pub handle: Handle<Buffer>,
@@ -771,42 +969,9 @@ impl<'a> Default for IndexedBindingInfo<'a> {
 }
 
 #[derive(Hash)]
-pub struct BindGroupUpdateInfo<'a> {
-    pub bg: Handle<BindGroup>,
-    pub bindings: &'a [IndexedBindingInfo<'a>],
-}
-
-#[derive(Hash)]
 pub struct BindTableUpdateInfo<'a> {
     pub table: Handle<BindTable>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
-}
-
-#[derive(Clone)]
-pub struct IndexedBindGroupInfo<'a> {
-    pub debug_name: &'a str,
-    pub layout: Handle<BindGroupLayout>,
-    pub bindings: &'a [IndexedBindingInfo<'a>],
-    pub set: u32,
-}
-
-impl Hash for IndexedBindGroupInfo<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.layout.hash(state);
-        self.bindings.hash(state);
-        self.set.hash(state);
-    }
-}
-
-impl<'a> Default for IndexedBindGroupInfo<'a> {
-    fn default() -> Self {
-        Self {
-            layout: Default::default(),
-            bindings: &[],
-            set: 0,
-            debug_name: "",
-        }
-    }
 }
 
 #[derive(Clone)]
