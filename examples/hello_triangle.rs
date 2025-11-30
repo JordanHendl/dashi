@@ -226,13 +226,21 @@ void main() {
         .unwrap();
 
     // Make a graphics pipeline. This matches a pipeline layout to a render pass.
+    let subpass_info = ctx
+        .render_pass_subpass_info(render_pass, 0)
+        .expect("render pass subpass info");
     let graphics_pipeline = ctx
-        .make_graphics_pipeline(&GraphicsPipelineInfo {
-            layout: pipeline_layout,
+        .make_graphics_pipeline(
             render_pass,
-            debug_name: "Pipeline",
-            ..Default::default()
-        })
+            &GraphicsPipelineInfo {
+                layout: pipeline_layout,
+                attachment_formats: subpass_info.color_formats,
+                depth_format: subpass_info.depth_format,
+                subpass_samples: subpass_info.samples,
+                debug_name: "Pipeline",
+                ..Default::default()
+            },
+        )
         .unwrap();
 
     // Make dynamic allocator to use for dynamic buffers.
@@ -299,7 +307,6 @@ void main() {
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
-
             // Begin render pass & bind pipeline
             let mut stream = CommandStream::new().begin();
 

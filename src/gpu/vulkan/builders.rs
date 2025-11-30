@@ -1,16 +1,17 @@
 //! Builder pattern wrappers for Dashi Context resource creation.
 
 use crate::utils::Handle;
+#[cfg(feature = "dashi-openxr")]
+use crate::XrDisplayInfo;
 use crate::{
     AttachmentDescription, BindGroupLayout, BindTable, BindTableLayout, ComputePipeline,
     ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
-    GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
-    GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
-    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering, DynamicState,
+    DynamicState, GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo,
+    GraphicsPipelineLayout, GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass,
+    RenderPassInfo, SubpassDependency, SubpassDescription, VertexDescriptionInfo, Viewport,
+    WindowBuffering,
 };
 use crate::{Context, GPUError};
-#[cfg(feature = "dashi-openxr")]
-use crate::XrDisplayInfo;
 use smallvec::SmallVec;
 
 /// Builds a RenderPass via the builder pattern.
@@ -248,13 +249,22 @@ impl GraphicsPipelineBuilder {
 
     /// Finalize and create the GraphicsPipeline.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<GraphicsPipeline>, GPUError> {
+        let subpass_info = ctx
+            .render_pass_subpass_info(self.render_pass, self.subpass_id)
+            .ok_or(GPUError::InvalidSubpass {
+                subpass: self.subpass_id as u32,
+                available: 0,
+            })?;
+
         let info = GraphicsPipelineInfo {
             debug_name: &self.debug_name,
             layout: self.layout,
-            render_pass: self.render_pass,
+            attachment_formats: subpass_info.color_formats,
+            depth_format: subpass_info.depth_format,
+            subpass_samples: subpass_info.samples,
             subpass_id: self.subpass_id,
         };
-        ctx.make_graphics_pipeline(&info)
+        ctx.make_graphics_pipeline(self.render_pass, &info)
     }
 }
 
@@ -527,11 +537,7 @@ impl<'a> BindTableBuilder<'a> {
     }
 
     /// Add indexed resources at a binding slot.
-    pub fn binding(
-        mut self,
-        binding: u32,
-        resources: &'a [crate::IndexedResource],
-    ) -> Self {
+    pub fn binding(mut self, binding: u32, resources: &'a [crate::IndexedResource]) -> Self {
         self.bindings
             .push(crate::IndexedBindingInfo { binding, resources });
         self
@@ -565,9 +571,9 @@ impl<'a> BindTableBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::structs::Format as GpuFormat;
     use crate::ContextInfo;
     use crate::*;
-    use crate::gpu::structs::Format as GpuFormat;
     use serial_test::serial;
     use std::panic;
 
@@ -747,8 +753,11 @@ mod tests {
 
         let color_attachments = [color_desc];
         let deps_empty: [SubpassDependency; 0] = [];
-        let builder = RenderPassBuilder::new("rp_color_only", vp)
-            .add_subpass(&color_attachments, None, &deps_empty);
+        let builder = RenderPassBuilder::new("rp_color_only", vp).add_subpass(
+            &color_attachments,
+            None,
+            &deps_empty,
+        );
         assert!(!builder.subpasses_spilled());
         let rp = builder.build(&mut ctx).expect("color-only pass");
 
@@ -766,32 +775,33 @@ mod tests {
         };
         let color_attachments2 = [color_desc];
         let deps = [dep];
-        let builder2 = RenderPassBuilder::new("rp_with_depth", vp)
-            .add_subpass(&color_attachments2, Some(&ds_desc), &deps);
+        let builder2 = RenderPassBuilder::new("rp_with_depth", vp).add_subpass(
+            &color_attachments2,
+            Some(&ds_desc),
+            &deps,
+        );
         assert!(!builder2.subpasses_spilled());
-        let rp2 = builder2
-            .build(&mut ctx)
-            .expect("with-depth pass");
+        let rp2 = builder2.build(&mut ctx).expect("with-depth pass");
 
         ctx.destroy_render_pass(rp2);
         ctx.destroy();
     }
 
-//    // Happy‐path smoke‐tests (still destroy resources cleanly):
-//    #[test]
-//    #[serial]
-//    fn test_render_pass_builder_happy_path() {
-//        let mut ctx = Context::headless(&Default::default()).unwrap();
-//        let vp = Viewport::default();
-//        let desc = AttachmentDescription::default();
-//        let color = [desc];
-//        let deps_empty2: [SubpassDependency; 0] = [];
-//        let builder = RenderPassBuilder::new("rp", vp).add_subpass(&color, None, &deps_empty2);
-//        assert!(!builder.subpasses_spilled());
-//        let rp = builder.build(&mut ctx).unwrap();
-//        ctx.destroy_render_pass(rp);
-//        ctx.destroy();
-//    }
+    //    // Happy‐path smoke‐tests (still destroy resources cleanly):
+    //    #[test]
+    //    #[serial]
+    //    fn test_render_pass_builder_happy_path() {
+    //        let mut ctx = Context::headless(&Default::default()).unwrap();
+    //        let vp = Viewport::default();
+    //        let desc = AttachmentDescription::default();
+    //        let color = [desc];
+    //        let deps_empty2: [SubpassDependency; 0] = [];
+    //        let builder = RenderPassBuilder::new("rp", vp).add_subpass(&color, None, &deps_empty2);
+    //        assert!(!builder.subpasses_spilled());
+    //        let rp = builder.build(&mut ctx).unwrap();
+    //        ctx.destroy_render_pass(rp);
+    //        ctx.destroy();
+    //    }
 
     #[test]
     #[serial]
