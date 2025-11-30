@@ -216,12 +216,10 @@ impl Drop for Context {
 mod tests {
     use super::*;
     use crate::driver::command::{BeginDrawing, CommandSink, EndDrawing};
+    use crate::driver::command::{CommandEncoder, Draw, GraphicsPipelineStateUpdate};
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use crate::driver::command::{
-        BeginDrawing, CommandEncoder, Draw, GraphicsPipelineStateUpdate,
-    };
 
     unsafe extern "system" fn validation_flag_callback(
         _message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -3044,7 +3042,10 @@ impl Context {
         if let Some(max_index) = max_index {
             layouts.reserve(max_index + 1);
             for index in 0..=max_index {
-                match (bind_group_layout_handle.get(index), bind_table_layout_handle.get(index)) {
+                match (
+                    bind_group_layout_handle.get(index),
+                    bind_table_layout_handle.get(index),
+                ) {
                     (Some(Some(b)), _) => {
                         layouts.push(self.bind_group_layouts.get_ref(*b).unwrap().layout)
                     }
