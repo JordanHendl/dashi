@@ -1,8 +1,11 @@
+mod common;
+
+use common::ValidationContext;
 use dashi::*;
 
 #[test]
 fn gpu_timer() {
-    let mut ctx = match gpu::Context::headless(&ContextInfo::default()) {
+    let mut ctx = match ValidationContext::headless(&ContextInfo::default()) {
         Ok(ctx) => ctx,
         Err(err) => {
             eprintln!(
@@ -15,8 +18,11 @@ fn gpu_timer() {
     // GPU timers must be initialized before use.
     ctx.init_gpu_timers(1).unwrap();
 
-    let ctx_ptr = &mut ctx as *mut _;
-    let mut list = ctx.pool_mut(QueueType::Graphics).begin(ctx_ptr, "timer", false).unwrap();
+    let ctx_ptr = ctx.as_mut_ptr();
+    let mut list = ctx
+        .pool_mut(QueueType::Graphics)
+        .begin(ctx_ptr, "timer", false)
+        .unwrap();
     // Begin and end must bracket commands on the same list.
     ctx.gpu_timer_begin(&mut list, 0);
     // intentionally no operations to measure minimal overhead
@@ -29,5 +35,4 @@ fn gpu_timer() {
     assert!(elapsed >= 0.0);
 
     ctx.destroy_cmd_queue(list);
-    ctx.destroy();
 }

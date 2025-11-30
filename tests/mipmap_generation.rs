@@ -1,5 +1,8 @@
-use dashi::*;
+mod common;
+
+use common::ValidationContext;
 use dashi::structs::*;
+use dashi::*;
 
 #[test]
 #[ignore]
@@ -9,7 +12,7 @@ fn mipmap_generation() {
     // solid red base level
     let data = vec![255u8, 0, 0, 255].repeat((WIDTH * HEIGHT) as usize);
 
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
     let image = ctx
         .make_image(&ImageInfo {
             debug_name: "mip_test",
@@ -55,5 +58,4 @@ fn mipmap_generation() {
     //    ctx.destroy_cmd_queue(list);
     ctx.destroy_buffer(buffer);
     ctx.destroy_image(image);
-    ctx.destroy();
 }

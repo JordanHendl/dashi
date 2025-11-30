@@ -1,3 +1,6 @@
+mod common;
+
+use common::ValidationContext;
 use dashi::*;
 
 #[test]
@@ -5,7 +8,7 @@ fn pipeline_switch() {
     const WIDTH: u32 = 64;
     const HEIGHT: u32 = 64;
 
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
     let img = ctx
         .make_image(&ImageInfo {
@@ -18,14 +21,25 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-    let view = ImageView { img, ..Default::default() };
+    let view = ImageView {
+        img,
+        ..Default::default()
+    };
 
     let rp = ctx
         .make_render_pass(&RenderPassInfo {
             debug_name: "rp",
             viewport: Viewport {
-                area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-                scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+                area: FRect2D {
+                    w: WIDTH as f32,
+                    h: HEIGHT as f32,
+                    ..Default::default()
+                },
+                scissor: Rect2D {
+                    w: WIDTH,
+                    h: HEIGHT,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             subpasses: &[SubpassDescription {
@@ -36,32 +50,53 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-    let vert = inline_spirv::inline_spirv!(r"#version 450
+    let vert = inline_spirv::inline_spirv!(
+        r"#version 450
         vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
         void main() {
             gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
         }
-    ", vert);
+    ",
+        vert
+    );
 
-    let frag_red = inline_spirv::inline_spirv!(r"#version 450
+    let frag_red = inline_spirv::inline_spirv!(
+        r"#version 450
         layout(location=0) out vec4 color;
         void main() { color = vec4(1.0,0.0,0.0,1.0); }
-    ", frag);
+    ",
+        frag
+    );
 
-    let frag_green = inline_spirv::inline_spirv!(r"#version 450
+    let frag_green = inline_spirv::inline_spirv!(
+        r"#version 450
         layout(location=0) out vec4 color;
         void main() { color = vec4(0.0,1.0,0.0,1.0); }
-    ", frag);
+    ",
+        frag
+    );
 
     let layout_red = ctx
         .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
             debug_name: "layout_red",
-            vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
+            vertex_info: VertexDescriptionInfo {
+                entries: &[],
+                stride: 0,
+                rate: VertexRate::Vertex,
+            },
             bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shaders: &[
-                PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
-                PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag_red, specialization: &[] },
+                PipelineShaderInfo {
+                    stage: ShaderType::Vertex,
+                    spirv: vert,
+                    specialization: &[],
+                },
+                PipelineShaderInfo {
+                    stage: ShaderType::Fragment,
+                    spirv: frag_red,
+                    specialization: &[],
+                },
             ],
             details: Default::default(),
         })
@@ -70,12 +105,24 @@ fn pipeline_switch() {
     let layout_green = ctx
         .make_graphics_pipeline_layout(&GraphicsPipelineLayoutInfo {
             debug_name: "layout_green",
-            vertex_info: VertexDescriptionInfo { entries: &[], stride: 0, rate: VertexRate::Vertex },
+            vertex_info: VertexDescriptionInfo {
+                entries: &[],
+                stride: 0,
+                rate: VertexRate::Vertex,
+            },
             bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shaders: &[
-                PipelineShaderInfo { stage: ShaderType::Vertex, spirv: vert, specialization: &[] },
-                PipelineShaderInfo { stage: ShaderType::Fragment, spirv: frag_green, specialization: &[] },
+                PipelineShaderInfo {
+                    stage: ShaderType::Vertex,
+                    spirv: vert,
+                    specialization: &[],
+                },
+                PipelineShaderInfo {
+                    stage: ShaderType::Fragment,
+                    spirv: frag_green,
+                    specialization: &[],
+                },
             ],
             details: Default::default(),
         })
@@ -109,31 +156,30 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-//    let mut list = ctx
-//        .begin_command_queue(&CommandQueueInfo { debug_name: "draw", ..Default::default() })
-//        .unwrap();
-//
-//    list.begin_drawing(&DrawBegin {
-//        viewport: Viewport {
-//            area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-//            scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
-//            ..Default::default()
-//        },
-//        pipeline: pipe_red,
-//        render_target: rt,
-//        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
-//    }).unwrap();
-//
-//    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-//
-//    list.bind_pipeline(pipe_green).unwrap();
-//    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-//
-//    list.end_drawing().unwrap();
-//
-//    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-//    ctx.wait(fence).unwrap();
+    //    let mut list = ctx
+    //        .begin_command_queue(&CommandQueueInfo { debug_name: "draw", ..Default::default() })
+    //        .unwrap();
+    //
+    //    list.begin_drawing(&DrawBegin {
+    //        viewport: Viewport {
+    //            area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
+    //            scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
+    //            ..Default::default()
+    //        },
+    //        pipeline: pipe_red,
+    //        render_target: rt,
+    //        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
+    //    }).unwrap();
+    //
+    //    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
+    //
+    //    list.bind_pipeline(pipe_green).unwrap();
+    //    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
+    //
+    //    list.end_drawing().unwrap();
+    //
+    //    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
+    //    ctx.wait(fence).unwrap();
 
-//    ctx.destroy_cmd_queue(list);
-    ctx.destroy();
+    //    ctx.destroy_cmd_queue(list);
 }

@@ -1,3 +1,6 @@
+mod common;
+
+use common::ValidationContext;
 use dashi::gpu::vulkan::*;
 use serial_test::serial;
 
@@ -45,7 +48,7 @@ subpasses:
 #[test]
 #[serial]
 fn yaml_render_pass_produces_expected_targets() {
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
     let rp = ctx
         .make_render_pass_from_yaml(TEST_RENDERPASS_YAML)
         .expect("render pass from yaml");
@@ -86,13 +89,12 @@ fn yaml_render_pass_produces_expected_targets() {
     assert!(present.clear_value.is_none());
 
     ctx.destroy_render_pass(rp.render_pass);
-    ctx.destroy();
 }
 
 #[test]
 #[serial]
 fn yaml_render_pass_allows_overriding_attachment_views() {
-    let mut ctx = Context::headless(&Default::default()).unwrap();
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
     let mut rp = ctx
         .make_render_pass_from_yaml(TEST_RENDERPASS_YAML)
         .expect("render pass from yaml");
@@ -128,5 +130,4 @@ fn yaml_render_pass_allows_overriding_attachment_views() {
 
     ctx.destroy_image(override_img);
     ctx.destroy_render_pass(rp.render_pass);
-    ctx.destroy();
 }

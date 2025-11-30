@@ -1977,6 +1977,34 @@ impl Context {
     /// Currently this method is a no-op and exists for API completeness.
     pub fn clean_up(&mut self) {}
 
+    /// Creates an additional debug messenger using the context's debug utils interface.
+    ///
+    /// Validation layers must be enabled via `DASHI_VALIDATION=1` for this to succeed.
+    pub fn create_debug_messenger(
+        &self,
+        info: &vk::DebugUtilsMessengerCreateInfoEXT,
+    ) -> Result<vk::DebugUtilsMessengerEXT> {
+        let debug_utils = self
+            .debug_utils
+            .as_ref()
+            .ok_or(GPUError::Unimplemented(
+                "Debug utils unavailable; enable validation to install callbacks",
+            ))?;
+
+        unsafe {
+            debug_utils
+                .create_debug_utils_messenger(info, None)
+                .map_err(GPUError::from)
+        }
+    }
+
+    /// Destroys a debug messenger created via [`create_debug_messenger`].
+    pub fn destroy_debug_messenger(&self, messenger: vk::DebugUtilsMessengerEXT) {
+        if let Some(utils) = &self.debug_utils {
+            unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
+        }
+    }
+
     /// Destroys the GPU context and all resources owned by it.
     ///
     /// # Prerequisites
