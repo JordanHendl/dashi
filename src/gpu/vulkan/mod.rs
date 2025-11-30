@@ -73,10 +73,16 @@ unsafe extern "system" fn vulkan_debug_callback(
     vk::FALSE
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct SubpassSampleInfo {
     pub color_samples: Vec<SampleCount>,
     pub depth_sample: Option<SampleCount>,
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
+pub struct SubpassAttachmentFormats {
+    pub color_formats: Vec<Format>,
+    pub depth_format: Option<Format>,
 }
 
 #[derive(Clone, Default)]
@@ -86,6 +92,7 @@ pub struct RenderPass {
     pub(super) viewport: Viewport,
     pub(super) attachment_formats: Vec<Format>,
     pub(super) subpass_samples: Vec<SubpassSampleInfo>,
+    pub(super) subpass_formats: Vec<SubpassAttachmentFormats>,
 }
 
 #[derive(Clone)]
@@ -616,13 +623,22 @@ mod tests {
             })
             .expect("create graphics pipeline layout");
 
+        let subpass_info = ctx
+            .render_pass_subpass_info(render_pass, 0)
+            .expect("query render pass subpass info");
+
         let pipeline = ctx
-            .make_graphics_pipeline(&GraphicsPipelineInfo {
-                debug_name: "validation_draw_pipeline",
-                layout: pipeline_layout,
+            .make_graphics_pipeline(
                 render_pass,
-                ..Default::default()
-            })
+                &GraphicsPipelineInfo {
+                    debug_name: "validation_draw_pipeline",
+                    layout: pipeline_layout,
+                    attachment_formats: subpass_info.color_formats,
+                    depth_format: subpass_info.depth_format,
+                    subpass_samples: subpass_info.samples,
+                    ..Default::default()
+                },
+            )
             .expect("create graphics pipeline");
 
         let color0 = ctx
@@ -1502,13 +1518,7 @@ impl Context {
         };
 
         self.transition_image_stages(
-            cmd,
-            img,
-            layout,
-            src_stage,
-            dst_stage,
-            src_access,
-            dst_access,
+            cmd, img, layout, src_stage, dst_stage, src_access, dst_access,
         );
     }
 
@@ -3206,11 +3216,13 @@ impl Context {
         let mut deps = Vec::with_capacity(256);
         let mut attachment_formats = Vec::with_capacity(256);
         let mut subpass_samples = Vec::with_capacity(info.subpasses.len());
+        let mut subpass_formats = Vec::with_capacity(info.subpasses.len());
         for subpass in info.subpasses {
             let mut depth_stencil_attachment_ref = None;
             let attachment_offset = attachments.len();
             let color_offset = color_attachment_refs.len();
             let mut subpass_sample_info = SubpassSampleInfo::default();
+            let mut subpass_format_info = SubpassAttachmentFormats::default();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
                 let attachment_desc = vk::AttachmentDescription {
@@ -3236,6 +3248,9 @@ impl Context {
                 subpass_sample_info
                     .color_samples
                     .push(color_attachment.samples);
+                subpass_format_info
+                    .color_formats
+                    .push(color_attachment.format);
             }
 
             // Process depth-stencil attachment
@@ -3258,6 +3273,7 @@ impl Context {
                 });
                 attachment_formats.push(depth_stencil_attachment.format);
                 subpass_sample_info.depth_sample = Some(depth_stencil_attachment.samples);
+                subpass_format_info.depth_format = Some(depth_stencil_attachment.format);
             }
 
             let colors = if color_attachment_refs.is_empty() {
@@ -3292,6 +3308,7 @@ impl Context {
             }
 
             subpass_samples.push(subpass_sample_info);
+            subpass_formats.push(subpass_format_info);
         }
         // Create the render pass info
         let render_pass_info = vk::RenderPassCreateInfo {
@@ -3356,8 +3373,27 @@ impl Context {
                 viewport: info.viewport,
                 attachment_formats,
                 subpass_samples,
+                subpass_formats,
             })
             .unwrap());
+    }
+
+    pub fn render_pass_subpass_info(
+        &self,
+        render_pass: Handle<RenderPass>,
+        subpass_id: u8,
+    ) -> Option<RenderPassSubpassInfo> {
+        let rp = self.render_passes.get_ref(render_pass)?;
+        let index = subpass_id as usize;
+        let formats = rp.subpass_formats.get(index)?.clone();
+        let samples = rp.subpass_samples.get(index)?.clone();
+
+        Some(RenderPassSubpassInfo {
+            viewport: rp.viewport,
+            color_formats: formats.color_formats,
+            depth_format: formats.depth_format,
+            samples,
+        })
     }
 
     /// Creates a compute pipeline layout from shader and bind group layouts.
@@ -3585,12 +3621,13 @@ impl Context {
     /// - Synchronization primitives are handled during presentation.
     pub fn make_graphics_pipeline(
         &mut self,
+        render_pass: Handle<RenderPass>,
         info: &GraphicsPipelineInfo,
     ) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
-        let rp_ref = self.render_passes.get_ref(info.render_pass).unwrap();
+        let rp_ref = self.render_passes.get_ref(render_pass).unwrap();
         let subpass_index = info.subpass_id as usize;
-        let subpass_info =
+        let expected_subpass =
             rp_ref
                 .subpass_samples
                 .get(subpass_index)
@@ -3599,7 +3636,7 @@ impl Context {
                     available: rp_ref.subpass_samples.len() as u32,
                 })?;
 
-        for (attachment_idx, expected) in subpass_info.color_samples.iter().enumerate() {
+        for (attachment_idx, expected) in expected_subpass.color_samples.iter().enumerate() {
             if layout.sample_count != *expected {
                 return Err(GPUError::MismatchedSampleCount {
                     context: format!(
@@ -3612,7 +3649,7 @@ impl Context {
             }
         }
 
-        if let Some(depth_sample) = subpass_info.depth_sample {
+        if let Some(depth_sample) = expected_subpass.depth_sample {
             if layout.sample_count != depth_sample {
                 return Err(GPUError::MismatchedSampleCount {
                     context: format!("render pass subpass {} depth attachment", subpass_index),
@@ -3622,11 +3659,9 @@ impl Context {
             }
         }
 
-        let rp = rp_ref.raw;
-
         let rp_viewport = self
             .render_passes
-            .get_ref(info.render_pass)
+            .get_ref(render_pass)
             .unwrap()
             .viewport
             .clone();
@@ -3686,7 +3721,7 @@ impl Context {
             .multisample_state(&layout.multisample)
             .color_blend_state(&color_blend_state)
             .layout(layout.layout)
-            .render_pass(rp)
+            .render_pass(rp_ref.raw)
             .subpass(info.subpass_id as u32);
 
         if let Some(d) = layout.depth_stencil.as_ref() {
@@ -3716,7 +3751,7 @@ impl Context {
         return Ok(self
             .gfx_pipelines
             .insert(GraphicsPipeline {
-                render_pass: info.render_pass,
+                render_pass,
                 raw: graphics_pipelines[0],
                 layout: info.layout,
                 subpass: info.subpass_id,

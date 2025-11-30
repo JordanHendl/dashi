@@ -6,7 +6,7 @@ use anyhow::{Context as _, Result};
 use crate::gpu::vulkan::{
     ComputePipeline, ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo,
     Context, GraphicsPipeline, GraphicsPipelineInfo, GraphicsPipelineLayout,
-    GraphicsPipelineLayoutInfo,
+    GraphicsPipelineLayoutInfo, RenderPass,
 };
 use crate::utils::Handle;
 
@@ -98,6 +98,7 @@ impl PipelineManager {
     pub fn register_graphics_pipeline(
         &self,
         name: impl Into<String>,
+        render_pass: Handle<RenderPass>,
         info: &GraphicsPipelineInfo<'_>,
     ) -> Result<Handle<GraphicsPipeline>> {
         let name = name.into();
@@ -106,7 +107,7 @@ impl PipelineManager {
         }
 
         let handle = unsafe { &mut *self.ctx }
-            .make_graphics_pipeline(info)
+            .make_graphics_pipeline(render_pass, info)
             .with_context(|| format!("creating graphics pipeline '{}'", name))?;
 
         self.graphics_pipelines
@@ -141,10 +142,10 @@ impl PipelineManager {
 #[cfg(feature = "dashi-serde")]
 mod serde_support {
     use std::fs;
-    
-    use std::collections::HashMap;
+
     use super::*;
     use anyhow::{anyhow, bail, Context as _};
+    use std::collections::HashMap;
 
     use super::{PipelineManager, Result};
     use crate::gpu::vulkan::structs::cfg;
@@ -398,12 +399,27 @@ mod serde_support {
         ) -> Result<Handle<GraphicsPipeline>> {
             let name = name.into();
             let layouts_guard = self.graphics_layouts.read().unwrap();
+            let layout = *layouts_guard
+                .get(&cfg.layout)
+                .ok_or_else(|| anyhow!("Unknown GraphicsPipelineLayout key: {}", cfg.layout))?;
+            let render_pass = *render_passes
+                .get(&cfg.render_pass)
+                .ok_or_else(|| anyhow!("Unknown RenderPass key: {}", cfg.render_pass))?;
+            let subpass_info = unsafe { &*self.ctx }
+                .render_pass_subpass_info(render_pass, cfg.subpass_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Unknown subpass {} for render pass {}",
+                        cfg.subpass_id,
+                        cfg.render_pass
+                    )
+                })?;
             let info = cfg
-                .to_info(&*layouts_guard, render_passes)
+                .to_info(&*layouts_guard, subpass_info)
                 .map_err(|err| anyhow!(err))?;
             drop(layouts_guard);
 
-            self.register_graphics_pipeline(name, &info)
+            self.register_graphics_pipeline(name, render_pass, &info)
         }
 
         fn register_compute_pipeline_cfg(

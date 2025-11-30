@@ -1,6 +1,6 @@
 use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocatorState,
-    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice,
+    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice, SubpassSampleInfo,
 };
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
 use std::collections::hash_map::{DefaultHasher, Entry};
@@ -1557,10 +1557,20 @@ pub struct ComputePipelineInfo<'a> {
     pub layout: Handle<ComputePipelineLayout>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RenderPassSubpassInfo {
+    pub viewport: Viewport,
+    pub color_formats: Vec<Format>,
+    pub depth_format: Option<Format>,
+    pub samples: SubpassSampleInfo,
+}
+
 pub struct GraphicsPipelineInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<GraphicsPipelineLayout>,
-    pub render_pass: Handle<RenderPass>,
+    pub attachment_formats: Vec<Format>,
+    pub depth_format: Option<Format>,
+    pub subpass_samples: SubpassSampleInfo,
     pub subpass_id: u8,
 }
 
@@ -1573,7 +1583,9 @@ impl Hash for ComputePipelineInfo<'_> {
 impl Hash for GraphicsPipelineInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layout.hash(state);
-        self.render_pass.hash(state);
+        self.attachment_formats.hash(state);
+        self.depth_format.hash(state);
+        self.subpass_samples.hash(state);
         self.subpass_id.hash(state);
     }
 }
@@ -1583,7 +1595,9 @@ impl<'a> Default for GraphicsPipelineInfo<'a> {
         Self {
             debug_name: Default::default(),
             layout: Default::default(),
-            render_pass: Default::default(),
+            attachment_formats: Default::default(),
+            depth_format: None,
+            subpass_samples: Default::default(),
             subpass_id: 0,
         }
     }
@@ -1908,18 +1922,17 @@ pub mod cfg {
         pub fn to_info<'a>(
             &'a self,
             layouts: &std::collections::HashMap<String, Handle<GraphicsPipelineLayout>>,
-            render_passes: &std::collections::HashMap<String, Handle<RenderPass>>,
+            subpass_info: RenderPassSubpassInfo,
         ) -> Result<GraphicsPipelineInfo<'a>, String> {
             let layout = *layouts
                 .get(&self.layout)
                 .ok_or_else(|| format!("Unknown GraphicsPipelineLayout key: {}", self.layout))?;
-            let render_pass = *render_passes
-                .get(&self.render_pass)
-                .ok_or_else(|| format!("Unknown RenderPass key: {}", self.render_pass))?;
             Ok(GraphicsPipelineInfo {
                 debug_name: &self.debug_name,
                 layout,
-                render_pass,
+                attachment_formats: subpass_info.color_formats,
+                depth_format: subpass_info.depth_format,
+                subpass_samples: subpass_info.samples,
                 subpass_id: self.subpass_id,
             })
         }

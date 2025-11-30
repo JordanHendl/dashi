@@ -128,22 +128,36 @@ fn pipeline_switch() {
         })
         .unwrap();
 
+    let subpass_info = ctx
+        .render_pass_subpass_info(rp, 0)
+        .expect("render pass subpass info");
+
     let pipe_red = ctx
-        .make_graphics_pipeline(&GraphicsPipelineInfo {
-            debug_name: "pipe_red",
-            layout: layout_red,
-            render_pass: rp,
-            ..Default::default()
-        })
+        .make_graphics_pipeline(
+            rp,
+            &GraphicsPipelineInfo {
+                debug_name: "pipe_red",
+                layout: layout_red,
+                attachment_formats: subpass_info.color_formats.clone(),
+                depth_format: subpass_info.depth_format,
+                subpass_samples: subpass_info.samples.clone(),
+                ..Default::default()
+            },
+        )
         .unwrap();
 
     let pipe_green = ctx
-        .make_graphics_pipeline(&GraphicsPipelineInfo {
-            debug_name: "pipe_green",
-            layout: layout_green,
-            render_pass: rp,
-            ..Default::default()
-        })
+        .make_graphics_pipeline(
+            rp,
+            &GraphicsPipelineInfo {
+                debug_name: "pipe_green",
+                layout: layout_green,
+                attachment_formats: subpass_info.color_formats,
+                depth_format: subpass_info.depth_format,
+                subpass_samples: subpass_info.samples,
+                ..Default::default()
+            },
+        )
         .unwrap();
 
     let vb = ctx
