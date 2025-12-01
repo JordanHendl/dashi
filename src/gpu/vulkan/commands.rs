@@ -9,7 +9,7 @@ use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
     Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
-    Image, ImageView, QueueType, Result, Semaphore, SubmitInfo2, UsageBits,
+    Image, ImageView, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -664,20 +664,29 @@ impl CommandSink for CommandQueue {
         self.curr_rp = Some(cmd.render_pass);
         self.curr_subpass = Some(0);
 
-        let rp_obj = self
-            .ctx_ref()
-            .render_passes
-            .get_ref(cmd.render_pass)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
-        let rp_raw = rp_obj.raw;
-        let fb = rp_obj.fb;
+        let (rp_raw, mut fb, attachment_formats, rp_subpass_samples, mut rp_width, mut rp_height) = {
+            let rp_obj = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(cmd.render_pass)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            (
+                rp_obj.raw,
+                rp_obj.fb,
+                rp_obj.attachment_formats.clone(),
+                rp_obj.subpass_samples.clone(),
+                rp_obj.width,
+                rp_obj.height,
+            )
+        };
+        let mut target_width = cmd.viewport.scissor.w.max(1);
+        let mut target_height = cmd.viewport.scissor.h.max(1);
 
         #[cfg(debug_assertions)]
         {
-            let subpass_samples = rp_obj.subpass_samples.clone();
             if let Err(err) = self.validate_subpass_samples(
-                &subpass_samples,
+                &rp_subpass_samples,
                 0,
                 &cmd.color_attachments,
                 cmd.depth_attachment,
@@ -712,6 +721,47 @@ impl CommandSink for CommandQueue {
                 .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
         }
 
+        let mut attachment_min_width = u32::MAX;
+        let mut attachment_min_height = u32::MAX;
+        {
+            let ctx = self.ctx_ref();
+            for (view_handle, _) in &self.curr_attachments {
+                let v = ctx.image_views.get_ref(*view_handle).unwrap();
+                let img = ctx.images.get_ref(v.img).unwrap();
+                attachment_min_width = attachment_min_width.min(img.dim[0]);
+                attachment_min_height = attachment_min_height.min(img.dim[1]);
+            }
+        }
+
+        if attachment_min_width != u32::MAX {
+            target_width = target_width.min(attachment_min_width).max(1);
+            target_height = target_height.min(attachment_min_height).max(1);
+        }
+
+        if target_width != rp_width || target_height != rp_height {
+            let ctx = self.ctx_ref();
+            let new_fb = ctx
+                .create_imageless_framebuffer(
+                    rp_raw,
+                    &attachment_formats,
+                    target_width,
+                    target_height,
+                )
+                .unwrap();
+            {
+                let rp_mut = ctx.render_passes.get_mut_ref(cmd.render_pass).unwrap();
+                unsafe {
+                    ctx.device.destroy_framebuffer(rp_mut.fb, None);
+                }
+                rp_mut.fb = new_fb;
+                rp_mut.width = target_width;
+                rp_mut.height = target_height;
+            }
+            fb = new_fb;
+            rp_width = target_width;
+            rp_height = target_height;
+        }
+
         for (view_handle, layout) in &self.curr_attachments {
             let ctx = self.ctx_ref();
             let v = ctx.image_views.get_ref(*view_handle).unwrap();
@@ -741,7 +791,12 @@ impl CommandSink for CommandQueue {
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp_raw)
                     .framebuffer(fb)
-                    .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
+                    .render_area(convert_rect2d_to_vulkan(Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: rp_width,
+                        h: rp_height,
+                    }))
                     .clear_values(&clears)
                     .push_next(&mut attachment_info)
                     .build(),
@@ -807,14 +862,24 @@ impl CommandSink for CommandQueue {
         self.curr_rp = Some(pipeline_rp);
         self.curr_subpass = Some(0);
 
-        let rp_obj = self
-            .ctx_ref()
-            .render_passes
-            .get_ref(pipeline_rp)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
-        let rp_raw = rp_obj.raw;
-        let fb = rp_obj.fb;
+        let (rp_raw, mut fb, rp_subpass_samples, attachment_formats, mut rp_width, mut rp_height) = {
+            let rp = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(pipeline_rp)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            (
+                rp.raw,
+                rp.fb,
+                rp.subpass_samples.clone(),
+                rp.attachment_formats.clone(),
+                rp.width,
+                rp.height,
+            )
+        };
+        let mut target_width = cmd.viewport.scissor.w.max(1);
+        let mut target_height = cmd.viewport.scissor.h.max(1);
 
         #[cfg(debug_assertions)]
         {
@@ -828,10 +893,8 @@ impl CommandSink for CommandQueue {
                 layout.sample_count
             };
 
-            let subpass_samples = rp_obj.subpass_samples.clone();
-
             if let Err(err) = self.validate_subpass_samples(
-                &subpass_samples,
+                &rp_subpass_samples,
                 pipeline_subpass,
                 &cmd.color_attachments,
                 cmd.depth_attachment,
@@ -864,6 +927,47 @@ impl CommandSink for CommandQueue {
             attachments_vk.push(vk_view);
             self.curr_attachments
                 .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
+        }
+
+        let mut attachment_min_width = u32::MAX;
+        let mut attachment_min_height = u32::MAX;
+        {
+            let ctx = self.ctx_ref();
+            for (view_handle, _) in &self.curr_attachments {
+                let v = ctx.image_views.get_ref(*view_handle).unwrap();
+                let img = ctx.images.get_ref(v.img).unwrap();
+                attachment_min_width = attachment_min_width.min(img.dim[0]);
+                attachment_min_height = attachment_min_height.min(img.dim[1]);
+            }
+        }
+
+        if attachment_min_width != u32::MAX {
+            target_width = target_width.min(attachment_min_width).max(1);
+            target_height = target_height.min(attachment_min_height).max(1);
+        }
+
+        if target_width != rp_width || target_height != rp_height {
+            let ctx = self.ctx_ref();
+            let new_fb = ctx
+                .create_imageless_framebuffer(
+                    rp_raw,
+                    &attachment_formats,
+                    target_width,
+                    target_height,
+                )
+                .unwrap();
+            {
+                let rp_mut = ctx.render_passes.get_mut_ref(pipeline_rp).unwrap();
+                unsafe {
+                    ctx.device.destroy_framebuffer(rp_mut.fb, None);
+                }
+                rp_mut.fb = new_fb;
+                rp_mut.width = target_width;
+                rp_mut.height = target_height;
+            }
+            fb = new_fb;
+            rp_width = target_width;
+            rp_height = target_height;
         }
 
         for (view_handle, layout) in &self.curr_attachments {
@@ -899,7 +1003,12 @@ impl CommandSink for CommandQueue {
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(rp_raw)
                     .framebuffer(fb)
-                    .render_area(convert_rect2d_to_vulkan(cmd.viewport.scissor))
+                    .render_area(convert_rect2d_to_vulkan(Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: rp_width,
+                        h: rp_height,
+                    }))
                     .clear_values(&clears)
                     .push_next(&mut attachment_info)
                     .build(),
