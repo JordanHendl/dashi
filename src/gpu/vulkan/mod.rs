@@ -89,6 +89,8 @@ pub struct SubpassAttachmentFormats {
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
     pub(super) fb: vk::Framebuffer,
+    pub(super) width: u32,
+    pub(super) height: u32,
     pub(super) attachment_formats: Vec<Format>,
     pub(super) subpass_samples: Vec<SubpassSampleInfo>,
     pub(super) subpass_formats: Vec<SubpassAttachmentFormats>,
@@ -567,6 +569,15 @@ mod tests {
             })
             .expect("create render pass");
 
+        {
+            let rp = ctx
+                .render_passes
+                .get_ref(render_pass)
+                .expect("render pass should exist");
+            assert_eq!(rp.width, WIDTH);
+            assert_eq!(rp.height, HEIGHT);
+        }
+
         let vert = inline_spirv::inline_spirv!(
             r#"#version 450
                vec2 positions[3] = vec2[3](vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(0.0,0.5));
@@ -718,6 +729,20 @@ mod tests {
         ring.submit(&SubmitInfo::default())
             .expect("submit drawing commands");
         ring.wait_all().expect("wait for validation work");
+
+        {
+            let pipeline_rp = ctx
+                .gfx_pipelines
+                .get_ref(pipeline)
+                .expect("pipeline should exist")
+                .render_pass;
+            let rp = ctx
+                .render_passes
+                .get_ref(pipeline_rp)
+                .expect("pipeline render pass should exist");
+            assert_eq!(rp.width, WIDTH);
+            assert_eq!(rp.height, HEIGHT);
+        }
 
         drop(ring);
 
@@ -3201,6 +3226,58 @@ impl Context {
         self.make_bind_table_layouts_from_yaml(&s)
     }
 
+    fn create_imageless_framebuffer(
+        &self,
+        render_pass: vk::RenderPass,
+        attachment_formats: &[Format],
+        width: u32,
+        height: u32,
+    ) -> Result<vk::Framebuffer, GPUError> {
+        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
+        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
+        let width = width.max(1);
+        let height = height.max(1);
+
+        for fmt in attachment_formats {
+            let mut usage = vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::SAMPLED;
+
+            if matches!(fmt, Format::D24S8) {
+                usage |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+            } else {
+                usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            }
+
+            let vk_fmt = lib_to_vk_image_format(fmt);
+            view_formats_vk.push(vk_fmt);
+            let info = vk::FramebufferAttachmentImageInfo::builder()
+                .usage(usage)
+                .width(width)
+                .height(height)
+                .layer_count(1)
+                .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
+                .build();
+            attachment_image_infos.push(info);
+        }
+
+        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
+            .attachment_image_infos(&attachment_image_infos);
+
+        let fb_info = vk::FramebufferCreateInfo::builder()
+            .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
+            .render_pass(render_pass)
+            .width(width)
+            .height(height)
+            .layers(1)
+            .attachment_count(attachment_formats.len() as u32)
+            .push_next(&mut attachments_info);
+
+        let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
+
+        Ok(fb)
+    }
+
     /// Builds a render pass with the supplied subpass configuration.
     pub fn make_render_pass(
         &mut self,
@@ -3319,53 +3396,19 @@ impl Context {
         let render_pass = unsafe { self.device.create_render_pass(&render_pass_info, None) }?;
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
-        let width = 1;
-        let height = 1;
+        let width = info.viewport.scissor.w.max(1);
+        let height = info.viewport.scissor.h.max(1);
 
-        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
-        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
-        for fmt in &attachment_formats {
-            let mut usage = vk::ImageUsageFlags::TRANSFER_DST
-                | vk::ImageUsageFlags::TRANSFER_SRC
-                | vk::ImageUsageFlags::SAMPLED;
-
-            if matches!(fmt, Format::D24S8) {
-                usage |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
-            } else {
-                usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
-            }
-
-            let vk_fmt = lib_to_vk_image_format(fmt);
-            view_formats_vk.push(vk_fmt);
-            let info = vk::FramebufferAttachmentImageInfo::builder()
-                .usage(usage)
-                .width(width)
-                .height(height)
-                .layer_count(1)
-                .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
-                .build();
-            attachment_image_infos.push(info);
-        }
-
-        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
-            .attachment_image_infos(&attachment_image_infos);
-
-        let fb_info = vk::FramebufferCreateInfo::builder()
-            .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
-            .render_pass(render_pass)
-            .width(width)
-            .height(height)
-            .layers(1)
-            .attachment_count(attachment_formats.len() as u32)
-            .push_next(&mut attachments_info);
-
-        let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
+        let fb =
+            self.create_imageless_framebuffer(render_pass, &attachment_formats, width, height)?;
 
         return Ok(self
             .render_passes
             .insert(RenderPass {
                 raw: render_pass,
                 fb,
+                width,
+                height,
                 attachment_formats,
                 subpass_samples,
                 subpass_formats,
@@ -3742,49 +3785,21 @@ impl Context {
             .build();
 
         let dummy_render_pass = unsafe { self.device.create_render_pass(&dummy_rp_info, None) }?;
-        self.set_name(dummy_render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
+        self.set_name(
+            dummy_render_pass,
+            info.debug_name,
+            vk::ObjectType::RENDER_PASS,
+        );
 
         let width = 1;
         let height = 1;
 
-        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
-        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
-        for fmt in &attachment_formats {
-            let mut usage = vk::ImageUsageFlags::TRANSFER_DST
-                | vk::ImageUsageFlags::TRANSFER_SRC
-                | vk::ImageUsageFlags::SAMPLED;
-
-            if matches!(fmt, Format::D24S8) {
-                usage |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
-            } else {
-                usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
-            }
-
-            let vk_fmt = lib_to_vk_image_format(fmt);
-            view_formats_vk.push(vk_fmt);
-            let info = vk::FramebufferAttachmentImageInfo::builder()
-                .usage(usage)
-                .width(width)
-                .height(height)
-                .layer_count(1)
-                .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
-                .build();
-            attachment_image_infos.push(info);
-        }
-
-        let mut attachments_info = vk::FramebufferAttachmentsCreateInfo::builder()
-            .attachment_image_infos(&attachment_image_infos);
-
-        let fb_info = vk::FramebufferCreateInfo::builder()
-            .flags(vk::FramebufferCreateFlags::IMAGELESS_KHR)
-            .render_pass(dummy_render_pass)
-            .width(width)
-            .height(height)
-            .layers(1)
-            .attachment_count(attachment_formats.len() as u32)
-            .push_next(&mut attachments_info);
-
-        let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
+        let fb = self.create_imageless_framebuffer(
+            dummy_render_pass,
+            &attachment_formats,
+            width,
+            height,
+        )?;
 
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_binding_descriptions(&[layout.vertex_input])
@@ -3803,7 +3818,10 @@ impl Context {
 
         let scissor = vk::Rect2D::builder()
             .offset(vk::Offset2D { x: 0, y: 0 })
-            .extent(vk::Extent2D { width: 1, height: 1 })
+            .extent(vk::Extent2D {
+                width: 1,
+                height: 1,
+            })
             .build();
 
         let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
@@ -3867,6 +3885,8 @@ impl Context {
             .insert(RenderPass {
                 raw: dummy_render_pass,
                 fb,
+                width,
+                height,
                 attachment_formats,
                 subpass_samples,
                 subpass_formats,
