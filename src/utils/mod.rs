@@ -4,6 +4,7 @@ use crate::{IndexedResource, ShaderResource};
 
 pub type Handle<T> = resource_pool::Handle<T>;
 pub type Pool<T> = resource_pool::Pool<T>;
+pub type DynamicPool = resource_pool::DynamicPool;
 pub mod gpupool;
 
 pub fn resource_list_to_indexed_resources(list: &ResourceList<ShaderResource>) -> Vec<IndexedResource> {
