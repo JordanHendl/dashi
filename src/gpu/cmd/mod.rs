@@ -3,10 +3,10 @@ use std::marker::PhantomData;
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
 };
-use crate::gpu::driver::types::Handle;
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
+use crate::gpu::driver::types::Handle;
 use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2};
 
 /// Generic command buffer with type-state tracking.
@@ -129,6 +129,13 @@ impl CommandStream<Compute> {
 
     pub fn dispatch(&mut self, cmd: &Dispatch) {
         self.enc.dispatch(cmd);
+    }
+
+    pub fn unbind_pipeline(self) -> CommandStream<Recording> {
+        CommandStream {
+            enc: self.enc,
+            _state: PhantomData,
+        }
     }
 
     pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> CommandStream<Graphics> {
