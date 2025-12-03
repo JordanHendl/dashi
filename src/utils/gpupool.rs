@@ -1,16 +1,11 @@
-use crate::{
-    gpu::driver::command::CopyBuffer,
-    Buffer,
-    BufferInfo,
-    CommandQueue,
-    CommandStream,
-    Context,
-    MemoryVisibility,
-};
 #[cfg(test)]
 use crate::QueueType;
+use crate::{
+    cmd::Recording, gpu::driver::command::CopyBuffer, Buffer, BufferInfo, CommandQueue,
+    CommandStream, Context, MemoryVisibility,
+};
 
-use super::{Handle, Pool, DynamicPool};
+use super::{DynamicPool, Handle, Pool};
 use crate::Result;
 
 pub struct DynamicGPUPool {
@@ -86,29 +81,25 @@ impl<T> GPUPool<T> {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandQueue) -> Result<()> {
-
-        let mut cmd = CommandStream::new().begin();
-        cmd.copy_buffers(&CopyBuffer {
+    pub fn sync_down(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
+        list.copy_buffers(&CopyBuffer {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
         });
 
-        cmd.end().submit(list, &Default::default());
         Ok(())
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandQueue) -> Result<()> {
-        let mut cmd = CommandStream::new().begin();
-        cmd.copy_buffers(&CopyBuffer {
+    pub fn sync_up(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
+        list.copy_buffers(&CopyBuffer {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
         });
 
-        cmd.end().submit(list, &Default::default());
-        Ok(())    }
+        Ok(())
+    }
 
     pub fn get_empty(&self) -> &[u32] {
         &self.pool.get_empty()
@@ -158,7 +149,12 @@ impl<T> GPUPool<T> {
 ///
 
 impl DynamicGPUPool {
-    pub fn new(ctx: &mut Context, info: &BufferInfo, item_size: usize, item_align: usize) -> Result<Self> {
+    pub fn new(
+        ctx: &mut Context,
+        info: &BufferInfo,
+        item_size: usize,
+        item_align: usize,
+    ) -> Result<Self> {
         let len = info.byte_size as usize / item_size;
 
         let mut b = info.clone();
@@ -171,7 +167,12 @@ impl DynamicGPUPool {
         let staging = ctx.make_buffer(&b)?;
 
         let mapped = ctx.map_buffer_mut::<u8>(staging)?;
-        let pool = DynamicPool::new_preallocated(mapped.as_mut_ptr(), len, item_size as u32, item_align as u32);
+        let pool = DynamicPool::new_preallocated(
+            mapped.as_mut_ptr(),
+            len,
+            item_size as u32,
+            item_align as u32,
+        );
 
         Ok(Self {
             buffer,
@@ -190,29 +191,25 @@ impl DynamicGPUPool {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandQueue) -> Result<()> {
-
-        let mut cmd = CommandStream::new().begin();
-        cmd.copy_buffers(&CopyBuffer {
+    pub fn sync_down(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
+        list.copy_buffers(&CopyBuffer {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
         });
 
-        cmd.end().submit(list, &Default::default());
         Ok(())
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandQueue) -> Result<()> {
-        let mut cmd = CommandStream::new().begin();
-        cmd.copy_buffers(&CopyBuffer {
+    pub fn sync_up(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
+        list.copy_buffers(&CopyBuffer {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
         });
 
-        cmd.end().submit(list, &Default::default());
-        Ok(())    }
+        Ok(())
+    }
 
     pub fn get_empty(&self) -> &[u32] {
         &self.pool.get_empty()
@@ -222,23 +219,23 @@ impl DynamicGPUPool {
         return self.pool.insert(item);
     }
 
-//    pub fn for_each_occupied<F>(&self, func: F)
-//    where
-//        F: FnMut(&T),
-//    {
-//        self.pool.for_each_occupied(func);
-//    }
-//
-//    pub fn len(&self) -> usize {
-//        return self.pool.len();
-//    }
-//
-//    pub fn for_each_occupied_mut<F>(&mut self, func: F)
-//    where
-//        F: FnMut(&mut T),
-//    {
-//        self.pool.for_each_occupied_mut(func);
-//    }
+    //    pub fn for_each_occupied<F>(&self, func: F)
+    //    where
+    //        F: FnMut(&T),
+    //    {
+    //        self.pool.for_each_occupied(func);
+    //    }
+    //
+    //    pub fn len(&self) -> usize {
+    //        return self.pool.len();
+    //    }
+    //
+    //    pub fn for_each_occupied_mut<F>(&mut self, func: F)
+    //    where
+    //        F: FnMut(&mut T),
+    //    {
+    //        self.pool.for_each_occupied_mut(func);
+    //    }
 
     pub fn release<T>(&mut self, item: Handle<T>) {
         self.pool.release(item);
@@ -256,8 +253,6 @@ impl DynamicGPUPool {
         self.pool.clear();
     }
 }
-
-
 
 ///
 #[cfg(test)]
@@ -301,11 +296,16 @@ mod tests {
         assert!(pool.len() == TEST_AMT);
 
         let ctx_ptr = &mut ctx as *mut _;
-        let mut list = ctx.pool_mut(QueueType::Graphics).begin(ctx_ptr, "", false).unwrap();
-        pool.sync_up(&mut list).unwrap();
+        let mut list = ctx
+            .pool_mut(QueueType::Graphics)
+            .begin(ctx_ptr, "", false)
+            .unwrap();
+
+        let mut stream = CommandStream::new().begin();
+        pool.sync_up(&mut stream).unwrap();
         ctx.submit(&mut list, &Default::default())
             .expect("ASSERT: Should be able to sync data up");
-        
+
         ctx.sync_current_device();
         pool.destroy().unwrap();
         ctx.destroy();
