@@ -170,6 +170,7 @@ pub struct Context {
     pub(super) pdevice: vk::PhysicalDevice,
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
+    pub(super) descriptor_indexing_features: vk::PhysicalDeviceDescriptorIndexingFeatures,
     pub(super) gfx_pool: CommandPool,
     pub(super) compute_pool: Option<CommandPool>,
     pub(super) transfer_pool: Option<CommandPool>,
@@ -784,6 +785,7 @@ impl Context {
             vk::PhysicalDevice,
             ash::Device,
             ash::vk::PhysicalDeviceProperties,
+            vk::PhysicalDeviceDescriptorIndexingFeatures,
             vk_mem::Allocator,
             Queue,
             Option<Queue>,
@@ -910,41 +912,83 @@ impl Context {
             || (vk::api_version_major(device_prop.api_version) == 1
                 && vk::api_version_minor(device_prop.api_version) >= 1);
 
-        let mut descriptor_indexing =
-            vk::PhysicalDeviceDescriptorIndexingFeatures::builder().build();
         let features = vk::PhysicalDeviceFeatures::builder()
             .shader_clip_distance(true)
             .build();
 
+        let mut enabled_descriptor_indexing =
+            vk::PhysicalDeviceDescriptorIndexingFeatures::default();
+        let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
         let mut features2 = supports_vulkan11.then(|| {
-            let mut f2 = vk::PhysicalDeviceFeatures2::builder()
+            let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
+            let mut feature_query = vk::PhysicalDeviceFeatures2::builder()
                 .features(features)
                 .push_next(&mut descriptor_indexing)
                 .build();
 
-            unsafe { instance.get_physical_device_features2(pdevice, &mut f2) };
+            unsafe { instance.get_physical_device_features2(pdevice, &mut feature_query) };
 
-            // Bind table enabled
-            if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing <= 0
-                && descriptor_indexing.descriptor_binding_sampled_image_update_after_bind <= 0
-                && descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing <= 0
-                && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind <= 0
-                && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing <= 0
-                && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind <= 0
-            {
-                f2 = Default::default();
+            if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
+                enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
+            }
+            if descriptor_indexing.descriptor_binding_sampled_image_update_after_bind == vk::TRUE {
+                enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE {
+                enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE {
+                enabled_descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.descriptor_binding_storage_image_update_after_bind == vk::TRUE {
+                enabled_descriptor_indexing.descriptor_binding_storage_image_update_after_bind =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing == vk::TRUE {
+                enabled_descriptor_indexing.shader_sampled_image_array_non_uniform_indexing =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE {
+                enabled_descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing =
+                    vk::TRUE;
+            }
+            if descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE {
+                enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing =
+                    vk::TRUE;
             }
 
-            f2
-        });
+            let descriptor_features_enabled = enabled_descriptor_indexing
+                .descriptor_binding_partially_bound
+                == vk::TRUE
+                || enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
+                    == vk::TRUE
+                || enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
+                    == vk::TRUE
+                || enabled_descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind
+                    == vk::TRUE
+                || enabled_descriptor_indexing.descriptor_binding_storage_image_update_after_bind
+                    == vk::TRUE
+                || enabled_descriptor_indexing.shader_sampled_image_array_non_uniform_indexing
+                    == vk::TRUE
+                || enabled_descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing
+                    == vk::TRUE
+                || enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing
+                    == vk::TRUE;
 
-        let mut features16bit = supports_vulkan11
-            .then(|| {
-                vk::PhysicalDevice16BitStorageFeatures::builder()
-                    .uniform_and_storage_buffer16_bit_access(true)
-                    .build()
-            })
-            .unwrap_or_default();
+            let mut f2 = vk::PhysicalDeviceFeatures2::builder().features(features);
+            if descriptor_features_enabled {
+                f2 = f2.push_next(&mut enabled_descriptor_indexing);
+            }
+
+            features16bit = vk::PhysicalDevice16BitStorageFeatures::builder()
+                .uniform_and_storage_buffer16_bit_access(true)
+                .build();
+
+            f2.build()
+        });
 
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
@@ -1026,6 +1070,7 @@ impl Context {
             pdevice,
             device,
             device_prop,
+            enabled_descriptor_indexing,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1049,6 +1094,7 @@ impl Context {
             pdevice,
             device,
             properties,
+            descriptor_indexing_features,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1100,7 +1146,18 @@ impl Context {
             None
         };
 
-        let empty_set_layout = Self::create_empty_set_layout(&device)?;
+        let supports_update_after_bind_layouts = descriptor_indexing_features
+            .descriptor_binding_sampled_image_update_after_bind
+            == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind
+                == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind
+                == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
+                == vk::TRUE;
+
+        let empty_set_layout =
+            Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
 
         let mut ctx = Context {
             entry,
@@ -1108,6 +1165,7 @@ impl Context {
             pdevice,
             device,
             properties,
+            descriptor_indexing_features,
             gfx_pool,
             compute_pool,
             transfer_pool,
@@ -1169,6 +1227,7 @@ impl Context {
             pdevice,
             device,
             properties,
+            descriptor_indexing_features,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1225,7 +1284,18 @@ impl Context {
             None
         };
 
-        let empty_set_layout = Self::create_empty_set_layout(&device)?;
+        let supports_update_after_bind_layouts = descriptor_indexing_features
+            .descriptor_binding_sampled_image_update_after_bind
+            == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind
+                == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind
+                == vk::TRUE
+            || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
+                == vk::TRUE;
+
+        let empty_set_layout =
+            Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
 
         let mut ctx = Context {
             entry,
@@ -1233,6 +1303,7 @@ impl Context {
             pdevice,
             device,
             properties,
+            descriptor_indexing_features,
             gfx_pool,
             compute_pool,
             transfer_pool,
@@ -2326,8 +2397,30 @@ impl Context {
     ) -> Result<Handle<BindTableLayout>, GPUError> {
         const MAX_DESCRIPTOR_SETS: u32 = 2048;
 
+        let supports_partially_bound = self
+            .descriptor_indexing_features
+            .descriptor_binding_partially_bound
+            == vk::TRUE;
+        let supports_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_uniform_buffer_update_after_bind
+            == vk::TRUE;
+        let supports_sampled_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_sampled_image_update_after_bind
+            == vk::TRUE;
+        let supports_storage_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_storage_buffer_update_after_bind
+            == vk::TRUE;
+        let supports_storage_image_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_storage_image_update_after_bind
+            == vk::TRUE;
+
         let mut flags = Vec::new();
         let mut bindings = Vec::new();
+        let mut uses_update_after_bind = false;
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
                 let descriptor_type = match variable.var_type {
@@ -2352,10 +2445,26 @@ impl Context {
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
-                flags.push(
-                    vk::DescriptorBindingFlags::PARTIALLY_BOUND
-                        | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND,
-                );
+                let mut binding_flags = vk::DescriptorBindingFlags::empty();
+                if supports_partially_bound {
+                    binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                }
+                let binding_supports_uab = match variable.var_type {
+                    BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
+                        supports_uab
+                    }
+                    BindGroupVariableType::DynamicStorage | BindGroupVariableType::Storage => {
+                        supports_storage_uab
+                    }
+                    BindGroupVariableType::SampledImage => supports_sampled_uab,
+                    BindGroupVariableType::StorageImage => supports_storage_image_uab,
+                };
+                if binding_supports_uab {
+                    binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
+                    uses_update_after_bind = true;
+                }
+
+                flags.push(binding_flags);
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
@@ -2366,15 +2475,21 @@ impl Context {
                 bindings.push(layout_binding);
             }
         }
-        let mut layout_binding_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder()
-            .binding_flags(&flags)
-            .build();
+        let mut layout_binding_info =
+            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
 
-        let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&bindings)
-            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
-            .push_next(&mut layout_binding_info)
-            .build();
+        let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+        if uses_update_after_bind {
+            layout_info =
+                layout_info.flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL);
+        }
+
+        let mut layout_binding_info = layout_binding_info.build();
+        if flags.iter().any(|f| !f.is_empty()) {
+            layout_info = layout_info.push_next(&mut layout_binding_info);
+        }
+
+        let layout_info = layout_info.build();
 
         let descriptor_set_layout = unsafe {
             self.device
@@ -2391,10 +2506,12 @@ impl Context {
             })
             .collect::<Vec<_>>();
 
-        let pool_info = vk::DescriptorPoolCreateInfo::builder()
+        let mut pool_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(MAX_DESCRIPTOR_SETS);
+        if uses_update_after_bind {
+            pool_info = pool_info.flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND);
+        }
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
 
@@ -2437,7 +2554,29 @@ impl Context {
         info: &BindGroupLayoutInfo,
     ) -> Result<Handle<BindGroupLayout>, GPUError> {
         let max_descriptor_sets: u32 = 2048;
+        let supports_partially_bound = self
+            .descriptor_indexing_features
+            .descriptor_binding_partially_bound
+            == vk::TRUE;
+        let supports_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_uniform_buffer_update_after_bind
+            == vk::TRUE;
+        let supports_sampled_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_sampled_image_update_after_bind
+            == vk::TRUE;
+        let supports_storage_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_storage_buffer_update_after_bind
+            == vk::TRUE;
+        let supports_storage_image_uab = self
+            .descriptor_indexing_features
+            .descriptor_binding_storage_image_update_after_bind
+            == vk::TRUE;
         let mut bindings = Vec::new();
+        let mut flags = Vec::new();
+        let mut uses_update_after_bind = false;
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
                 let descriptor_type = match variable.var_type {
@@ -2462,6 +2601,26 @@ impl Context {
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
+                let mut binding_flags = vk::DescriptorBindingFlags::empty();
+                if supports_partially_bound {
+                    binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
+                }
+                let binding_supports_uab = match variable.var_type {
+                    BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
+                        supports_uab
+                    }
+                    BindGroupVariableType::DynamicStorage | BindGroupVariableType::Storage => {
+                        supports_storage_uab
+                    }
+                    BindGroupVariableType::SampledImage => supports_sampled_uab,
+                    BindGroupVariableType::StorageImage => supports_storage_image_uab,
+                };
+                if binding_supports_uab {
+                    binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
+                    uses_update_after_bind = true;
+                }
+
+                flags.push(binding_flags);
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
@@ -2473,10 +2632,21 @@ impl Context {
             }
         }
 
-        let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&bindings)
-            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
-            .build();
+        let mut layout_binding_info =
+            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
+
+        let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
+        if uses_update_after_bind {
+            layout_info =
+                layout_info.flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL);
+        }
+
+        let mut layout_binding_info = layout_binding_info.build();
+        if flags.iter().any(|f| !f.is_empty()) {
+            layout_info = layout_info.push_next(&mut layout_binding_info);
+        }
+
+        let layout_info = layout_info.build();
 
         let descriptor_set_layout = unsafe {
             self.device
@@ -2493,10 +2663,12 @@ impl Context {
             })
             .collect::<Vec<_>>();
 
-        let pool_info = vk::DescriptorPoolCreateInfo::builder()
+        let mut pool_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
-            .flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND)
             .max_sets(max_descriptor_sets);
+        if uses_update_after_bind {
+            pool_info = pool_info.flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND);
+        }
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
 
@@ -2979,11 +3151,16 @@ impl Context {
         Ok(pipeline_layout)
     }
 
-    fn create_empty_set_layout(device: &ash::Device) -> Result<vk::DescriptorSetLayout> {
-        let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&[])
-            .flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL)
-            .build();
+    fn create_empty_set_layout(
+        device: &ash::Device,
+        supports_update_after_bind: bool,
+    ) -> Result<vk::DescriptorSetLayout> {
+        let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[]);
+        if supports_update_after_bind {
+            layout_info =
+                layout_info.flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL);
+        }
+        let layout_info = layout_info.build();
 
         let layout = unsafe { device.create_descriptor_set_layout(&layout_info, None)? };
         Ok(layout)
