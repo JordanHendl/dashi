@@ -2,12 +2,13 @@ use std::marker::PhantomData;
 
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
+    GraphicsPipelineStateUpdate,
 };
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
 use crate::gpu::driver::types::Handle;
-use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2};
+use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2, Viewport};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
@@ -244,6 +245,12 @@ impl CommandStream<Graphics> {
 
     pub fn draw_indexed(&mut self, cmd: &DrawIndexed) {
         self.enc.draw_indexed(cmd);
+    }
+
+    pub fn update_viewport(&mut self, viewport: &Viewport) {
+        let mut update = GraphicsPipelineStateUpdate::default();
+        update.viewport = Some(*viewport);
+        self.enc.update_graphics_pipeline_state(&update);
     }
 
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {
