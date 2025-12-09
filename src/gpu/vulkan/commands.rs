@@ -441,7 +441,18 @@ impl CommandQueue {
             layer_count: cmd.range.layer_count,
         };
 
-        let dst_stage = usage_to_stages(cmd.new_usage);
+        let dst_stage = if cmd.new_usage.contains(UsageBits::PRESENT) {
+            // Present requires waiting for the producing stage; reuse the
+            // previous usage's stages rather than BOTTOM_OF_PIPE.
+            usage_to_stages(cmd.old_usage)
+        } else {
+            usage_to_stages(cmd.new_usage)
+        };
+        let src_stage = if cmd.new_usage.contains(UsageBits::PRESENT) {
+            usage_to_stages(cmd.old_usage)
+        } else {
+            self.last_op_stage
+        };
         let src_access = usage_to_access(cmd.old_usage);
         let dst_access = usage_to_access(cmd.new_usage);
 
@@ -468,7 +479,7 @@ impl CommandQueue {
         unsafe {
             ctx.device.cmd_pipeline_barrier(
                 self.cmd_buf,
-                self.last_op_stage,
+                src_stage,
                 dst_stage,
                 vk::DependencyFlags::empty(),
                 &[],
