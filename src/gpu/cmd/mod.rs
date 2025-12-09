@@ -92,10 +92,13 @@ impl CommandStream<Recording> {
 
     pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> CommandStream<Graphics> {
         self.enc.begin_drawing(cmd);
-        CommandStream {
+        let mut new = CommandStream {
             enc: self.enc,
             _state: PhantomData,
-        }
+        };
+
+        new.update_viewport(&cmd.viewport);
+        new
     }
 
     pub fn dispatch(mut self, cmd: &Dispatch) -> CommandStream<Compute> {

@@ -15,6 +15,7 @@ use winit::platform::run_return::EventLoopExtRunReturn;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     position: [f32; 2],
+    color: [f32; 3],
 }
 
 const NUM_TRANSFORMS: usize = 1024;
@@ -25,51 +26,17 @@ fn main() -> Result<(), GPUError> {
     // Describe storage buffers for the per-instance transforms.
     let shader_info = ShaderInfo {
         shader_type: ShaderType::All,
-        variables: &[
-            BindGroupVariable {
-                var_type: BindGroupVariableType::Storage,
-                binding: 0,
-                count: NUM_TRANSFORMS as u32,
-            },
-            BindGroupVariable {
-                var_type: BindGroupVariableType::SampledImage,
-                binding: 1,
-                count: NUM_TRANSFORMS as u32,
-            },
-        ],
+        variables: &[BindGroupVariable {
+            var_type: BindGroupVariableType::Storage,
+            binding: 0,
+            count: NUM_TRANSFORMS as u32,
+        }],
     };
 
     // Build the layout and table.
     let layout = BindTableLayoutBuilder::new("bindless_layout")
         .shader(shader_info)
         .build(&mut ctx)?;
-
-    let r = ctx.make_image(&ImageInfo {
-        debug_name: "bindless_triangle_r",
-        dim: [1, 1, 1],
-        format: Format::RGBA8,
-        mip_levels: 1,
-        initial_data: Some(&[255, 0, 0, 0]),
-        ..Default::default()
-    })?;
-
-    let g = ctx.make_image(&ImageInfo {
-        debug_name: "bindless_triangle_g",
-        dim: [1, 1, 1],
-        format: Format::RGBA8,
-        mip_levels: 1,
-        initial_data: Some(&[0, 255, 0, 0]),
-        ..Default::default()
-    })?;
-
-    let b = ctx.make_image(&ImageInfo {
-        debug_name: "bindless_triangle_b",
-        dim: [1, 1, 1],
-        format: Format::RGBA8,
-        mip_levels: 1,
-        initial_data: Some(&[0, 0, 255, 0]),
-        ..Default::default()
-    })?;
 
     // Allocate a dynamic buffer and bind it.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default())?;
@@ -120,50 +87,15 @@ fn main() -> Result<(), GPUError> {
         })
         .collect();
 
-    let sampler = ctx.make_sampler(&Default::default()).unwrap();
-    let samplers_gpu: Vec<IndexedResource> = vec![
-        IndexedResource {
-            resource: ShaderResource::SampledImage(
-                ImageView {
-                    img: r,
-                    ..Default::default()
-                },
-                sampler,
-            ),
-            slot: 0,
-        },
-        IndexedResource {
-            resource: ShaderResource::SampledImage(
-                ImageView {
-                    img: g,
-                    ..Default::default()
-                },
-                sampler,
-            ),
-            slot: 1,
-        },
-        IndexedResource {
-            resource: ShaderResource::SampledImage(
-                ImageView {
-                    img: b,
-                    ..Default::default()
-                },
-                sampler,
-            ),
-            slot: 2,
-        },
-    ];
-
     let table = BindTableBuilder::new("bindless_table")
         .layout(layout)
         .set(1)
         .binding(0, &transforms_gpu)
-        .binding(1, &samplers_gpu)
         .build(&mut ctx)?;
 
     // Bind group layout for the per-draw instance index.
     let instance_shader_info = ShaderInfo {
-        shader_type: ShaderType::All,
+        shader_type: ShaderType::Vertex,
         variables: &[BindGroupVariable {
             var_type: BindGroupVariableType::DynamicUniform,
             binding: 0,
@@ -185,12 +117,15 @@ fn main() -> Result<(), GPUError> {
     const VERTICES: [Vertex; 3] = [
         Vertex {
             position: [0.0, -0.5],
+            color: [1.0, 0.0, 0.0],
         },
         Vertex {
             position: [0.5, 0.5],
+            color: [0.0, 1.0, 0.0],
         },
         Vertex {
             position: [-0.5, 0.5],
+            color: [0.0, 0.0, 1.0],
         },
     ];
     const INDICES: [u32; 3] = [0, 1, 2];
@@ -246,11 +181,18 @@ fn main() -> Result<(), GPUError> {
         .add_subpass(&[AttachmentDescription::default()], None, &[])
         .build(&mut ctx)?;
 
-    let vertex_entries = [VertexEntryInfo {
-        format: ShaderPrimitiveType::Vec2,
-        location: 0,
-        offset: 0,
-    }];
+    let vertex_entries = [
+        VertexEntryInfo {
+            format: ShaderPrimitiveType::Vec2,
+            location: 0,
+            offset: 0,
+        },
+        VertexEntryInfo {
+            format: ShaderPrimitiveType::Vec3,
+            location: 1,
+            offset: std::mem::size_of::<[f32; 2]>(),
+        },
+    ];
 
     let vertex_shader = PipelineShaderInfo {
         stage: ShaderType::Vertex,
@@ -268,7 +210,7 @@ layout(set = 0, binding = 0) uniform InstanceData {
 
 layout(set = 1, binding = 0) readonly buffer TransformBuffer {
     mat4 transform;
-} transforms[1024];
+} transforms[];
 
 void main() {
     uint index = instance_data.transform_index;
@@ -296,7 +238,7 @@ layout(set = 0, binding = 0) uniform InstanceData {
     uint tex_id;
 };
 
-layout(set = 1, binding = 1) uniform sampler2D in_tex[1024];
+layout(set = 1, binding = 1) uniform sampler2D in_tex[];
 
 void main() {
     out_color = texture(in_tex[tex_id], in_coords);
@@ -364,12 +306,10 @@ void main() {
         if should_exit {
             break 'running;
         }
-        
-        println!("1");
+
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
-        println!("2");
         allocator.reset();
         ring.record(|list| {
             let ctx_ptr = &mut ctx as *mut _;
@@ -390,8 +330,6 @@ void main() {
                 clear_values,
                 ..Default::default()
             });
-            
-            drawing.update_viewport(&viewport);
 
             for slot in 0..transforms.len() {
                 let mut buf = allocator.bump().expect("allocator exhausted");
@@ -423,20 +361,17 @@ void main() {
         })
         .expect("Unable to record drawing commands!");
 
-        println!("3");
         // Submit our recorded commands
         ring.submit(&SubmitInfo {
             wait_sems: &[sem],
-            signal_sems: &[sems[0]],
+            signal_sems: &[sems[0], sems[1]],
             ..Default::default()
         })
         .unwrap();
-            
-        println!("4");
+
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
-        ctx.present_display(&display, &[sems[0]]).unwrap();
-        println!("5");
+        ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
     }
 
     ctx.destroy_dynamic_allocator(allocator);

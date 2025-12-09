@@ -381,7 +381,7 @@ impl Context {
             images: handles,
             loader,
             sc_loader: swap_loader,
-            frame_idx: 0,
+            frame_idx: 1,
             semaphores: sems,
             fences,
             views: view_handles,
