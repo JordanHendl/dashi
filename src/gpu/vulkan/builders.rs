@@ -14,6 +14,8 @@ use crate::{
 use crate::{Context, GPUError};
 use smallvec::SmallVec;
 
+use super::SampleCount;
+
 /// Builds a RenderPass via the builder pattern.
 pub struct RenderPassBuilder<'a> {
     debug_name: &'a str,
@@ -152,6 +154,12 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
     /// Specify the vertex input description.
     pub fn vertex_info(mut self, info: VertexDescriptionInfo<'a>) -> Self {
         self.vertex_info = Some(info);
+        self
+    }
+
+    /// Specify the vertex input description.
+    pub fn sample_count(mut self, info: SampleCount) -> Self {
+        self.details.sample_count = info;
         self
     }
 

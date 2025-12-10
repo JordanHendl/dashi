@@ -2611,11 +2611,7 @@ impl Context {
                     BindGroupVariableType::SampledImage => supports_sampled_uab,
                     BindGroupVariableType::StorageImage => supports_storage_image_uab,
                 };
-                if binding_supports_uab {
-                    binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
-                    uses_update_after_bind = true;
-                }
-
+           
                 flags.push(binding_flags);
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
@@ -2628,7 +2624,7 @@ impl Context {
             }
         }
 
-        let mut layout_binding_info =
+        let layout_binding_info =
             vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
 
         let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);

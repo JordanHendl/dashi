@@ -72,7 +72,10 @@ impl Timer {
 }
 
 fn main() {
-    let device = SelectedDevice::default();
+    let device = DeviceSelector::new()
+        .unwrap()
+        .select(DeviceFilter::default().add_required_type(DeviceType::Dedicated))
+        .expect("Unable to select device!");
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
@@ -269,9 +272,7 @@ void main() {
             ..Default::default()
         })
         .unwrap();
-    let render_sems: Vec<[Handle<Semaphore>; 2]> = (0..MAX_FRAMES_IN_FLIGHT)
-        .map(|_| ctx.make_semaphores(2).unwrap().try_into().unwrap())
-        .collect();
+    let render_sems = ctx.make_semaphores(3).unwrap();
     'running: loop {
         let frame_slot = ring.current_index();
         // Reset the allocator
@@ -377,16 +378,16 @@ void main() {
         })
         .unwrap();
         // Submit our recorded commands
-        ring
-            .submit(&SubmitInfo {
-                wait_sems: &[sem],
-                signal_sems: &render_sems[frame_slot],
-                ..Default::default()
-            })
-            .unwrap();
+        ring.submit(&SubmitInfo {
+            wait_sems: &[sem],
+            signal_sems: &[render_sems[frame_slot]],
+            ..Default::default()
+        })
+        .unwrap();
 
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
-        ctx.present_display(&display, &render_sems[frame_slot]).unwrap();
+        ctx.present_display(&display, &[render_sems[frame_slot]])
+            .unwrap();
     }
 }

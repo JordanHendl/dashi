@@ -49,7 +49,7 @@ fn main() -> Result<(), GPUError> {
         dim: [1, 1, 1],
         format: Format::RGBA8,
         mip_levels: 1,
-        initial_data: Some(&[255, 0, 0, 0]),
+        initial_data: Some(&[255, 0, 0, 255]),
         ..Default::default()
     })?;
 
@@ -58,7 +58,7 @@ fn main() -> Result<(), GPUError> {
         dim: [1, 1, 1],
         format: Format::RGBA8,
         mip_levels: 1,
-        initial_data: Some(&[0, 255, 0, 0]),
+        initial_data: Some(&[0, 255, 0, 255]),
         ..Default::default()
     })?;
 
@@ -67,7 +67,7 @@ fn main() -> Result<(), GPUError> {
         dim: [1, 1, 1],
         format: Format::RGBA8,
         mip_levels: 1,
-        initial_data: Some(&[0, 0, 255, 0]),
+        initial_data: Some(&[0, 0, 255, 255]),
         ..Default::default()
     })?;
 
@@ -83,18 +83,27 @@ fn main() -> Result<(), GPUError> {
     };
 
     for _ in 0..NUM_TRANSFORMS {
+        // Random uniform scale in [0.05, 0.15]
+        let s = 0.05 + rand() * 0.10;
+        let scale = Vec3::new(s, s, 1.0);
+
+        // Triangle is roughly in [-0.5, 0.5] in both axes.
+        // So its half-extent in clip space is about 0.5 * s.
+        let half_extent = 0.5 * s;
+
+        // Keep the *center* inside [-1 + half_extent, 1 - half_extent]
+        let max_x = 1.0 - half_extent;
+        let max_y = 1.0 - half_extent;
+
         let translation = Vec3::new(
-            rand() * 20.0 - 10.0,
-            rand() * 20.0 - 10.0,
-            rand() * 2.0 - 1.0,
+            rand() * 2.0 * max_x - max_x, // [-max_x, max_x]
+            rand() * 2.0 * max_y - max_y, // [-max_y, max_y]
+            0.0,                          // fixed depth
         );
-        let axis = Vec3::new(rand(), rand(), rand());
-        let rotation = if axis.length_squared() > 0.0001 {
-            Quat::from_axis_angle(axis.normalize(), rand() * std::f32::consts::TAU)
-        } else {
-            Quat::IDENTITY
-        };
-        let scale = Vec3::splat(0.2 + rand() * 0.8);
+
+        // 2D rotation around Z only (screen space)
+        let rotation = Quat::from_rotation_z(rand() * std::f32::consts::TAU);
+
         let matrix = Mat4::from_scale_rotation_translation(scale, rotation, translation);
         transforms.push(matrix.to_cols_array());
     }
@@ -220,6 +229,7 @@ fn main() -> Result<(), GPUError> {
         format: Format::RGBA8,
         mip_levels: 1,
         initial_data: None,
+        samples: SampleCount::S4,
         ..Default::default()
     })?;
 
@@ -243,7 +253,10 @@ fn main() -> Result<(), GPUError> {
     };
 
     let render_pass = RenderPassBuilder::new("bindless_triangle_rp", viewport)
-        .add_subpass(&[AttachmentDescription::default()], None, &[])
+        .add_subpass(&[AttachmentDescription {
+            samples: SampleCount::S4,
+            ..Default::default()
+        }], None, &[])
         .build(&mut ctx)?;
 
     let vertex_entries = [VertexEntryInfo {
@@ -317,6 +330,7 @@ void main() {
         .bind_table_layout(1, layout)
         .shader(vertex_shader)
         .shader(fragment_shader)
+        .sample_count(SampleCount::S4)
         .build(&mut ctx)?;
 
     let graphics_pipeline = GraphicsPipelineBuilder::new("bindless_triangle_pipeline")
@@ -332,7 +346,14 @@ void main() {
         })
         .unwrap();
 
-    let mut display = ctx.make_display(&Default::default()).unwrap();
+    let mut display = ctx.make_display(&DisplayInfo {
+        window: WindowInfo {
+            title: "bindless triangle".to_string(),
+            size: [WIDTH, HEIGHT],
+            resizable: false,
+        },
+        ..Default::default()
+    }).unwrap();
     let sems = ctx.make_semaphores(2).unwrap();
     'running: loop {
         // Reset the allocator
@@ -364,12 +385,10 @@ void main() {
         if should_exit {
             break 'running;
         }
-        
-        println!("1");
+
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
-        println!("2");
         allocator.reset();
         ring.record(|list| {
             let ctx_ptr = &mut ctx as *mut _;
@@ -391,12 +410,20 @@ void main() {
                 clear_values,
                 ..Default::default()
             });
-            
+
             drawing.update_viewport(&viewport);
 
             for slot in 0..transforms.len() {
+                #[repr(C)]
+                struct Index {
+                    tid: u32,
+                    texid: u32,
+                }
                 let mut buf = allocator.bump().expect("allocator exhausted");
-                buf.slice::<u32>()[0] = slot as u32;
+                buf.slice::<Index>()[0] = Index {
+                    tid: slot as u32,
+                    texid: slot as u32 % 3,
+                };
                 drawing.draw_indexed(&DrawIndexed {
                     vertices,
                     indices,
@@ -424,7 +451,6 @@ void main() {
         })
         .expect("Unable to record drawing commands!");
 
-        println!("3");
         // Submit our recorded commands
         ring.submit(&SubmitInfo {
             wait_sems: &[sem],
@@ -432,12 +458,10 @@ void main() {
             ..Default::default()
         })
         .unwrap();
-            
-        println!("4");
+
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
         ctx.present_display(&display, &[sems[0]]).unwrap();
-        println!("5");
     }
 
     ctx.destroy_dynamic_allocator(allocator);

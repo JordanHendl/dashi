@@ -1180,7 +1180,7 @@ impl Default for GraphicsPipelineDetails {
     fn default() -> Self {
         GraphicsPipelineDetails {
             topology: Topology::TriangleList,
-            culling: CullMode::Back,
+            culling: CullMode::None,
             front_face: VertexOrdering::Clockwise,
             depth_test: None,
             color_blend_states: vec![Default::default()],
