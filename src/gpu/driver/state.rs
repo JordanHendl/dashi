@@ -254,7 +254,10 @@ pub mod vulkan {
         (UsageBits::UAV_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
         (UsageBits::COPY_SRC, vk::PipelineStageFlags::TRANSFER),
         (UsageBits::COPY_DST, vk::PipelineStageFlags::TRANSFER),
-        (UsageBits::PRESENT, vk::PipelineStageFlags::BOTTOM_OF_PIPE),
+        // When transitioning to PRESENT we still need to synchronize with the
+        // producing stage (e.g., TRANSFER). Avoid BOTTOM_OF_PIPE, which is
+        // incompatible with non-empty access masks.
+        (UsageBits::PRESENT, vk::PipelineStageFlags::ALL_COMMANDS),
         (
             UsageBits::DEPTH_READ,
             vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
