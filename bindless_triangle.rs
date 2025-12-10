@@ -5,7 +5,7 @@ use dashi::builders::{
 };
 use dashi::driver::command::{BeginDrawing, CommandSink, DrawIndexed, EndDrawing};
 use dashi::*;
-use driver::command::BlitImage;
+use driver::command::MSImageResolve;
 use glam::{Mat4, Quat, Vec3};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
@@ -348,11 +348,10 @@ void main() {
 
             stream = drawing.stop_drawing();
 
-            // Blit the framebuffer to the display's image
-            stream.blit_images(&BlitImage {
+            // Resolve the multisampled framebuffer to the display's image
+            stream.resolve_images(&MSImageResolve {
                 src: color_view.img,
                 dst: img.img,
-                filter: Filter::Nearest,
                 ..Default::default()
             });
             // Transition the display image for presentation

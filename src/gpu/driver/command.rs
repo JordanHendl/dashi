@@ -2,7 +2,10 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ColorBlendState, ComputePipeline, CullMode, DepthInfo, DynamicBuffer, DynamicState, Fence, Filter, GraphicsPipeline, GraphicsPipelineDetails, Image, ImageView, QueueType, Rect2D, RenderPass, SampleCount, SubmitInfo2, Topology, VertexOrdering, Viewport
+    BindGroup, BindTable, Buffer, ClearValue, ColorBlendState, ComputePipeline, CullMode,
+    DepthInfo, DynamicBuffer, DynamicState, Fence, Filter, GraphicsPipeline,
+    GraphicsPipelineDetails, Image, ImageView, QueueType, Rect2D, RenderPass, SampleCount,
+    SubmitInfo2, Topology, VertexOrdering, Viewport,
 };
 
 use super::{
@@ -32,11 +35,12 @@ pub enum Op {
     CopyImageToBuffer = 11,
     CopyImage = 12,
     BlitImage = 13,
-    DebugMarkerBegin = 14,
-    DebugMarkerEnd = 15,
-    TransitionImage = 16,
-    BeginRenderPass = 17,
-    NextSubpass = 18,
+    ResolveImage = 14,
+    DebugMarkerBegin = 15,
+    DebugMarkerEnd = 16,
+    TransitionImage = 17,
+    BeginRenderPass = 18,
+    NextSubpass = 19,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -79,7 +83,7 @@ pub struct BeginRenderPass {
 #[derive(Default, Clone, Debug)]
 pub struct GraphicsPipelineStateUpdate {
     pub viewport: Option<Viewport>,
-//    ... others
+    //    ... others
 }
 
 #[repr(C)]
@@ -205,6 +209,19 @@ pub struct CopyImageBuffer {
 pub struct CopyImage {
     pub src: Handle<Image>,
     pub dst: Handle<Image>,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct MSImageResolve {
+    pub src: Handle<Image>,
+    pub dst: Handle<Image>,
+    pub src_range: SubresourceRange,
+    pub dst_range: SubresourceRange,
+    /// Region in the source image.
+    pub src_region: Rect2D,
+    /// Region in the destination image.
+    pub dst_region: Rect2D,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -422,6 +439,11 @@ impl CommandEncoder {
         self.push(Op::BlitImage, cmd);
     }
 
+    /// Resolve a multisampled image into a non-multisampled image.
+    pub fn resolve_image(&mut self, cmd: &MSImageResolve) {
+        self.push(Op::ResolveImage, cmd);
+    }
+
     /// Transition an image to presentation layout.
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         let range = SubresourceRange::default();
@@ -469,6 +491,7 @@ impl CommandEncoder {
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
                 Op::CopyBufferToImage => sink.copy_buffer_to_image(cmd.payload()),
                 Op::CopyImage => sink.copy_image(cmd.payload()),
+                Op::ResolveImage => sink.resolve_image(cmd.payload()),
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload()),
                 Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload()),
                 Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload()),
@@ -636,6 +659,7 @@ impl Op {
             x if x == Op::CopyBufferToImage as u16 => Some(Op::CopyBufferToImage),
             x if x == Op::CopyImageToBuffer as u16 => Some(Op::CopyImageToBuffer),
             x if x == Op::CopyImage as u16 => Some(Op::CopyImage),
+            x if x == Op::ResolveImage as u16 => Some(Op::ResolveImage),
             x if x == Op::BlitImage as u16 => Some(Op::BlitImage),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
@@ -661,6 +685,7 @@ pub trait CommandSink {
     fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage);
     fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer);
     fn copy_image(&mut self, cmd: &CopyImage);
+    fn resolve_image(&mut self, cmd: &MSImageResolve);
     fn transition_image(&mut self, cmd: &TransitionImage);
     fn next_subpass(&mut self, cmd: &NextSubpass);
     fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;

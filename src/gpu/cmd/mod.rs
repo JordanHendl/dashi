@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
-    GraphicsPipelineStateUpdate,
+    GraphicsPipelineStateUpdate, MSImageResolve,
 };
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
@@ -78,6 +78,10 @@ impl CommandStream<Recording> {
         self.enc.blit_image(cmd);
     }
 
+    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+        self.enc.resolve_image(cmd);
+    }
+
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
         self.enc.prepare_for_presentation(image);
     }
@@ -125,6 +129,10 @@ impl CommandStream<Compute> {
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
         self.enc.blit_image(cmd);
+    }
+
+    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+        self.enc.resolve_image(cmd);
     }
 
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
@@ -193,6 +201,10 @@ impl CommandStream<PendingGraphics> {
         self.enc.blit_image(cmd);
     }
 
+    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+        self.enc.resolve_image(cmd);
+    }
+
     pub fn next_subpass(&mut self) {
         self.enc.next_subpass();
     }
@@ -232,6 +244,10 @@ impl CommandStream<Graphics> {
 
     pub fn blit_images(&mut self, cmd: &BlitImage) {
         self.enc.blit_image(cmd);
+    }
+
+    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+        self.enc.resolve_image(cmd);
     }
 
     pub fn next_subpass(&mut self) {
