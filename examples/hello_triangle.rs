@@ -262,14 +262,18 @@ void main() {
     let mut timer = Timer::new();
 
     timer.start();
+    const MAX_FRAMES_IN_FLIGHT: usize = 3;
     let mut ring = ctx
         .make_command_ring(&CommandQueueInfo2 {
             debug_name: "cmd",
             ..Default::default()
         })
         .unwrap();
-    let sems = ctx.make_semaphores(2).unwrap();
+    let render_sems: Vec<[Handle<Semaphore>; 2]> = (0..MAX_FRAMES_IN_FLIGHT)
+        .map(|_| ctx.make_semaphores(2).unwrap().try_into().unwrap())
+        .collect();
     'running: loop {
+        let frame_slot = ring.current_index();
         // Reset the allocator
         allocator.reset();
 
@@ -372,15 +376,16 @@ void main() {
         })
         .unwrap();
         // Submit our recorded commands
-        ring.submit(&SubmitInfo {
-            wait_sems: &[sem],
-            signal_sems: &[sems[0], sems[1]],
-            ..Default::default()
-        })
-        .unwrap();
+        ring
+            .submit(&SubmitInfo {
+                wait_sems: &[sem],
+                signal_sems: &render_sems[frame_slot],
+                ..Default::default()
+            })
+            .unwrap();
 
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
-        ctx.present_display(&display, &[sems[0], sems[1]]).unwrap();
+        ctx.present_display(&display, &render_sems[frame_slot]).unwrap();
     }
 }

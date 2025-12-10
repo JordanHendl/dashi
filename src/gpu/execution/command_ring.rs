@@ -40,6 +40,11 @@ impl CommandRing {
         })
     }
 
+    /// Returns the index of the command buffer currently being recorded.
+    pub fn current_index(&self) -> usize {
+        self.curr as usize
+    }
+
     pub fn append<T>(&mut self, mut record_func: T) -> Result<()>
     where
         T: FnMut(&mut CommandQueue),

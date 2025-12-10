@@ -79,6 +79,11 @@ impl Display {
         &mut self.event_loop
     }
 
+    #[cfg(not(feature = "dashi-openxr"))]
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
     #[cfg(feature = "dashi-openxr")]
     pub fn xr_instance(&self) -> &xr::Instance {
         &self.xr_instance
