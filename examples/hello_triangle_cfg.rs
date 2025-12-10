@@ -321,6 +321,7 @@ fn main() {
 
                 let mut draw = stream.begin_drawing(&BeginDrawing {
                     viewport,
+                    render_pass,
                     pipeline,
                     color_attachments: subpass_targets.color_views(),
                     depth_attachment: subpass_targets.depth_view(),

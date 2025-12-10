@@ -713,6 +713,7 @@ mod tests {
 
             cmd.begin_drawing(&BeginDrawing {
                 viewport,
+                render_pass,
                 pipeline,
                 color_attachments,
                 depth_attachment: Some(depth_view),
@@ -732,15 +733,10 @@ mod tests {
         ring.wait_all().expect("wait for validation work");
 
         {
-            let pipeline_rp = ctx
-                .gfx_pipelines
-                .get_ref(pipeline)
-                .expect("pipeline should exist")
-                .render_pass;
             let rp = ctx
                 .render_passes
-                .get_ref(pipeline_rp)
-                .expect("pipeline render pass should exist");
+                .get_ref(render_pass)
+                .expect("render pass should exist");
             assert_eq!(rp.width, WIDTH);
             assert_eq!(rp.height, HEIGHT);
         }

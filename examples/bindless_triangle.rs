@@ -384,6 +384,7 @@ void main() {
 
             let mut drawing = stream.begin_drawing(&BeginDrawing {
                 viewport,
+                render_pass,
                 pipeline: graphics_pipeline,
                 color_attachments,
                 depth_attachment: None,
