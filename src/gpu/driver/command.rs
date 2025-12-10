@@ -86,6 +86,7 @@ pub struct GraphicsPipelineStateUpdate {
 #[derive(Default, Clone, Copy, Debug)]
 pub struct BeginDrawing {
     pub viewport: Viewport,
+    pub render_pass: Handle<RenderPass>,
     pub pipeline: Handle<GraphicsPipeline>,
     pub color_attachments: [Option<ImageView>; 8],
     pub depth_attachment: Option<ImageView>,

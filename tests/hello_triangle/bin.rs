@@ -324,6 +324,7 @@ void main() {
                         },
                         ..Default::default()
                     },
+                    render_pass,
                     pipeline: graphics_pipeline,
                     color_attachments: [Some(fb_view), None, None, None],
                     depth_attachment: None,

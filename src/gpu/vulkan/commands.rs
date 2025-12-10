@@ -824,7 +824,7 @@ impl CommandSink for CommandQueue {
                 Layout::DepthStencilAttachment,
             );
         }
-        let (pipeline_rp, pipeline_subpass, layout_handle) = {
+        let (pipeline_rp_layout, pipeline_subpass, layout_handle) = {
             let gfx = self
                 .ctx_ref()
                 .gfx_pipelines
@@ -834,7 +834,7 @@ impl CommandSink for CommandQueue {
             (gfx.render_pass, gfx.subpass as usize, gfx.layout)
         };
 
-        if self.curr_rp.map_or(false, |rp| rp == pipeline_rp) {
+        if self.curr_rp.map_or(false, |rp| rp == cmd.render_pass) {
             return;
         }
 
@@ -859,20 +859,29 @@ impl CommandSink for CommandQueue {
             }
         }
 
-        self.curr_rp = Some(pipeline_rp);
+        self.curr_rp = Some(cmd.render_pass);
         self.curr_subpass = Some(0);
 
-        let (rp_raw, mut fb, rp_subpass_samples, attachment_formats, mut rp_width, mut rp_height) = {
+        let (
+            rp_raw,
+            mut fb,
+            rp_subpass_samples,
+            rp_subpass_formats,
+            attachment_formats,
+            mut rp_width,
+            mut rp_height,
+        ) = {
             let rp = self
                 .ctx_ref()
                 .render_passes
-                .get_ref(pipeline_rp)
+                .get_ref(cmd.render_pass)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
             (
                 rp.raw,
                 rp.fb,
                 rp.subpass_samples.clone(),
+                rp.subpass_formats.clone(),
                 rp.attachment_formats.clone(),
                 rp.width,
                 rp.height,
@@ -902,6 +911,39 @@ impl CommandSink for CommandQueue {
             ) {
                 panic!("{}", err);
             }
+
+            let pipeline_rp = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(pipeline_rp_layout)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+
+            let pipeline_subpass_samples = pipeline_rp
+                .subpass_samples
+                .get(pipeline_subpass)
+                .expect("pipeline subpass index should be valid");
+            let pipeline_subpass_formats = pipeline_rp
+                .subpass_formats
+                .get(pipeline_subpass)
+                .expect("pipeline subpass index should be valid");
+
+            let rp_subpass_samples = rp_subpass_samples
+                .get(pipeline_subpass)
+                .expect("render pass subpass index should be valid");
+            let rp_subpass_formats = rp_subpass_formats
+                .get(pipeline_subpass)
+                .expect("render pass subpass index should be valid");
+
+            assert_eq!(
+                rp_subpass_samples, pipeline_subpass_samples,
+                "input render pass subpass samples do not match pipeline layout",
+            );
+
+            assert_eq!(
+                rp_subpass_formats, pipeline_subpass_formats,
+                "input render pass subpass formats do not match pipeline layout",
+            );
         }
 
         let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
@@ -957,7 +999,10 @@ impl CommandSink for CommandQueue {
                 )
                 .unwrap();
             {
-                let rp_mut = ctx.render_passes.get_mut_ref(pipeline_rp).unwrap();
+                let rp_mut = ctx
+                    .render_passes
+                    .get_mut_ref(cmd.render_pass)
+                    .unwrap();
                 unsafe {
                     ctx.device.destroy_framebuffer(rp_mut.fb, None);
                 }
