@@ -1010,10 +1010,7 @@ impl CommandSink for CommandQueue {
                 )
                 .unwrap();
             {
-                let rp_mut = ctx
-                    .render_passes
-                    .get_mut_ref(cmd.render_pass)
-                    .unwrap();
+                let rp_mut = ctx.render_passes.get_mut_ref(cmd.render_pass).unwrap();
                 unsafe {
                     ctx.device.destroy_framebuffer(rp_mut.fb, None);
                 }
@@ -1229,6 +1226,98 @@ impl CommandSink for CommandQueue {
                 dst_data.layouts[dst_mip],
                 &regions,
                 cmd.filter.into(),
+            );
+
+            self.update_last_access(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::AccessFlags::TRANSFER_WRITE,
+            );
+        }
+    }
+
+    fn resolve_image(&mut self, cmd: &crate::gpu::driver::command::MSImageResolve) {
+        self.ensure_image_state(
+            cmd.src,
+            cmd.src_range,
+            UsageBits::COPY_SRC,
+            Layout::TransferSrc,
+        );
+        self.ensure_image_state(
+            cmd.dst,
+            cmd.dst_range,
+            UsageBits::COPY_DST,
+            Layout::TransferDst,
+        );
+
+        unsafe {
+            let src_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.src)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+            let dst_data = self
+                .ctx_ref()
+                .images
+                .get_ref(cmd.dst)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+
+            let width = match (cmd.src_region.w, cmd.dst_region.w) {
+                (0, 0) => src_data.dim[0].min(dst_data.dim[0]),
+                (s, 0) => s,
+                (0, d) => d,
+                (s, d) => s.min(d),
+            }
+            .max(1);
+            let height = match (cmd.src_region.h, cmd.dst_region.h) {
+                (0, 0) => src_data.dim[1].min(dst_data.dim[1]),
+                (s, 0) => s,
+                (0, d) => d,
+                (s, d) => s.min(d),
+            }
+            .max(1);
+
+            let src_mip = cmd.src_range.base_mip as usize;
+            let dst_mip = cmd.dst_range.base_mip as usize;
+
+            let regions = [vk::ImageResolve {
+                src_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: cmd.src_range.base_mip,
+                    base_array_layer: cmd.src_range.base_layer,
+                    layer_count: cmd.src_range.layer_count,
+                },
+                src_offset: vk::Offset3D {
+                    x: cmd.src_region.x as i32,
+                    y: cmd.src_region.y as i32,
+                    z: 0,
+                },
+                dst_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: cmd.dst_range.base_mip,
+                    base_array_layer: cmd.dst_range.base_layer,
+                    layer_count: cmd.dst_range.layer_count,
+                },
+                dst_offset: vk::Offset3D {
+                    x: cmd.dst_region.x as i32,
+                    y: cmd.dst_region.y as i32,
+                    z: 0,
+                },
+                extent: vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                },
+            }];
+
+            self.ctx_ref().device.cmd_resolve_image(
+                self.cmd_buf,
+                src_data.img,
+                src_data.layouts[src_mip],
+                dst_data.img,
+                dst_data.layouts[dst_mip],
+                &regions,
             );
 
             self.update_last_access(

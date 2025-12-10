@@ -5,7 +5,7 @@ use dashi::builders::{
 };
 use dashi::driver::command::{BeginDrawing, CommandSink, DrawIndexed, EndDrawing};
 use dashi::*;
-use driver::command::BlitImage;
+use driver::command::MSImageResolve;
 use glam::{Mat4, Quat, Vec3};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
@@ -253,10 +253,14 @@ fn main() -> Result<(), GPUError> {
     };
 
     let render_pass = RenderPassBuilder::new("bindless_triangle_rp", viewport)
-        .add_subpass(&[AttachmentDescription {
-            samples: SampleCount::S4,
-            ..Default::default()
-        }], None, &[])
+        .add_subpass(
+            &[AttachmentDescription {
+                samples: SampleCount::S4,
+                ..Default::default()
+            }],
+            None,
+            &[],
+        )
         .build(&mut ctx)?;
 
     let vertex_entries = [VertexEntryInfo {
@@ -346,14 +350,16 @@ void main() {
         })
         .unwrap();
 
-    let mut display = ctx.make_display(&DisplayInfo {
-        window: WindowInfo {
-            title: "bindless triangle".to_string(),
-            size: [WIDTH, HEIGHT],
-            resizable: false,
-        },
-        ..Default::default()
-    }).unwrap();
+    let mut display = ctx
+        .make_display(&DisplayInfo {
+            window: WindowInfo {
+                title: "bindless triangle".to_string(),
+                size: [WIDTH, HEIGHT],
+                resizable: false,
+            },
+            ..Default::default()
+        })
+        .unwrap();
     let sems = ctx.make_semaphores(2).unwrap();
     'running: loop {
         // Reset the allocator
@@ -437,11 +443,10 @@ void main() {
 
             stream = drawing.stop_drawing();
 
-            // Blit the framebuffer to the display's image
-            stream.blit_images(&BlitImage {
+            // Resolve the multisampled framebuffer to the display's image
+            stream.resolve_images(&MSImageResolve {
                 src: color_view.img,
                 dst: img.img,
-                filter: Filter::Nearest,
                 ..Default::default()
             });
             // Transition the display image for presentation
