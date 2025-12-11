@@ -1281,44 +1281,95 @@ impl CommandSink for CommandQueue {
             let src_mip = cmd.src_range.base_mip as usize;
             let dst_mip = cmd.dst_range.base_mip as usize;
 
-            let regions = [vk::ImageResolve {
-                src_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    mip_level: cmd.src_range.base_mip,
-                    base_array_layer: cmd.src_range.base_layer,
-                    layer_count: cmd.src_range.layer_count,
-                },
-                src_offset: vk::Offset3D {
-                    x: cmd.src_region.x as i32,
-                    y: cmd.src_region.y as i32,
-                    z: 0,
-                },
-                dst_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    mip_level: cmd.dst_range.base_mip,
-                    base_array_layer: cmd.dst_range.base_layer,
-                    layer_count: cmd.dst_range.layer_count,
-                },
-                dst_offset: vk::Offset3D {
-                    x: cmd.dst_region.x as i32,
-                    y: cmd.dst_region.y as i32,
-                    z: 0,
-                },
-                extent: vk::Extent3D {
-                    width,
-                    height,
-                    depth: 1,
-                },
-            }];
+            if src_data.samples == SampleCount::S1 {
+                let regions = [vk::ImageBlit {
+                    src_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: cmd.src_range.base_mip,
+                        base_array_layer: cmd.src_range.base_layer,
+                        layer_count: cmd.src_range.layer_count,
+                    },
+                    src_offsets: [
+                        vk::Offset3D {
+                            x: cmd.src_region.x as i32,
+                            y: cmd.src_region.y as i32,
+                            z: 0,
+                        },
+                        vk::Offset3D {
+                            x: cmd.src_region.x.saturating_add(width) as i32,
+                            y: cmd.src_region.y.saturating_add(height) as i32,
+                            z: 1,
+                        },
+                    ],
+                    dst_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: cmd.dst_range.base_mip,
+                        base_array_layer: cmd.dst_range.base_layer,
+                        layer_count: cmd.dst_range.layer_count,
+                    },
+                    dst_offsets: [
+                        vk::Offset3D {
+                            x: cmd.dst_region.x as i32,
+                            y: cmd.dst_region.y as i32,
+                            z: 0,
+                        },
+                        vk::Offset3D {
+                            x: cmd.dst_region.x.saturating_add(width) as i32,
+                            y: cmd.dst_region.y.saturating_add(height) as i32,
+                            z: 1,
+                        },
+                    ],
+                }];
 
-            self.ctx_ref().device.cmd_resolve_image(
-                self.cmd_buf,
-                src_data.img,
-                src_data.layouts[src_mip],
-                dst_data.img,
-                dst_data.layouts[dst_mip],
-                &regions,
-            );
+                self.ctx_ref().device.cmd_blit_image(
+                    self.cmd_buf,
+                    src_data.img,
+                    src_data.layouts[src_mip],
+                    dst_data.img,
+                    dst_data.layouts[dst_mip],
+                    &regions,
+                    vk::Filter::NEAREST,
+                );
+            } else {
+                let regions = [vk::ImageResolve {
+                    src_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: cmd.src_range.base_mip,
+                        base_array_layer: cmd.src_range.base_layer,
+                        layer_count: cmd.src_range.layer_count,
+                    },
+                    src_offset: vk::Offset3D {
+                        x: cmd.src_region.x as i32,
+                        y: cmd.src_region.y as i32,
+                        z: 0,
+                    },
+                    dst_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: cmd.dst_range.base_mip,
+                        base_array_layer: cmd.dst_range.base_layer,
+                        layer_count: cmd.dst_range.layer_count,
+                    },
+                    dst_offset: vk::Offset3D {
+                        x: cmd.dst_region.x as i32,
+                        y: cmd.dst_region.y as i32,
+                        z: 0,
+                    },
+                    extent: vk::Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    },
+                }];
+
+                self.ctx_ref().device.cmd_resolve_image(
+                    self.cmd_buf,
+                    src_data.img,
+                    src_data.layouts[src_mip],
+                    dst_data.img,
+                    dst_data.layouts[dst_mip],
+                    &regions,
+                );
+            }
 
             self.update_last_access(
                 vk::PipelineStageFlags::TRANSFER,
