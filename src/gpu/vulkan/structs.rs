@@ -334,6 +334,40 @@ pub struct ContextInfo {
     pub device: SelectedDevice,
 }
 
+/// A snapshot of hardware limits exposed through the [`Context`].
+///
+/// All fields are expressed in API-agnostic terms so they can be used directly
+/// when deciding how many resources to bind or how large buffers can be in
+/// shader-visible memory.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ContextLimits {
+    /// Maximum number of sampler bindings that a single shader stage can see
+    /// across all currently bound bind tables.
+    pub max_sampler_array_len: u32,
+    /// Maximum number of sampled textures that a single shader stage can read
+    /// from at once.
+    pub max_sampled_texture_array_len: u32,
+    /// Maximum number of storage textures that a single shader stage can write
+    /// to or read from.
+    pub max_storage_texture_array_len: u32,
+    /// Maximum size, in bytes, of any single uniform/constant buffer binding
+    /// that is visible to shaders.
+    pub max_uniform_buffer_range: u32,
+    /// Maximum size, in bytes, of any single storage buffer binding that is
+    /// visible to shaders.
+    pub max_storage_buffer_range: u32,
+    /// Maximum total size, in bytes, of push constant data provided to shaders
+    /// via [`crate::gpu::cmd::CommandStream::push_constants`].
+    pub max_push_constant_size: u32,
+    /// Maximum number of color attachments that can be written in a single
+    /// render pass.
+    pub max_color_attachments: u32,
+    /// Maximum number of bind groups/bind tables that can be bound
+    /// simultaneously.
+    pub max_bound_bind_groups: u32,
+}
+
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IndirectCommand {
