@@ -1814,7 +1814,7 @@ impl Context {
         }
     }
 
-    pub fn map_buffer_offset_mut<T>(&mut self, view: BufferView, offset: u32) -> Result<&mut [T]> {
+    pub fn map_buffer_mut<T>(&mut self, view: BufferView) -> Result<&mut [T]> {
         let buf = match self.buffers.get_ref(view.handle) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
@@ -1823,7 +1823,7 @@ impl Context {
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        let base_offset = buf.offset as u64 + view.offset + offset as u64;
+        let base_offset = buf.offset as u64 + view.offset as u64;
         typed_map = unsafe { typed_map.add(base_offset as usize) };
         let buffer_size = buf.size as u64;
         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -1837,7 +1837,7 @@ impl Context {
         });
     }
 
-    pub fn map_buffer_offset<T>(&self, view: BufferView, offset: u32) -> Result<&[T]> {
+    pub fn map_buffer<T>(&mut self, view: BufferView) -> Result<&[T]> {
         let buf = match self.buffers.get_ref(view.handle) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
@@ -1846,7 +1846,7 @@ impl Context {
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        let base_offset = buf.offset as u64 + view.offset + offset as u64;
+        let base_offset = buf.offset as u64 + view.offset;
         typed_map = unsafe { typed_map.add(base_offset as usize) };
         let buffer_size = buf.size as u64;
         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -1858,14 +1858,6 @@ impl Context {
         return Ok(unsafe {
             std::slice::from_raw_parts(typed_map, size as usize / std::mem::size_of::<T>())
         });
-    }
-
-    pub fn map_buffer_mut<T>(&mut self, view: BufferView) -> Result<&mut [T]> {
-        self.map_buffer_offset_mut(view, 0)
-    }
-
-    pub fn map_buffer<T>(&mut self, view: BufferView) -> Result<&[T]> {
-        self.map_buffer_offset(view, 0)
     }
 
     pub fn unmap_buffer(&self, buf: Handle<Buffer>) -> Result<()> {
