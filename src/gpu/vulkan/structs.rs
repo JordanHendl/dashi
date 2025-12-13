@@ -931,6 +931,12 @@ impl BufferView {
     }
 }
 
+impl From<Handle<Buffer>> for BufferView {
+    fn from(value: Handle<Buffer>) -> Self {
+        BufferView::new(value)
+    }
+}
+
 #[derive(Debug, Clone, Hash)]
 pub enum ShaderResource {
     Buffer(BufferView),
