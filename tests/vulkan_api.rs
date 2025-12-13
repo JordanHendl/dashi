@@ -31,7 +31,7 @@ fn test_buffer() {
 
     let buffer = buffer_res.unwrap();
 
-    let mapped_res = ctx.map_buffer::<u8>(buffer);
+    let mapped_res = ctx.map_buffer::<u8>(BufferView::new(buffer));
     assert!(mapped_res.is_ok());
 
     let mapped = mapped_res.unwrap();
@@ -236,11 +236,11 @@ outputData[index] = inputData[index] + num_to_add;
             layout: bg_layout,
             bindings: &[
                 BindingInfo {
-                    resource: ShaderResource::StorageBuffer(input),
+                    resource: ShaderResource::StorageBuffer(BufferView::new(input)),
                     binding: 0,
                 },
                 BindingInfo {
-                    resource: ShaderResource::StorageBuffer(output),
+                    resource: ShaderResource::StorageBuffer(BufferView::new(output)),
                     binding: 1,
                 },
                 BindingInfo {

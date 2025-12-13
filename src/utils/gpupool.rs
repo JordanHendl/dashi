@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::QueueType;
 use crate::{
-    cmd::Recording, gpu::driver::command::CopyBuffer, Buffer, BufferInfo, CommandQueue,
+    cmd::Recording, gpu::driver::command::CopyBuffer, Buffer, BufferInfo, BufferView, CommandQueue,
     CommandStream, Context, MemoryVisibility,
 };
 
@@ -61,7 +61,7 @@ impl<T> GPUPool<T> {
         b.visibility = MemoryVisibility::CpuAndGpu;
         let staging = ctx.make_buffer(&b)?;
 
-        let mapped = ctx.map_buffer_mut::<u8>(staging)?;
+        let mapped = ctx.map_buffer_mut::<u8>(BufferView::new(staging))?;
         let pool = Pool::new_preallocated(mapped.as_mut_ptr(), len);
 
         Ok(Self {
@@ -166,7 +166,7 @@ impl DynamicGPUPool {
         b.visibility = MemoryVisibility::CpuAndGpu;
         let staging = ctx.make_buffer(&b)?;
 
-        let mapped = ctx.map_buffer_mut::<u8>(staging)?;
+        let mapped = ctx.map_buffer_mut::<u8>(BufferView::new(staging))?;
         let pool = DynamicPool::new_preallocated(
             mapped.as_mut_ptr(),
             len,

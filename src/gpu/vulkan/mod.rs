@@ -426,7 +426,7 @@ mod tests {
                         binding: 0,
                     },
                     BindingInfo {
-                        resource: ShaderResource::Buffer(uniform_buffer),
+                        resource: ShaderResource::Buffer(BufferView::new(uniform_buffer)),
                         binding: 1,
                     },
                 ],
@@ -462,7 +462,9 @@ mod tests {
                         binding: 1,
                         resources: &[IndexedResource {
                             slot: 0,
-                            resource: ShaderResource::StorageBuffer(storage_buffer),
+                            resource: ShaderResource::StorageBuffer(BufferView::new(
+                                storage_buffer,
+                            )),
                         }],
                     },
                 ],
@@ -1812,12 +1814,8 @@ impl Context {
         }
     }
 
-    pub fn map_buffer_offset_mut<T>(
-        &mut self,
-        buf: Handle<Buffer>,
-        offset: u32,
-    ) -> Result<&mut [T]> {
-        let buf = match self.buffers.get_ref(buf) {
+    pub fn map_buffer_offset_mut<T>(&mut self, view: BufferView, offset: u32) -> Result<&mut [T]> {
+        let buf = match self.buffers.get_ref(view.handle) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
         };
@@ -1825,14 +1823,22 @@ impl Context {
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        typed_map = unsafe { typed_map.offset(buf.offset as isize + offset as isize) };
+        let base_offset = buf.offset as u64 + view.offset + offset as u64;
+        typed_map = unsafe { typed_map.add(base_offset as usize) };
+        let buffer_size = buf.size as u64;
+        let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+        let size = if view.size == 0 {
+            available
+        } else {
+            view.size.min(available)
+        };
         return Ok(unsafe {
-            std::slice::from_raw_parts_mut(typed_map, buf.size as usize / std::mem::size_of::<T>())
+            std::slice::from_raw_parts_mut(typed_map, size as usize / std::mem::size_of::<T>())
         });
     }
 
-    pub fn map_buffer_offset<T>(&self, buf: Handle<Buffer>, offset: u32) -> Result<&[T]> {
-        let buf = match self.buffers.get_ref(buf) {
+    pub fn map_buffer_offset<T>(&self, view: BufferView, offset: u32) -> Result<&[T]> {
+        let buf = match self.buffers.get_ref(view.handle) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
         };
@@ -1840,40 +1846,26 @@ impl Context {
         let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        typed_map = unsafe { typed_map.offset(buf.offset as isize + offset as isize) };
+        let base_offset = buf.offset as u64 + view.offset + offset as u64;
+        typed_map = unsafe { typed_map.add(base_offset as usize) };
+        let buffer_size = buf.size as u64;
+        let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+        let size = if view.size == 0 {
+            available
+        } else {
+            view.size.min(available)
+        };
         return Ok(unsafe {
-            std::slice::from_raw_parts(typed_map, buf.size as usize / std::mem::size_of::<T>())
+            std::slice::from_raw_parts(typed_map, size as usize / std::mem::size_of::<T>())
         });
     }
 
-    pub fn map_buffer_mut<T>(&mut self, buf: Handle<Buffer>) -> Result<&mut [T]> {
-        let buf = match self.buffers.get_ref(buf) {
-            Some(it) => it,
-            None => return Err(GPUError::SlotError()),
-        };
-
-        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
-        let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
-        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        typed_map = unsafe { typed_map.offset(buf.offset as isize) };
-        return Ok(unsafe {
-            std::slice::from_raw_parts_mut(typed_map, buf.size as usize / std::mem::size_of::<T>())
-        });
+    pub fn map_buffer_mut<T>(&mut self, view: BufferView) -> Result<&mut [T]> {
+        self.map_buffer_offset_mut(view, 0)
     }
 
-    pub fn map_buffer<T>(&mut self, buf: Handle<Buffer>) -> Result<&[T]> {
-        let buf = match self.buffers.get_ref(buf) {
-            Some(it) => it,
-            None => return Err(GPUError::SlotError()),
-        };
-
-        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
-        let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
-        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
-        typed_map = unsafe { typed_map.offset(buf.offset as isize) };
-        return Ok(unsafe {
-            std::slice::from_raw_parts(typed_map, buf.size as usize / std::mem::size_of::<T>())
-        });
+    pub fn map_buffer<T>(&mut self, view: BufferView) -> Result<&[T]> {
+        self.map_buffer_offset(view, 0)
     }
 
     pub fn unmap_buffer(&self, buf: Handle<Buffer>) -> Result<()> {
@@ -1918,7 +1910,7 @@ impl Context {
                 self.destroy_buffer(staging);
             }
             MemoryVisibility::CpuAndGpu => {
-                let mapped: &mut [u8] = self.map_buffer_mut(buf)?;
+                let mapped: &mut [u8] = self.map_buffer_mut(BufferView::new(buf))?;
                 mapped.copy_from_slice(unsafe { info.initial_data.unwrap_unchecked() });
                 self.unmap_buffer(buf)?;
             }
@@ -2051,7 +2043,7 @@ impl Context {
         return Ok(DynamicAllocator {
             allocator: offset_allocator::Allocator::new(info.byte_size, info.num_allocations),
             pool: buffer,
-            ptr: self.map_buffer_mut(buffer)?.as_mut_ptr(),
+            ptr: self.map_buffer_mut(BufferView::new(buffer))?.as_mut_ptr(),
             min_alloc_size,
         });
     }
@@ -2782,12 +2774,19 @@ impl Context {
         for binding_info in info.bindings.iter() {
             for res in binding_info.resources {
                 match &res.resource {
-                    ShaderResource::Buffer(handle) => {
-                        let buffer = self.buffers.get_ref(*handle).unwrap();
+                    ShaderResource::Buffer(view) => {
+                        let buffer = self.buffers.get_ref(view.handle).unwrap();
+                        let buffer_size = buffer.size as u64;
+                        let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+                        let size = if view.size == 0 {
+                            available
+                        } else {
+                            view.size.min(available)
+                        };
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
-                            .offset(buffer.offset as u64)
-                            .range(buffer.size as u64)
+                            .offset(buffer.offset as u64 + view.offset)
+                            .range(size)
                             .build();
 
                         buffer_infos.push(buffer_info);
@@ -2865,13 +2864,20 @@ impl Context {
 
                         write_descriptor_sets.push(write_descriptor_set);
                     }
-                    ShaderResource::StorageBuffer(handle) => {
-                        let buffer = self.buffers.get_ref(*handle).unwrap();
+                    ShaderResource::StorageBuffer(view) => {
+                        let buffer = self.buffers.get_ref(view.handle).unwrap();
+                        let buffer_size = buffer.size as u64;
+                        let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+                        let size = if view.size == 0 {
+                            available
+                        } else {
+                            view.size.min(available)
+                        };
 
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
-                            .offset(buffer.offset as u64)
-                            .range(buffer.size as u64)
+                            .offset(buffer.offset as u64 + view.offset)
+                            .range(size)
                             .build();
 
                         buffer_infos.push(buffer_info);
@@ -2957,13 +2963,20 @@ impl Context {
 
         for binding_info in info.bindings.iter() {
             match &binding_info.resource {
-                ShaderResource::Buffer(handle) => {
-                    let buffer = self.buffers.get_ref(*handle).unwrap();
+                ShaderResource::Buffer(view) => {
+                    let buffer = self.buffers.get_ref(view.handle).unwrap();
+                    let buffer_size = buffer.size as u64;
+                    let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+                    let size = if view.size == 0 {
+                        available
+                    } else {
+                        view.size.min(available)
+                    };
 
                     let buffer_info = vk::DescriptorBufferInfo::builder()
                         .buffer(buffer.buf)
-                        .offset(buffer.offset as u64)
-                        .range(buffer.size as u64)
+                        .offset(buffer.offset as u64 + view.offset)
+                        .range(size)
                         .build();
 
                     buffer_infos.push(buffer_info);
@@ -3038,13 +3051,20 @@ impl Context {
 
                     write_descriptor_sets.push(write_descriptor_set);
                 }
-                ShaderResource::StorageBuffer(buffer_handle) => {
-                    let buffer = self.buffers.get_ref(*buffer_handle).unwrap();
+                ShaderResource::StorageBuffer(view) => {
+                    let buffer = self.buffers.get_ref(view.handle).unwrap();
+                    let buffer_size = buffer.size as u64;
+                    let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
+                    let size = if view.size == 0 {
+                        available
+                    } else {
+                        view.size.min(available)
+                    };
 
                     let buffer_info = vk::DescriptorBufferInfo::builder()
                         .buffer(buffer.buf)
-                        .offset(buffer.offset as u64)
-                        .range(buffer.size as u64)
+                        .offset(buffer.offset as u64 + view.offset)
+                        .range(size)
                         .build();
 
                     buffer_infos.push(buffer_info);
