@@ -123,7 +123,7 @@ fn main() -> Result<(), GPUError> {
                 .expect("Unable to make transform buffer");
             idx += 1;
             IndexedResource {
-                resource: ShaderResource::StorageBuffer(b),
+                resource: ShaderResource::StorageBuffer(BufferView::new(b)),
                 slot: idx - 1,
             }
         })

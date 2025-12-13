@@ -837,11 +837,11 @@ mod layout_validation_tests {
         let bindings = [
             BindingInfo {
                 binding: 0,
-                resource: ShaderResource::Buffer(Handle::new(0, 0)),
+                resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
             },
             BindingInfo {
                 binding: 1,
-                resource: ShaderResource::StorageBuffer(Handle::new(1, 0)),
+                resource: ShaderResource::StorageBuffer(BufferView::new(Handle::new(1, 0))),
             },
         ];
 
@@ -858,7 +858,7 @@ mod layout_validation_tests {
 
         let bindings = [BindingInfo {
             binding: 0,
-            resource: ShaderResource::Buffer(Handle::new(0, 0)),
+            resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
         }];
 
         assert!(!bindings_compatible_with_layout(&layout_vars, &bindings));
@@ -933,9 +933,9 @@ impl BufferView {
 
 #[derive(Debug, Clone, Hash)]
 pub enum ShaderResource {
-    Buffer(Handle<Buffer>),
+    Buffer(BufferView),
     ConstBuffer(BufferView),
-    StorageBuffer(Handle<Buffer>),
+    StorageBuffer(BufferView),
     Dynamic(DynamicAllocatorState),
     DynamicStorage(DynamicAllocatorState),
     SampledImage(ImageView, Handle<Sampler>),
