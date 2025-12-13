@@ -1343,6 +1343,25 @@ impl Context {
         Ok(ctx)
     }
 
+    /// Query hardware limits in API-agnostic terms.
+    ///
+    /// This information can be used to size bind tables, buffers, or push
+    /// constant blocks so that shaders never exceed what the device supports.
+    pub fn limits(&self) -> ContextLimits {
+        let limits = &self.properties.limits;
+
+        ContextLimits {
+            max_sampler_array_len: limits.max_per_stage_descriptor_samplers,
+            max_sampled_texture_array_len: limits.max_per_stage_descriptor_sampled_images,
+            max_storage_texture_array_len: limits.max_per_stage_descriptor_storage_images,
+            max_uniform_buffer_range: limits.max_uniform_buffer_range,
+            max_storage_buffer_range: limits.max_storage_buffer_range,
+            max_push_constant_size: limits.max_push_constants_size,
+            max_color_attachments: limits.max_color_attachments,
+            max_bound_bind_groups: limits.max_bound_descriptor_sets,
+        }
+    }
+
     #[cfg(feature = "dashi-sdl2")]
     /// Access the underlying SDL context for window creation.
     ///
