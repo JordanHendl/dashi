@@ -1812,6 +1812,40 @@ impl Context {
         }
     }
 
+    pub fn map_buffer_offset_mut<T>(
+        &mut self,
+        buf: Handle<Buffer>,
+        offset: u32,
+    ) -> Result<&mut [T]> {
+        let buf = match self.buffers.get_ref(buf) {
+            Some(it) => it,
+            None => return Err(GPUError::SlotError()),
+        };
+
+        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+        let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
+        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        typed_map = unsafe { typed_map.offset(buf.offset as isize + offset as isize) };
+        return Ok(unsafe {
+            std::slice::from_raw_parts_mut(typed_map, buf.size as usize / std::mem::size_of::<T>())
+        });
+    }
+
+    pub fn map_buffer_offset<T>(&self, buf: Handle<Buffer>, offset: u32) -> Result<&[T]> {
+        let buf = match self.buffers.get_ref(buf) {
+            Some(it) => it,
+            None => return Err(GPUError::SlotError()),
+        };
+
+        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+        let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
+        let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
+        typed_map = unsafe { typed_map.offset(buf.offset as isize + offset as isize) };
+        return Ok(unsafe {
+            std::slice::from_raw_parts(typed_map, buf.size as usize / std::mem::size_of::<T>())
+        });
+    }
+
     pub fn map_buffer_mut<T>(&mut self, buf: Handle<Buffer>) -> Result<&mut [T]> {
         let buf = match self.buffers.get_ref(buf) {
             Some(it) => it,
@@ -2611,7 +2645,7 @@ impl Context {
                     BindGroupVariableType::SampledImage => supports_sampled_uab,
                     BindGroupVariableType::StorageImage => supports_storage_image_uab,
                 };
-           
+
                 flags.push(binding_flags);
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
