@@ -471,79 +471,50 @@ impl CommandEncoder {
     }
 
     pub fn combine(&mut self, other: &CommandEncoder) {
-        const INLINE_ALIGN: usize = 8;
-        const SIDE_FLAG: u16 = 0x8000;
-        // Ensure that the beginning of the appended payload has the same alignment
-        // remainder as when it was originally recorded. Inline payload parsing uses the
-        // absolute address of the payload within `data` to determine padding, so we need
-        // to reproduce the original pointer alignment to keep the padding valid even
-        // after concatenation. The same applies to the side-band buffer.
-        if !other.data.is_empty() {
-            self.data.reserve(other.data.len() + INLINE_ALIGN);
+        assert_eq!(
+            self.queue, other.queue,
+            "cannot combine command encoders targeting different queues"
+        );
 
-            let target_mod = (other.data.as_ptr() as usize) % INLINE_ALIGN;
-            let current_mod = (self.data.as_ptr() as usize + self.data.len()) % INLINE_ALIGN;
-            let pad = (target_mod + INLINE_ALIGN - current_mod) % INLINE_ALIGN;
-
-            if pad != 0 {
-                self.data.resize(self.data.len() + pad, 0);
-            }
-        }
-
-        if !other.side.is_empty() {
-            const SIDE_ALIGN: usize = 8;
-
-            self.side.reserve(other.side.len() + SIDE_ALIGN);
-
-            let target_mod = (other.side.as_ptr() as usize) % SIDE_ALIGN;
-            let current_mod = (self.side.as_ptr() as usize + self.side.len()) % SIDE_ALIGN;
-            let pad = (target_mod + SIDE_ALIGN - current_mod) % SIDE_ALIGN;
-
-            if pad != 0 {
-                self.side.resize(self.side.len() + pad, 0);
-            }
-        }
-
-        // If we already have side-band data, offsets in `other` need to be adjusted so
-        // they still point at the correct payload after concatenation.
-        let side_offset = self.side.len();
-        let mut patched = other.data.clone();
-
-        if side_offset != 0 && !other.side.is_empty() {
-            let mut cursor = 0;
-            let side_offset: u32 = side_offset.try_into().expect("combined side data overflow");
-
-            while cursor + 4 <= patched.len() {
-                let size = u16::from_ne_bytes([patched[cursor + 2], patched[cursor + 3]]);
-                cursor += 4;
-
-                if (size & SIDE_FLAG) != 0 {
-                    if cursor + 4 > patched.len() {
-                        break;
-                    }
-
-                    let mut off_bytes = [0u8; 4];
-                    off_bytes.copy_from_slice(&patched[cursor..cursor + 4]);
-
-                    let adjusted = u32::from_ne_bytes(off_bytes)
-                        .checked_add(side_offset)
-                        .expect("combined side data offset overflow");
-
-                    patched[cursor..cursor + 4].copy_from_slice(&adjusted.to_ne_bytes());
-                    cursor += 4;
-                } else {
-                    let payload_len = size as usize;
-                    let base = patched.as_ptr() as usize + cursor;
-                    let payload_addr = align_up(base, INLINE_ALIGN);
-                    let pad = payload_addr - base;
-
-                    cursor += pad + payload_len;
+        for cmd in other.iter() {
+            match cmd.op {
+                Op::BeginDrawing => self.begin_drawing(cmd.payload()),
+                Op::EndDrawing => {
+                    let _ = cmd.payload::<EndDrawing>();
+                    self.end_drawing();
+                }
+                Op::BindGraphicsPipeline => {
+                    let payload = cmd.payload::<BindGraphicsPipeline>();
+                    self.bind_graphics_pipeline(payload.pipeline);
+                }
+                Op::UpdateGraphicsPipelineState => {
+                    self.update_graphics_pipeline_state(cmd.payload())
+                }
+                Op::Draw => self.draw(cmd.payload()),
+                Op::Dispatch => self.dispatch(cmd.payload()),
+                Op::CopyBuffer => self.copy_buffer(cmd.payload()),
+                Op::CopyBufferToImage => self.copy_buffer_to_image(cmd.payload()),
+                Op::CopyImage => {
+                    let payload = cmd.payload::<CopyImage>();
+                    self.push(Op::CopyImage, payload);
+                }
+                Op::ResolveImage => self.resolve_image(cmd.payload()),
+                Op::DebugMarkerBegin => self.begin_debug_marker(),
+                Op::DebugMarkerEnd => self.end_debug_marker(),
+                Op::CopyImageToBuffer => self.copy_image_to_buffer(cmd.payload()),
+                Op::BlitImage => self.blit_image(cmd.payload()),
+                Op::DrawIndexed => self.draw_indexed(cmd.payload()),
+                Op::DrawIndirect => todo!(),
+                Op::DispatchIndirect => todo!(),
+                Op::TransitionImage => self.transition_image(cmd.payload()),
+                Op::BeginRenderPass => self.begin_render_pass(cmd.payload()),
+                Op::NextSubpass => {
+                    // Validate payload shape and record the implicit next-subpass command.
+                    let _ = cmd.payload::<NextSubpass>();
+                    self.next_subpass();
                 }
             }
         }
-
-        self.data.extend_from_slice(&patched);
-        self.side.extend_from_slice(&other.side);
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
     pub fn append<S: CommandSink>(&self, sink: &mut S) -> usize {
