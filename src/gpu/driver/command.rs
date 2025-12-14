@@ -473,13 +473,43 @@ impl CommandEncoder {
     pub fn combine(&mut self, other: &CommandEncoder) {
         const INLINE_ALIGN: usize = 8;
         const SIDE_FLAG: u16 = 0x8000;
+        // Ensure that the beginning of the appended payload has the same alignment
+        // remainder as when it was originally recorded. Inline payload parsing uses the
+        // absolute address of the payload within `data` to determine padding, so we need
+        // to reproduce the original pointer alignment to keep the padding valid even
+        // after concatenation. The same applies to the side-band buffer.
+        if !other.data.is_empty() {
+            self.data.reserve(other.data.len() + INLINE_ALIGN);
+
+            let target_mod = (other.data.as_ptr() as usize) % INLINE_ALIGN;
+            let current_mod = (self.data.as_ptr() as usize + self.data.len()) % INLINE_ALIGN;
+            let pad = (target_mod + INLINE_ALIGN - current_mod) % INLINE_ALIGN;
+
+            if pad != 0 {
+                self.data.resize(self.data.len() + pad, 0);
+            }
+        }
+
+        if !other.side.is_empty() {
+            const SIDE_ALIGN: usize = 8;
+
+            self.side.reserve(other.side.len() + SIDE_ALIGN);
+
+            let target_mod = (other.side.as_ptr() as usize) % SIDE_ALIGN;
+            let current_mod = (self.side.as_ptr() as usize + self.side.len()) % SIDE_ALIGN;
+            let pad = (target_mod + SIDE_ALIGN - current_mod) % SIDE_ALIGN;
+
+            if pad != 0 {
+                self.side.resize(self.side.len() + pad, 0);
+            }
+        }
 
         // If we already have side-band data, offsets in `other` need to be adjusted so
         // they still point at the correct payload after concatenation.
         let side_offset = self.side.len();
         let mut patched = other.data.clone();
 
-        if side_offset != 0 {
+        if side_offset != 0 && !other.side.is_empty() {
             let mut cursor = 0;
             let side_offset: u32 = side_offset.try_into().expect("combined side data overflow");
 
