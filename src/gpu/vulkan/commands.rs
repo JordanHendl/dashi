@@ -269,45 +269,19 @@ impl CommandQueue {
     }
 
     fn bind_compute_pipeline(&mut self, pipeline: Handle<ComputePipeline>) -> Result<()> {
-        todo!()
-        //        if self.curr_rp.is_none() {
-        //            return Err(GPUError::LibraryError());
-        //        }
-        //        if self.curr_pipeline == Some(pipeline) {
-        //            return Ok(());
-        //        }
-        //        self.curr_pipeline = Some(pipeline);
-        //        unsafe {
-        //            if let Some(pipeline) = info.compute {
-        //                let comp = self
-        //                    .ctx_ref()
-        //                    .compute_pipelines
-        //                    .get_ref(pipeline)
-        //                    .ok_or(GPUError::SlotError())?;
-        //                let layout = self
-        //                    .ctx_ref()
-        //                    .compute_pipeline_layouts
-        //                    .get_ref(comp.layout)
-        //                    .ok_or(GPUError::SlotError())?
-        //                    .layout;
-        //                self.ctx_ref().device.cmd_bind_pipeline(
-        //                    self.cmd_buf,
-        //                    vk::PipelineBindPoint::COMPUTE,
-        //                    comp.raw,
-        //                );
-        //                let offsets: Vec<u32> = info.bindings.dynamic_offsets().collect();
-        //                for (bt, bg) in info.bindings.iter() {
-        //                    self.bind_descriptor_set(
-        //                        vk::PipelineBindPoint::COMPUTE,
-        //                        layout,
-        //                        bt,
-        //                        bg,
-        //                        &offsets,
-        //                    );
-        //                }
-        //            }
-        //        }
-        //        Ok(())
+        unsafe {
+            let comp = self
+                .ctx_ref()
+                .compute_pipelines
+                .get_ref(pipeline)
+                .ok_or(GPUError::SlotError())?;
+            self.ctx_ref().device.cmd_bind_pipeline(
+                self.cmd_buf,
+                vk::PipelineBindPoint::COMPUTE,
+                comp.raw,
+            );
+        }
+        Ok(())
     }
 
     /// Bind a graphics pipeline for subsequent draw calls.
@@ -1525,13 +1499,65 @@ impl CommandSink for CommandQueue {
 
     fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) {
         unsafe {
-            self.ctx_ref()
-                .device
-                .cmd_dispatch(self.cmd_buf, cmd.x, cmd.y, cmd.z);
-            self.update_last_access(
-                vk::PipelineStageFlags::COMPUTE_SHADER,
-                vk::AccessFlags::SHADER_WRITE,
-            );
+            self.bind_compute_pipeline(cmd.pipeline).unwrap();
+            let layout_handle = self
+                .ctx_ref()
+                .compute_pipelines
+                .get_ref(cmd.pipeline)
+                .ok_or(GPUError::SlotError())
+                .unwrap()
+                .layout;
+
+            let layout = self
+                .ctx_ref()
+                .compute_pipeline_layouts
+                .get_ref(layout_handle)
+                .ok_or(GPUError::SlotError())
+                .unwrap();
+
+            unsafe {
+                let offsets: Vec<u32> = cmd
+                    .dynamic_buffers
+                    .iter()
+                    .filter_map(|&d| d.map(|b| b.alloc.offset))
+                    .collect();
+
+                for table in &cmd.bind_tables {
+                    if let Some(bt) = *table {
+                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::COMPUTE,
+                            layout.layout,
+                            bt_data.set_id,
+                            &[bt_data.set],
+                            &[],
+                        );
+                    }
+                }
+
+                for group in cmd.bind_groups {
+                    if let Some(bg) = group {
+                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::COMPUTE,
+                            layout.layout,
+                            bg_data.set_id,
+                            &[bg_data.set],
+                            &offsets,
+                        );
+                    }
+                }
+
+                self.ctx_ref()
+                    .device
+                    .cmd_dispatch(self.cmd_buf, cmd.x, cmd.y, cmd.z);
+                self.update_last_access(
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::AccessFlags::SHADER_WRITE,
+                );
+            }
         }
     }
 
