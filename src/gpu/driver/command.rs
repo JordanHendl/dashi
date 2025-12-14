@@ -471,7 +471,48 @@ impl CommandEncoder {
     }
 
     pub fn combine(&mut self, other: &CommandEncoder) {
-        self.data.extend_from_slice(&other.data);
+        const INLINE_ALIGN: usize = 8;
+        const SIDE_FLAG: u16 = 0x8000;
+
+        // If we already have side-band data, offsets in `other` need to be adjusted so
+        // they still point at the correct payload after concatenation.
+        let side_offset = self.side.len();
+        let mut patched = other.data.clone();
+
+        if side_offset != 0 {
+            let mut cursor = 0;
+            let side_offset: u32 = side_offset.try_into().expect("combined side data overflow");
+
+            while cursor + 4 <= patched.len() {
+                let size = u16::from_ne_bytes([patched[cursor + 2], patched[cursor + 3]]);
+                cursor += 4;
+
+                if (size & SIDE_FLAG) != 0 {
+                    if cursor + 4 > patched.len() {
+                        break;
+                    }
+
+                    let mut off_bytes = [0u8; 4];
+                    off_bytes.copy_from_slice(&patched[cursor..cursor + 4]);
+
+                    let adjusted = u32::from_ne_bytes(off_bytes)
+                        .checked_add(side_offset)
+                        .expect("combined side data offset overflow");
+
+                    patched[cursor..cursor + 4].copy_from_slice(&adjusted.to_ne_bytes());
+                    cursor += 4;
+                } else {
+                    let payload_len = size as usize;
+                    let base = patched.as_ptr() as usize + cursor;
+                    let payload_addr = align_up(base, INLINE_ALIGN);
+                    let pad = payload_addr - base;
+
+                    cursor += pad + payload_len;
+                }
+            }
+        }
+
+        self.data.extend_from_slice(&patched);
         self.side.extend_from_slice(&other.side);
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
@@ -713,4 +754,89 @@ pub mod compat {
 //===----------------------------------------------------------------------===//
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::{BindGroup, Buffer, ComputePipeline, DynamicBuffer};
+
+    fn sample_copy_buffer(src: u16, dst: u16) -> CopyBuffer {
+        CopyBuffer {
+            src: Handle::<Buffer>::new(src, 0),
+            dst: Handle::<Buffer>::new(dst, 0),
+            src_offset: 4,
+            dst_offset: 8,
+            amount: 16,
+        }
+    }
+
+    fn sample_dispatch(pipe: u16, bind_group: u16) -> Dispatch {
+        Dispatch {
+            x: 8,
+            y: 4,
+            z: 2,
+            pipeline: Handle::<ComputePipeline>::new(pipe, 0),
+            bind_groups: [
+                Some(Handle::<BindGroup>::new(bind_group, 0)),
+                None,
+                None,
+                None,
+            ],
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+        }
+    }
+
+    #[test]
+    fn inline_and_side_payloads_round_trip() {
+        let mut enc = CommandEncoder::new(QueueType::Compute);
+        let copy = sample_copy_buffer(1, 2);
+        let dispatch = sample_dispatch(7, 11);
+
+        enc.copy_buffer(&copy);
+        enc.dispatch(&dispatch);
+
+        let mut iter = enc.iter();
+
+        let cmd1 = iter.next().unwrap();
+        assert_eq!(cmd1.op, Op::CopyBuffer);
+        assert_eq!(cmd1.payload::<CopyBuffer>(), &copy);
+
+        let cmd2 = iter.next().unwrap();
+        assert_eq!(cmd2.op, Op::Dispatch);
+        let payload = cmd2.payload::<Dispatch>();
+        assert_eq!(payload.pipeline, dispatch.pipeline);
+        assert_eq!(payload.bind_groups[0], dispatch.bind_groups[0]);
+        assert_eq!(payload.x, dispatch.x);
+        assert_eq!(payload.y, dispatch.y);
+        assert_eq!(payload.z, dispatch.z);
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn combine_adjusts_side_offsets_for_side_payloads() {
+        let mut left = CommandEncoder::new(QueueType::Compute);
+        let dispatch_a = sample_dispatch(3, 21);
+        left.dispatch(&dispatch_a);
+
+        let mut right = CommandEncoder::new(QueueType::Compute);
+        let dispatch_b = sample_dispatch(5, 22);
+        right.dispatch(&dispatch_b);
+
+        left.combine(&right);
+
+        let mut iter = left.iter();
+        let first = iter.next().unwrap();
+        assert_eq!(first.op, Op::Dispatch);
+        let first_payload = first.payload::<Dispatch>();
+        assert_eq!(first_payload.pipeline, dispatch_a.pipeline);
+        assert_eq!(first_payload.bind_groups[0], dispatch_a.bind_groups[0]);
+
+        let second = iter.next().unwrap();
+        assert_eq!(second.op, Op::Dispatch);
+        let second_payload = second.payload::<Dispatch>();
+        assert_eq!(second_payload.pipeline, dispatch_b.pipeline);
+        assert_eq!(second_payload.bind_groups[0], dispatch_b.bind_groups[0]);
+
+        assert!(iter.next().is_none());
+    }
+}
