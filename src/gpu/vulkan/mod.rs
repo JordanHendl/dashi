@@ -85,6 +85,12 @@ pub struct SubpassAttachmentFormats {
     pub depth_format: Option<Format>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct DescriptorBindingFlagsInfo {
+    pub update_after_bind: bool,
+    pub partially_bound: bool,
+}
+
 #[derive(Clone, Default)]
 pub struct RenderPass {
     pub(super) raw: vk::RenderPass,
@@ -2600,6 +2606,8 @@ impl Context {
                     .iter()
                     .flat_map(|shader| shader.variables.iter().cloned())
                     .collect(),
+                update_after_bind: uses_update_after_bind,
+                partially_bound: supports_partially_bound,
             })
             .unwrap());
     }
@@ -2710,6 +2718,8 @@ impl Context {
                     .iter()
                     .flat_map(|shader| shader.variables.iter().cloned())
                     .collect(),
+                update_after_bind: false,
+                partially_bound: false,
             })
             .unwrap());
     }
@@ -2762,6 +2772,28 @@ impl Context {
         let bindings = resolved.bindings();
 
         self.bind_table_compatible(info.layout, &bindings)
+    }
+
+    pub fn bind_table_layout_flags(
+        &self,
+        layout: Handle<BindTableLayout>,
+    ) -> DescriptorBindingFlagsInfo {
+        let layout = self.bind_table_layouts.get_ref(layout).unwrap();
+        DescriptorBindingFlagsInfo {
+            update_after_bind: layout.update_after_bind,
+            partially_bound: layout.partially_bound,
+        }
+    }
+
+    pub fn bind_group_layout_flags(
+        &self,
+        layout: Handle<BindGroupLayout>,
+    ) -> DescriptorBindingFlagsInfo {
+        let layout = self.bind_group_layouts.get_ref(layout).unwrap();
+        DescriptorBindingFlagsInfo {
+            update_after_bind: layout.update_after_bind,
+            partially_bound: layout.partially_bound,
+        }
     }
 
     fn resolve_bind_table_bindings(

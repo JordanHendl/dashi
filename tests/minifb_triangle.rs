@@ -130,11 +130,14 @@ fn minifb_triangle() {
         })
         .unwrap();
 
-    let fb_view = ImageView { img: fb, ..Default::default() };
+    let fb_view = ImageView {
+        img: fb,
+        ..Default::default()
+    };
 
-    // Make the bind group layout. This describes the bindings into a shader.
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
+    // Make the bind table layout. This describes the bindings into a shader.
+    let bt_layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Vertex,
                 variables: &[BindGroupVariable {
@@ -159,8 +162,8 @@ fn minifb_triangle() {
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [Some(bg_layout), None, None, None],
-            bt_layouts: [None, None, None, None],
+            bg_layouts: [None, None, None, None],
+            bt_layouts: [Some(bt_layout), None, None, None],
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
@@ -255,13 +258,16 @@ void main() {
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
 
-    // Make bind group what we want to bind to what was described in the Bind Group Layout.
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
+    // Make bind table to match the bind table layout.
+    let bind_table = ctx
+        .make_bind_table(&BindTableInfo {
             debug_name: "Hello Triangle",
-            layout: bg_layout,
-            bindings: &[BindingInfo {
-                resource: ShaderResource::Dynamic(&allocator),
+            layout: bt_layout,
+            bindings: &[IndexedBindingInfo {
+                resources: &[IndexedResource {
+                    resource: ShaderResource::Dynamic(&allocator),
+                    slot: 0,
+                }],
                 binding: 0,
             }],
             ..Default::default()
@@ -289,59 +295,60 @@ void main() {
         // Get the next image from the display.
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
-        framed_list.record(|list| {
-            // Begin render pass & bind pipeline
-            list.begin_drawing(&DrawBegin {
-                viewport: Viewport {
-                    area: FRect2D {
-                        w: WIDTH as f32,
-                        h: HEIGHT as f32,
+        framed_list
+            .record(|list| {
+                // Begin render pass & bind pipeline
+                list.begin_drawing(&DrawBegin {
+                    viewport: Viewport {
+                        area: FRect2D {
+                            w: WIDTH as f32,
+                            h: HEIGHT as f32,
+                            ..Default::default()
+                        },
+                        scissor: Rect2D {
+                            w: WIDTH,
+                            h: HEIGHT,
+                            ..Default::default()
+                        },
                         ..Default::default()
                     },
-                    scissor: Rect2D {
-                        w: WIDTH,
-                        h: HEIGHT,
+                    pipeline: graphics_pipeline,
+                    render_target,
+                    clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                })
+                .unwrap();
+
+                // Bump alloc some data to write the triangle position to.
+                let mut buf = allocator.bump().unwrap();
+                let pos = &mut buf.slice::<[f32; 2]>()[0];
+                pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
+                pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
+
+                // Append a draw call using our vertices & indices & dynamic buffers
+                list.append(Command::DrawIndexed(DrawIndexed {
+                    vertices,
+                    indices,
+                    index_count: INDICES.len() as u32,
+                    bindings: Bindings {
+                        bind_tables: [Some(bind_table), None, None, None],
+                        dynamic_buffers: [Some(buf), None, None, None],
                         ..Default::default()
                     },
                     ..Default::default()
-                },
-                pipeline: graphics_pipeline,
-                render_target,
-                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                }));
+
+                // End drawing.
+                list.end_drawing().expect("Error ending drawing!");
+
+                // Blit the framebuffer to the display's image
+                list.blit_image(ImageBlit {
+                    src: fb_view,
+                    dst: img,
+                    filter: Filter::Nearest,
+                    ..Default::default()
+                });
             })
             .unwrap();
-
-            // Bump alloc some data to write the triangle position to.
-            let mut buf = allocator.bump().unwrap();
-            let pos = &mut buf.slice::<[f32; 2]>()[0];
-            pos[0] = (timer.elapsed_ms() as f32 / 1000.0).sin();
-            pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
-
-            // Append a draw call using our vertices & indices & dynamic buffers
-            list.append(Command::DrawIndexed(DrawIndexed {
-                vertices,
-                indices,
-                index_count: INDICES.len() as u32,
-                bindings: Bindings {
-                    bind_groups: [Some(bind_group), None, None, None],
-                    dynamic_buffers: [Some(buf), None, None, None],
-                    ..Default::default()
-                },
-                ..Default::default()
-            }));
-
-            // End drawing.
-            list.end_drawing().expect("Error ending drawing!");
-
-            // Blit the framebuffer to the display's image
-            list.blit_image(ImageBlit {
-                src: fb_view,
-                dst: img,
-                filter: Filter::Nearest,
-                ..Default::default()
-            });
-        })
-        .unwrap();
 
         // Submit our recorded commands
         framed_list
