@@ -2968,9 +2968,9 @@ impl Context {
         );
 
         // Step 2: Prepare the write operations for the descriptor set
-        let mut write_descriptor_sets = Vec::new();
-        let mut buffer_infos = Vec::new();
-        let mut image_infos = Vec::new();
+        let mut write_descriptor_sets = Vec::with_capacity(2048);
+        let mut buffer_infos = Vec::with_capacity(2048);
+        let mut image_infos = Vec::with_capacity(2048);
 
         for binding_info in info.bindings.iter() {
             match &binding_info.resource {
