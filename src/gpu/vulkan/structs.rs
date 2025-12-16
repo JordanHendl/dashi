@@ -363,9 +363,9 @@ pub struct ContextLimits {
     /// Maximum number of color attachments that can be written in a single
     /// render pass.
     pub max_color_attachments: u32,
-    /// Maximum number of bind groups/bind tables that can be bound
-    /// simultaneously.
-    pub max_bound_bind_groups: u32,
+    /// Maximum number of bind tables (descriptor sets) that can be bound
+    /// simultaneously across all pipeline stages.
+    pub max_bound_bind_tables: u32,
 }
 
 #[repr(C)]
@@ -993,7 +993,7 @@ pub struct IndexedResource {
     pub slot: u32,
 }
 
-#[derive(Hash)]
+#[derive(Hash, Clone)]
 pub struct IndexedBindingInfo<'a> {
     pub resources: &'a [IndexedResource],
     pub binding: u32,
@@ -1027,6 +1027,7 @@ pub struct BindTableInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindTableLayout>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
+    pub legacy_bindings: &'a [BindingInfo],
     pub set: u32,
 }
 
@@ -1042,6 +1043,7 @@ impl Hash for BindTableInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layout.hash(state);
         self.bindings.hash(state);
+        self.legacy_bindings.hash(state);
         self.set.hash(state);
     }
 }
@@ -1062,6 +1064,7 @@ impl<'a> Default for BindTableInfo<'a> {
         Self {
             layout: Default::default(),
             bindings: &[],
+            legacy_bindings: &[],
             set: 0,
             debug_name: "",
         }
