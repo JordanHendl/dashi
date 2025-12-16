@@ -1883,7 +1883,7 @@ impl Context {
         let buffer_size = buf.size as u64;
         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
         let size = if view.size == 0 {
-            available
+            buffer_size
         } else {
             view.size.min(available)
         };
@@ -1906,7 +1906,7 @@ impl Context {
         let buffer_size = buf.size as u64;
         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
         let size = if view.size == 0 {
-            available
+            buffer_size
         } else {
             view.size.min(available)
         };
