@@ -132,9 +132,9 @@ fn main() {
         ..Default::default()
     };
 
-    // Make the bind group layout. This describes the bindings into a shader.
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
+    // Make the bind table layout. This describes the bindings into a shader.
+    let bt_layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Vertex,
                 variables: &[BindGroupVariable {
@@ -159,8 +159,8 @@ fn main() {
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [Some(bg_layout), None, None, None],
-            bt_layouts: [None, None, None, None],
+            bg_layouts: [None, None, None, None],
+            bt_layouts: [Some(bt_layout), None, None, None],
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
@@ -246,13 +246,16 @@ void main() {
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
 
-    // Make bind group what we want to bind to what was described in the Bind Group Layout.
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
+    // Make bind table to match the bind table layout.
+    let bind_table = ctx
+        .make_bind_table(&BindTableInfo {
             debug_name: "Hello Triangle",
-            layout: bg_layout,
-            bindings: &[BindingInfo {
-                resource: ShaderResource::Dynamic(allocator.state().clone()),
+            layout: bt_layout,
+            bindings: &[IndexedBindingInfo {
+                resources: &[IndexedResource {
+                    resource: ShaderResource::Dynamic(allocator.state().clone()),
+                    slot: 0,
+                }],
                 binding: 0,
             }],
             ..Default::default()
@@ -355,7 +358,7 @@ void main() {
                 vertices,
                 indices,
                 index_count: INDICES.len() as u32,
-                bind_groups: [Some(bind_group), None, None, None],
+                bind_tables: [Some(bind_table), None, None, None],
                 dynamic_buffers: [Some(buf), None, None, None],
                 ..Default::default()
             });

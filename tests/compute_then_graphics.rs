@@ -78,7 +78,7 @@
 //void main(){ out_color = buf.color; }
 //", frag);
 //
-//    // bind group layout for storage buffer used in compute and fragment stages
+//    // bind table layout for storage buffer used in compute and fragment stages
 //    let bg_layout = ctx
 //        .make_bind_group_layout(&BindGroupLayoutInfo {
 //            debug_name: "bg_layout",

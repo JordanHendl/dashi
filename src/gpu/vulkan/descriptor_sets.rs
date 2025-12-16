@@ -6,6 +6,8 @@ pub struct BindGroupLayout {
     pub(super) pool: vk::DescriptorPool,
     pub(super) layout: vk::DescriptorSetLayout,
     pub(super) variables: Vec<BindGroupVariable>,
+    pub(super) update_after_bind: bool,
+    pub(super) partially_bound: bool,
 }
 
 #[allow(dead_code)]
@@ -21,6 +23,8 @@ pub struct BindTableLayout {
     pub(super) pool: vk::DescriptorPool,
     pub(super) layout: vk::DescriptorSetLayout,
     pub(super) variables: Vec<BindGroupVariable>,
+    pub(super) update_after_bind: bool,
+    pub(super) partially_bound: bool,
 }
 
 #[allow(dead_code)]

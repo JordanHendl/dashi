@@ -81,7 +81,7 @@ list.end_drawing()?;
 
 ### Resource Binding
 
-Dashi now focuses on bind-table-based binding. Use `BindTableLayout`/`BindTable` for descriptor indexing and per-draw dynamic bindings; the [`bindless_triangle`](examples/bindless_triangle.rs) and [`hello_bindless`](examples/hello_bindless.rs) examples show how to author layouts and rebind individual table entries without rebuilding the table. Legacy bind group compatibility remains for older code paths, but new work should rely on bind tables.
+Dashi now focuses on bind-table-based binding. Use `BindTableLayout`/`BindTable` for descriptor indexing and per-draw dynamic bindings; the [`bindless_triangle`](examples/bindless_triangle.rs) and [`hello_bindless`](examples/hello_bindless.rs) examples show how to author layouts and rebind individual table entries without rebuilding the table. Bind tables are created with update-after-bind + partially-bound descriptor flags enabled so you can refresh entries in-place; classic bind groups remain fixed at creation time and should only be used for legacy code paths.
 
 ### Window Backends
 

@@ -133,10 +133,10 @@ fn compute_test() {
     // The GPU context that holds all the data.
     let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
-    // Make the bind group layout. This describes the bindings into a shader.
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
-            debug_name: "Hello Compute BG Layout",
+    // Make the bind table layout. This describes the bindings into a shader.
+    let bt_layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
+            debug_name: "Hello Compute BT Layout",
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
                 variables: &[
@@ -163,8 +163,8 @@ fn compute_test() {
     // Make a pipeline layout. This describes a graphics pipeline's state.
     let pipeline_layout = ctx
         .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
-            bg_layouts: [Some(bg_layout), None, None, None],
-            bt_layouts: [None, None, None, None],
+            bg_layouts: [None, None, None, None],
+            bt_layouts: [Some(bt_layout), None, None, None],
             shader: &PipelineShaderInfo {
                 stage: ShaderType::Compute,
                 spirv: inline_spirv::inline_spirv!(
@@ -229,22 +229,31 @@ outputData[index] = inputData[index] + num_to_add;
         })
         .unwrap();
 
-    // Make bind group what we want to bind to what was described in the Bind Group Layout.
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
-            debug_name: "Hello Compute BG",
-            layout: bg_layout,
+    // Make bind table what we want to bind to what was described in the Bind Table Layout.
+    let bind_table = ctx
+        .make_bind_table(&BindTableInfo {
+            debug_name: "Hello Compute BT",
+            layout: bt_layout,
             bindings: &[
-                BindingInfo {
-                    resource: ShaderResource::StorageBuffer(BufferView::new(input)),
+                IndexedBindingInfo {
+                    resources: &[IndexedResource {
+                        resource: ShaderResource::StorageBuffer(BufferView::new(input)),
+                        slot: 0,
+                    }],
                     binding: 0,
                 },
-                BindingInfo {
-                    resource: ShaderResource::StorageBuffer(BufferView::new(output)),
+                IndexedBindingInfo {
+                    resources: &[IndexedResource {
+                        resource: ShaderResource::StorageBuffer(BufferView::new(output)),
+                        slot: 0,
+                    }],
                     binding: 1,
                 },
-                BindingInfo {
-                    resource: ShaderResource::Dynamic(allocator.state().clone()),
+                IndexedBindingInfo {
+                    resources: &[IndexedResource {
+                        resource: ShaderResource::Dynamic(allocator.state().clone()),
+                        slot: 0,
+                    }],
                     binding: 2,
                 },
             ],
