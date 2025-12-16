@@ -187,9 +187,9 @@ fn main() {
 
     let pipeline_manager = PipelineManager::new(&mut ctx as *mut _, &binding_layouts);
 
-    let bg_layout = binding_layouts
-        .bind_group_layout(BIND_GROUP_LAYOUT_NAME)
-        .expect("bind group layout registered");
+    let bt_layout = binding_layouts
+        .bind_table_layout(BIND_GROUP_LAYOUT_NAME)
+        .expect("bind table layout registered");
 
     // Make a render pass. This describes the targets we wish to draw to.
     let mut render_pass_with_images = ctx
@@ -219,22 +219,25 @@ fn main() {
     // Make dynamic allocator to use for dynamic buffers.
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
 
-    // Make bind group what we want to bind to what was described in the Bind Group Layout.
-    let bind_group = binding_manager.alloc_bind_group(
+    // Make bind table matching the authored layout for the draw call.
+    let bind_table = binding_manager.alloc_bind_table(
         0,
         0,
         |ctx| {
-            let bindings = [BindingInfo {
-                resource: ShaderResource::Dynamic(allocator.state().clone()),
+            let bindings = [IndexedBindingInfo {
+                resources: &[IndexedResource {
+                    resource: ShaderResource::Dynamic(allocator.state().clone()),
+                    slot: 0,
+                }],
                 binding: 0,
             }];
-            ctx.make_bind_group(&BindGroupInfo {
+            ctx.make_bind_table(&BindTableInfo {
                 debug_name: "Hello Triangle",
-                layout: bg_layout,
+                layout: bt_layout,
                 bindings: &bindings,
                 ..Default::default()
             })
-            .expect("make bind group")
+            .expect("make bind table")
         },
         |_ctx, _| {},
     );
@@ -339,7 +342,8 @@ fn main() {
                         vertices,
                         indices,
                         index_count: INDICES.len() as u32,
-                        bind_groups: [Some(bind_group), None, None, None],
+                        bind_groups: [None, None, None, None],
+                        bind_tables: [Some(bind_table), None, None, None],
                         dynamic_buffers: [Some(buf), None, None, None],
                         ..Default::default()
                     });

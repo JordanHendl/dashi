@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use dashi::builders::{
-    BindGroupBuilder, BindTableBuilder, BindTableLayoutBuilder, GraphicsPipelineBuilder,
+    BindTableBuilder, BindTableLayoutBuilder, GraphicsPipelineBuilder,
     GraphicsPipelineLayoutBuilder, RenderPassBuilder,
 };
 use dashi::driver::command::{BeginDrawing, CommandSink, DrawIndexed, EndDrawing};
@@ -170,7 +170,7 @@ fn main() -> Result<(), GPUError> {
         .binding(1, &samplers_gpu)
         .build(&mut ctx)?;
 
-    // Bind group layout for the per-draw instance index.
+    // Bind table layout for the per-draw instance index.
     let instance_shader_info = ShaderInfo {
         shader_type: ShaderType::All,
         variables: &[BindGroupVariable {
@@ -179,15 +179,21 @@ fn main() -> Result<(), GPUError> {
             count: 1,
         }],
     };
-    let instance_layout = ctx.make_bind_group_layout(&BindGroupLayoutInfo {
+    let instance_layout = ctx.make_bind_table_layout(&BindTableLayoutInfo {
         debug_name: "instance_index_layout",
         shaders: &[instance_shader_info],
     })?;
 
-    let bind_group = BindGroupBuilder::new("instance_index")
+    let instance_table = BindTableBuilder::new("instance_index")
         .layout(instance_layout)
         .set(0)
-        .binding(0, ShaderResource::Dynamic(allocator.state().clone()))
+        .binding(
+            0,
+            &[IndexedResource {
+                resource: ShaderResource::Dynamic(allocator.state().clone()),
+                slot: 0,
+            }],
+        )
         .build(&mut ctx)?;
 
     // Geometry buffers.
@@ -330,7 +336,7 @@ void main() {
             stride: std::mem::size_of::<Vertex>(),
             rate: VertexRate::Vertex,
         })
-        .bind_group_layout(0, instance_layout)
+        .bind_table_layout(0, instance_layout)
         .bind_table_layout(1, layout)
         .shader(vertex_shader)
         .shader(fragment_shader)
@@ -434,8 +440,8 @@ void main() {
                     vertices,
                     indices,
                     index_count: INDICES.len() as u32,
-                    bind_groups: [Some(bind_group), None, None, None],
-                    bind_tables: [Some(table), None, None, None],
+                    bind_groups: [None, None, None, None],
+                    bind_tables: [Some(instance_table), Some(table), None, None],
                     dynamic_buffers: [Some(buf), None, None, None],
                     ..Default::default()
                 });
