@@ -1,6 +1,5 @@
 pub mod utils;
 pub mod gpu;
-pub mod job;
 pub use gpu::driver::types::{Handle, IndexType, UsageBits};
 
 #[cfg(
