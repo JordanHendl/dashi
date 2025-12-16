@@ -11,7 +11,7 @@ use crate::{
 use ash::*;
 pub use error::*;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{c_char, c_void, CStr, CString},
     mem::ManuallyDrop,
 };
@@ -2587,29 +2587,8 @@ impl Context {
         info: &BindGroupLayoutInfo,
     ) -> Result<Handle<BindGroupLayout>, GPUError> {
         let max_descriptor_sets: u32 = 2048;
-        let supports_partially_bound = self
-            .descriptor_indexing_features
-            .descriptor_binding_partially_bound
-            == vk::TRUE;
-        let supports_uab = self
-            .descriptor_indexing_features
-            .descriptor_binding_uniform_buffer_update_after_bind
-            == vk::TRUE;
-        let supports_sampled_uab = self
-            .descriptor_indexing_features
-            .descriptor_binding_sampled_image_update_after_bind
-            == vk::TRUE;
-        let supports_storage_uab = self
-            .descriptor_indexing_features
-            .descriptor_binding_storage_buffer_update_after_bind
-            == vk::TRUE;
-        let supports_storage_image_uab = self
-            .descriptor_indexing_features
-            .descriptor_binding_storage_image_update_after_bind
-            == vk::TRUE;
         let mut bindings = Vec::new();
         let mut flags = Vec::new();
-        let mut uses_update_after_bind = false;
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
                 let descriptor_type = match variable.var_type {
@@ -2634,22 +2613,7 @@ impl Context {
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
-                let mut binding_flags = vk::DescriptorBindingFlags::empty();
-                if supports_partially_bound {
-                    binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
-                }
-                let binding_supports_uab = match variable.var_type {
-                    BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
-                        supports_uab
-                    }
-                    BindGroupVariableType::DynamicStorage | BindGroupVariableType::Storage => {
-                        supports_storage_uab
-                    }
-                    BindGroupVariableType::SampledImage => supports_sampled_uab,
-                    BindGroupVariableType::StorageImage => supports_storage_image_uab,
-                };
-
-                flags.push(binding_flags);
+                flags.push(vk::DescriptorBindingFlags::empty());
                 let layout_binding = vk::DescriptorSetLayoutBinding::builder()
                     .binding(variable.binding)
                     .descriptor_type(descriptor_type)
@@ -2665,10 +2629,6 @@ impl Context {
             vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
 
         let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
-        if uses_update_after_bind {
-            layout_info =
-                layout_info.flags(vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL);
-        }
 
         let mut layout_binding_info = layout_binding_info.build();
         if flags.iter().any(|f| !f.is_empty()) {
@@ -2692,12 +2652,9 @@ impl Context {
             })
             .collect::<Vec<_>>();
 
-        let mut pool_info = vk::DescriptorPoolCreateInfo::builder()
+        let pool_info = vk::DescriptorPoolCreateInfo::builder()
             .pool_sizes(&pool_sizes)
             .max_sets(max_descriptor_sets);
-        if uses_update_after_bind {
-            pool_info = pool_info.flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND);
-        }
 
         let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
 
@@ -2776,14 +2733,59 @@ impl Context {
     /// Updates an existing bind table with new resource bindings.
     pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) -> Result<()> {
         let table = self.bind_tables.get_ref(info.table).unwrap();
+        let layout = self.bind_table_layouts.get_ref(table.layout).unwrap();
+        let Some(requirements) = layout_binding_requirements(&layout.variables) else {
+            return Err(GPUError::InvalidBindTableBinding {
+                binding: u32::MAX,
+                reason: "bind table layout has conflicting bindings".to_string(),
+            });
+        };
         let descriptor_set = table.set;
 
         let mut write_descriptor_sets = Vec::with_capacity(9064);
         let mut buffer_infos = Vec::with_capacity(9064);
         let mut image_infos = Vec::with_capacity(9064);
+        let mut seen_slots: HashMap<u32, HashSet<u32>> = HashMap::new();
 
         for binding_info in info.bindings.iter() {
+            let Some((expected_type, expected_count)) = requirements.get(&binding_info.binding)
+            else {
+                return Err(GPUError::InvalidBindTableBinding {
+                    binding: binding_info.binding,
+                    reason: "binding is not part of the bind table layout".to_string(),
+                });
+            };
+
+            let slots = seen_slots.entry(binding_info.binding).or_default();
             for res in binding_info.resources {
+                let actual_type = resource_var_type(&res.resource);
+                if &actual_type != expected_type {
+                    return Err(GPUError::InvalidBindTableBinding {
+                        binding: binding_info.binding,
+                        reason: format!(
+                            "resource type {:?} does not match expected table variable {:?}",
+                            actual_type, expected_type
+                        ),
+                    });
+                }
+
+                if res.slot >= *expected_count {
+                    return Err(GPUError::InvalidBindTableBinding {
+                        binding: binding_info.binding,
+                        reason: format!(
+                            "slot {} exceeds declared count {}",
+                            res.slot, expected_count
+                        ),
+                    });
+                }
+
+                if !slots.insert(res.slot) {
+                    return Err(GPUError::InvalidBindTableBinding {
+                        binding: binding_info.binding,
+                        reason: format!("slot {} written more than once", res.slot),
+                    });
+                }
+
                 match &res.resource {
                     ShaderResource::Buffer(view) => {
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
@@ -3151,6 +3153,7 @@ impl Context {
         let bind_table = BindTable {
             set: descriptor_set,
             set_id: info.set,
+            layout: info.layout,
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();

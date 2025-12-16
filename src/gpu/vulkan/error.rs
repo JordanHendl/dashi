@@ -32,6 +32,10 @@ pub enum GPUError {
     SwapchainConfigError(&'static str),
     UnsupportedShaderStage(ShaderType),
     Unimplemented(&'static str),
+    InvalidBindTableBinding {
+        binding: u32,
+        reason: String,
+    },
     MismatchedAttachmentFormat {
         context: String,
         expected: Format,
@@ -86,6 +90,11 @@ impl fmt::Display for GPUError {
             }
             GPUError::UnsupportedShaderStage(stage) => write!(f, "Shader Stage {:?} not supported", stage),
             GPUError::Unimplemented(feature) => write!(f, "Unimplemented Feature: {}", feature),
+            GPUError::InvalidBindTableBinding { binding, reason } => write!(
+                f,
+                "Invalid bind table update for binding {}: {}",
+                binding, reason
+            ),
             GPUError::MismatchedAttachmentFormat {
                 context,
                 expected,
