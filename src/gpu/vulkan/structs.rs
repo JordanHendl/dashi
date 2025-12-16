@@ -1027,7 +1027,6 @@ pub struct BindTableInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindTableLayout>,
     pub bindings: &'a [IndexedBindingInfo<'a>],
-    pub legacy_bindings: &'a [BindingInfo],
     pub set: u32,
 }
 
@@ -1043,7 +1042,6 @@ impl Hash for BindTableInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layout.hash(state);
         self.bindings.hash(state);
-        self.legacy_bindings.hash(state);
         self.set.hash(state);
     }
 }
@@ -1064,7 +1062,6 @@ impl<'a> Default for BindTableInfo<'a> {
         Self {
             layout: Default::default(),
             bindings: &[],
-            legacy_bindings: &[],
             set: 0,
             debug_name: "",
         }
