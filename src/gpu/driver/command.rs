@@ -581,6 +581,7 @@ impl Default for CommandEncoder {
 // Iteration
 //===----------------------------------------------------------------------===//
 
+#[derive(Debug)]
 pub struct Command<'a> {
     pub op: Op,
     bytes: &'a [u8],

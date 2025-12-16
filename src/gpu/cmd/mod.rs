@@ -304,7 +304,12 @@ impl CommandStream<Executable> {
             f,
         )
     }
-
+    
+    pub fn debug_print_commands(&self) {
+        for c in self.enc.iter() {
+            println!("Op: {:?}", c.op);
+        }
+    }
     /// Submit the recorded commands to a sink and transition to pending.
     pub fn append<S: CommandSink>(self, sink: &mut S) -> CommandStream<Pending> {
         self.enc.append(sink);

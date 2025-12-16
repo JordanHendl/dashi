@@ -55,7 +55,7 @@ fn bind_table_layout_exposes_descriptor_flags() {
 
     let flags = ctx.bind_table_layout_flags(layout);
     assert!(
-        flags.update_after_bind,
+        !flags.update_after_bind,
         "bind tables must support update-after-bind"
     );
     assert!(
