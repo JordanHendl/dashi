@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::HashSet;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -30,7 +29,6 @@ pub struct BindTable {
     pub(super) set: vk::DescriptorSet,
     pub(super) set_id: u32,
     pub(super) layout: Handle<BindTableLayout>,
-    pub(super) immutable_bindings: HashSet<u32>,
 }
 
 impl CommandQueue {

@@ -543,7 +543,6 @@ impl<'a> BindTableBuilder<'a> {
             debug_name: self.debug_name,
             layout: self.layout,
             bindings: &self.bindings,
-            legacy_bindings: &[],
             set: self.set,
         };
         ctx.make_bind_table(&info)

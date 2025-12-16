@@ -229,21 +229,12 @@ struct ResolvedBindTableBindings {
 }
 
 impl ResolvedBindTableBindings {
-    fn new(table_bindings: &[IndexedBindingInfo], legacy_bindings: &[BindingInfo]) -> Self {
-        let mut storage = Vec::with_capacity(table_bindings.len() + legacy_bindings.len());
-        let mut bindings = Vec::with_capacity(table_bindings.len() + legacy_bindings.len());
+    fn new(table_bindings: &[IndexedBindingInfo]) -> Self {
+        let mut storage = Vec::with_capacity(table_bindings.len());
+        let mut bindings = Vec::with_capacity(table_bindings.len());
 
         for binding in table_bindings {
             storage.push(binding.resources.to_vec());
-            let idx = storage.len() - 1;
-            bindings.push((binding.binding, idx));
-        }
-
-        for binding in legacy_bindings {
-            storage.push(vec![IndexedResource {
-                resource: binding.resource.clone(),
-                slot: 0,
-            }]);
             let idx = storage.len() - 1;
             bindings.push((binding.binding, idx));
         }
@@ -507,7 +498,6 @@ mod tests {
                         }],
                     },
                 ],
-                legacy_bindings: &[],
                 set: 3,
             })
             .expect("create bind table");
@@ -2767,7 +2757,7 @@ impl Context {
     }
 
     pub fn bind_table_info_compatible(&self, info: &BindTableInfo) -> bool {
-        let resolved = self.resolve_bind_table_bindings(info.bindings, info.legacy_bindings);
+        let resolved = self.resolve_bind_table_bindings(info.bindings);
 
         let bindings = resolved.bindings();
 
@@ -2777,25 +2767,12 @@ impl Context {
     fn resolve_bind_table_bindings(
         &self,
         table_bindings: &[IndexedBindingInfo],
-        legacy_bindings: &[BindingInfo],
     ) -> ResolvedBindTableBindings {
-        ResolvedBindTableBindings::new(table_bindings, legacy_bindings)
+        ResolvedBindTableBindings::new(table_bindings)
     }
 
     /// Updates an existing bind table with new resource bindings.
     pub fn update_bind_table(&mut self, info: &BindTableUpdateInfo) -> Result<()> {
-        let table = self.bind_tables.get_ref(info.table).unwrap();
-        if let Some(binding) = info
-            .bindings
-            .iter()
-            .find(|b| table.immutable_bindings.contains(&b.binding))
-        {
-            return Err(GPUError::InvalidBindTableBinding {
-                binding: binding.binding,
-                reason: "binding is immutable and cannot be updated".to_string(),
-            });
-        }
-
         self.write_bind_table_bindings(info.table, info.bindings)
     }
 
@@ -3223,18 +3200,14 @@ impl Context {
             vk::ObjectType::DESCRIPTOR_SET,
         );
 
-        let immutable_bindings: HashSet<u32> =
-            info.legacy_bindings.iter().map(|binding| binding.binding).collect();
-
         let bind_table = BindTable {
             set: descriptor_set,
             set_id: info.set,
             layout: info.layout,
-            immutable_bindings,
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();
-        let resolved = self.resolve_bind_table_bindings(info.bindings, info.legacy_bindings);
+        let resolved = self.resolve_bind_table_bindings(info.bindings);
 
         let bindings = resolved.bindings();
 
