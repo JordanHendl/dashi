@@ -255,18 +255,16 @@ mod serde_support {
         ) -> Result<Handle<GraphicsPipelineLayout>> {
             let name = name.into();
 
-            let bg_layouts = self
-                .binding_layouts()
-                .resolve_bind_group_layouts(&cfg.layouts.bg_layouts)
-                .with_context(|| {
-                    format!(
-                        "resolving bind group layouts for graphics pipeline layout '{}'",
-                        name
-                    )
-                })?;
+            let mut bt_layout_refs = cfg.layouts.bt_layouts.clone();
+            for (dst, legacy) in bt_layout_refs.iter_mut().zip(cfg.layouts.bg_layouts.iter()) {
+                if dst.is_none() {
+                    *dst = legacy.clone();
+                }
+            }
+
             let bt_layouts = self
                 .binding_layouts()
-                .resolve_bind_table_layouts(&cfg.layouts.bt_layouts)
+                .resolve_bind_table_layouts(&bt_layout_refs)
                 .with_context(|| {
                     format!(
                         "resolving bind table layouts for graphics pipeline layout '{}'",
@@ -324,7 +322,7 @@ mod serde_support {
             let layout_info = GraphicsPipelineLayoutInfo {
                 debug_name: &cfg.debug_name,
                 vertex_info,
-                bg_layouts,
+                bg_layouts: [None; 4],
                 bt_layouts,
                 shaders: &shader_infos,
                 details: cfg.details.clone(),
@@ -340,18 +338,16 @@ mod serde_support {
         ) -> Result<Handle<ComputePipelineLayout>> {
             let name = name.into();
 
-            let bg_layouts = self
-                .binding_layouts()
-                .resolve_bind_group_layouts(&cfg.layouts.bg_layouts)
-                .with_context(|| {
-                    format!(
-                        "resolving bind group layouts for compute pipeline layout '{}'",
-                        name
-                    )
-                })?;
+            let mut bt_layout_refs = cfg.layouts.bt_layouts.clone();
+            for (dst, legacy) in bt_layout_refs.iter_mut().zip(cfg.layouts.bg_layouts.iter()) {
+                if dst.is_none() {
+                    *dst = legacy.clone();
+                }
+            }
+
             let bt_layouts = self
                 .binding_layouts()
-                .resolve_bind_table_layouts(&cfg.layouts.bt_layouts)
+                .resolve_bind_table_layouts(&bt_layout_refs)
                 .with_context(|| {
                     format!(
                         "resolving bind table layouts for compute pipeline layout '{}'",
@@ -382,7 +378,7 @@ mod serde_support {
             };
 
             let info = ComputePipelineLayoutInfo {
-                bg_layouts,
+                bg_layouts: [None; 4],
                 bt_layouts,
                 shader: &shader_info,
             };

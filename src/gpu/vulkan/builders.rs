@@ -4,12 +4,12 @@ use crate::utils::Handle;
 #[cfg(feature = "dashi-openxr")]
 use crate::XrDisplayInfo;
 use crate::{
-    AttachmentDescription, BindGroupLayout, BindTable, BindTableLayout, ComputePipeline,
-    ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
-    DynamicState, GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo,
-    GraphicsPipelineLayout, GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass,
-    RenderPassInfo, SubpassDependency, SubpassDescription, VertexDescriptionInfo, Viewport,
-    WindowBuffering,
+    AttachmentDescription, BindGroupLayout, BindGroupLayoutInfo, BindTable, BindTableLayout,
+    BindTableLayoutInfo, ComputePipeline, ComputePipelineInfo, ComputePipelineLayout,
+    ComputePipelineLayoutInfo, Display, DisplayInfo, DynamicState, GraphicsPipeline,
+    GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
+    GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
+    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering,
 };
 use crate::{Context, GPUError};
 use smallvec::SmallVec;
@@ -132,7 +132,6 @@ impl DisplayBuilder {
 pub struct GraphicsPipelineLayoutBuilder<'a> {
     debug_name: &'a str,
     vertex_info: Option<VertexDescriptionInfo<'a>>,
-    bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     shaders: SmallVec<[PipelineShaderInfo<'a>; 4]>,
     details: GraphicsPipelineDetails,
@@ -144,7 +143,6 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
         Self {
             debug_name,
             vertex_info: None,
-            bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shaders: SmallVec::new(),
             details: GraphicsPipelineDetails::default(),
@@ -160,14 +158,6 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
     /// Specify the vertex input description.
     pub fn sample_count(mut self, info: SampleCount) -> Self {
         self.details.sample_count = info;
-        self
-    }
-
-    /// Attach a bind group layout at a given index (0..3).
-    pub fn bind_group_layout(mut self, index: usize, layout: Handle<BindGroupLayout>) -> Self {
-        if index < 4 {
-            self.bg_layouts[index] = Some(layout);
-        }
         self
     }
 
@@ -202,7 +192,7 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
         let info = GraphicsPipelineLayoutInfo {
             debug_name: self.debug_name,
             vertex_info: self.vertex_info.expect("vertex_info is required"),
-            bg_layouts: self.bg_layouts,
+            bg_layouts: [None; 4],
             bt_layouts: self.bt_layouts,
             shaders: &self.shaders,
             details: self.details,
@@ -278,7 +268,6 @@ impl GraphicsPipelineBuilder {
 
 /// Builds a ComputePipelineLayout via the builder pattern.
 pub struct ComputePipelineLayoutBuilder<'a> {
-    bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     shader: Option<PipelineShaderInfo<'a>>,
 }
@@ -287,18 +276,9 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     /// Start a new builder for compute pipeline layout.
     pub fn new() -> Self {
         Self {
-            bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shader: None,
         }
-    }
-
-    /// Attach a bind group layout at a given index.
-    pub fn bind_group_layout(mut self, index: usize, layout: Handle<BindGroupLayout>) -> Self {
-        if index < 4 {
-            self.bg_layouts[index] = Some(layout);
-        }
-        self
     }
 
     /// Attach a bind table layout at a given index.
@@ -318,7 +298,7 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     /// Finalize and create the ComputePipelineLayout.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<ComputePipelineLayout>, GPUError> {
         let info = ComputePipelineLayoutInfo {
-            bg_layouts: self.bg_layouts,
+            bg_layouts: [None; 4],
             bt_layouts: self.bt_layouts,
             shader: &self.shader.expect("shader is required"),
         };
@@ -821,10 +801,10 @@ mod tests {
             rate: VertexRate::Vertex,
             entries: &[],
         };
-        // dummy bind group layout
-        let bgl = ctx
-            .make_bind_group_layout(&BindGroupLayoutInfo {
-                debug_name: "bgl",
+        // dummy bind table layout
+        let btl = ctx
+            .make_bind_table_layout(&BindTableLayoutInfo {
+                debug_name: "btl",
                 shaders: &[],
             })
             .unwrap();
@@ -838,7 +818,7 @@ mod tests {
         );
         let gpl_builder = GraphicsPipelineLayoutBuilder::new("gpl")
             .vertex_info(vert_info)
-            .bind_group_layout(0, bgl)
+            .bind_table_layout(0, btl)
             .shader(PipelineShaderInfo {
                 stage: ShaderType::Vertex,
                 spirv: spirv_vert,

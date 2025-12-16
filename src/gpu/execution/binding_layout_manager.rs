@@ -3,9 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{bail, Context as _, Result};
 
-use crate::gpu::vulkan::{
-    BindGroupLayout, BindGroupLayoutInfo, BindTableLayout, BindTableLayoutInfo, Context,
-};
+use crate::gpu::vulkan::{BindGroupLayoutInfo, BindTableLayout, BindTableLayoutInfo, Context};
 use crate::utils::Handle;
 
 use super::BindingManager;
@@ -24,7 +22,6 @@ use serde::{Deserialize, Serialize};
 /// resolves to the same GPU objects regardless of where it was loaded.
 pub struct BindingLayoutManager {
     binding_manager: Arc<BindingManager>,
-    bind_group_layouts: RwLock<HashMap<String, Handle<BindGroupLayout>>>,
     bind_table_layouts: RwLock<HashMap<String, Handle<BindTableLayout>>>,
 }
 
@@ -32,7 +29,6 @@ impl BindingLayoutManager {
     pub fn new(ctx: *mut Context, frames_in_flight: usize, thread_count: usize) -> Self {
         Self {
             binding_manager: BindingManager::new(ctx, frames_in_flight, thread_count),
-            bind_group_layouts: RwLock::new(HashMap::new()),
             bind_table_layouts: RwLock::new(HashMap::new()),
         }
     }
@@ -45,25 +41,12 @@ impl BindingLayoutManager {
         &self,
         name: impl Into<String>,
         info: &BindGroupLayoutInfo<'_>,
-    ) -> Result<Handle<BindGroupLayout>> {
-        let name = name.into();
-        let handle = self
-            .binding_manager
-            .try_get_or_create_bgl_from_info(info, |ctx, info| ctx.make_bind_group_layout(info))
-            .with_context(|| format!("creating bind group layout '{}'", name))?;
-
-        let mut map = self.bind_group_layouts.write().unwrap();
-        if let Some(existing) = map.get(&name) {
-            if *existing != handle {
-                bail!(
-                    "bind group layout '{}' already registered with a different definition",
-                    name
-                );
-            }
-        } else {
-            map.insert(name.clone(), handle);
-        }
-        Ok(handle)
+    ) -> Result<Handle<BindTableLayout>> {
+        let info = BindTableLayoutInfo {
+            debug_name: info.debug_name,
+            shaders: info.shaders,
+        };
+        self.register_bind_table_layout(name, &info)
     }
 
     pub fn register_bind_table_layout(
@@ -91,12 +74,12 @@ impl BindingLayoutManager {
         Ok(handle)
     }
 
-    pub fn bind_group_layout(&self, name: &str) -> Option<Handle<BindGroupLayout>> {
-        self.bind_group_layouts.read().unwrap().get(name).copied()
-    }
-
     pub fn bind_table_layout(&self, name: &str) -> Option<Handle<BindTableLayout>> {
         self.bind_table_layouts.read().unwrap().get(name).copied()
+    }
+
+    pub fn bind_group_layout(&self, name: &str) -> Option<Handle<BindTableLayout>> {
+        self.bind_table_layout(name)
     }
 
     #[cfg(feature = "dashi-serde")]
@@ -104,7 +87,7 @@ impl BindingLayoutManager {
         &self,
         name: impl Into<String>,
         cfg: &cfg::BindGroupLayoutCfg,
-    ) -> Result<Handle<BindGroupLayout>> {
+    ) -> Result<Handle<BindTableLayout>> {
         let borrowed = cfg.borrow();
         let info = borrowed.info();
         self.register_bind_group_layout(name, &info)
@@ -138,9 +121,7 @@ impl BindingLayoutManager {
     pub fn load_from_cfg(&self, cfg: &BindingLayoutsCfg) -> Result<()> {
         for entry in &cfg.bind_group_layouts {
             self.register_bind_group_layout_cfg(&entry.name, &entry.layout)
-                .with_context(|| {
-                    format!("registering bind group layout '{}'", entry.name)
-                })?;
+                .with_context(|| format!("registering bind table layout '{}'", entry.name))?;
         }
 
         for entry in &cfg.bind_table_layouts {
@@ -153,23 +134,6 @@ impl BindingLayoutManager {
 }
 
 impl BindingLayoutManager {
-    /// Resolve bind group layouts referenced by a pipeline layout configuration.
-    pub fn resolve_bind_group_layouts(
-        &self,
-        refs: &[Option<String>; 4],
-    ) -> Result<[Option<Handle<BindGroupLayout>>; 4]> {
-        let mut resolved = [None; 4];
-        for (dst, name) in resolved.iter_mut().zip(refs.iter()) {
-            if let Some(name) = name {
-                let handle = self
-                    .bind_group_layout(name)
-                    .ok_or_else(|| anyhow::anyhow!("unknown bind group layout '{}'", name))?;
-                *dst = Some(handle);
-            }
-        }
-        Ok(resolved)
-    }
-
     /// Resolve bind table layouts referenced by a pipeline layout configuration.
     pub fn resolve_bind_table_layouts(
         &self,
