@@ -14,7 +14,7 @@ use crate::{
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
 #[inline]
-pub fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
+pub(super) fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
     match layout {
         Layout::Undefined => vk::ImageLayout::UNDEFINED,
         Layout::General => vk::ImageLayout::GENERAL,
@@ -29,7 +29,7 @@ pub fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
 }
 
 #[inline]
-pub fn usage_to_stages(usage: UsageBits) -> vk::PipelineStageFlags {
+pub(super) fn usage_to_stages(usage: UsageBits) -> vk::PipelineStageFlags {
     let mut flags = vk::PipelineStageFlags::empty();
     for (u, s) in USAGE_TO_STAGE {
         if usage.contains(*u) {
@@ -44,7 +44,7 @@ pub fn usage_to_stages(usage: UsageBits) -> vk::PipelineStageFlags {
 }
 
 #[inline]
-pub fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
+pub(super) fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
     let mut flags = vk::AccessFlags::empty();
     for (u, a) in USAGE_TO_ACCESS {
         if usage.contains(*u) {

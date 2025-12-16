@@ -1,8 +1,9 @@
+use super::XrSwapchainImage;
+use ash::vk;
+use ash::vk::Handle;
+use ash::{Device, Instance};
 #[cfg(feature = "dashi-openxr")]
 use openxr as xr;
-use ash::vk;
-use ash::{Device, Instance};
-use ash::vk::Handle;
 
 /// Create an OpenXR Vulkan session and swapchain.
 ///
@@ -28,7 +29,7 @@ pub fn create_xr_session(
         xr::FrameWaiter,
         xr::FrameStream<xr::Vulkan>,
         xr::Swapchain<xr::Vulkan>,
-        Vec<vk::Image>,
+        Vec<XrSwapchainImage>,
         Vec<xr::ViewConfigurationView>,
     ),
     xr::sys::Result,
@@ -36,9 +37,7 @@ pub fn create_xr_session(
     #[cfg(feature = "static")]
     let entry = xr::Entry::linked();
     #[cfg(not(feature = "static"))]
-    let entry = unsafe {
-        xr::Entry::load().map_err(|_| xr::sys::Result::ERROR_RUNTIME_FAILURE)?
-    };
+    let entry = unsafe { xr::Entry::load().map_err(|_| xr::sys::Result::ERROR_RUNTIME_FAILURE)? };
 
     let exts = entry.enumerate_extensions()?;
     if !exts.khr_vulkan_enable2 {
@@ -74,10 +73,8 @@ pub fn create_xr_session(
         )?
     };
 
-    let views = instance.enumerate_view_configuration_views(
-        system,
-        xr::ViewConfigurationType::PRIMARY_STEREO,
-    )?;
+    let views = instance
+        .enumerate_view_configuration_views(system, xr::ViewConfigurationType::PRIMARY_STEREO)?;
     let image_rect_width = views[0].recommended_image_rect_width;
     let image_rect_height = views[0].recommended_image_rect_height;
     let array_size = views.len() as u32;
@@ -96,7 +93,7 @@ pub fn create_xr_session(
     let images_raw = swapchain.enumerate_images()?;
     let images = images_raw
         .into_iter()
-        .map(|img| vk::Image::from_raw(img as u64))
+        .map(|img| XrSwapchainImage::from_raw(img as u64))
         .collect();
 
     Ok((instance, session, waiter, stream, swapchain, images, views))
@@ -139,26 +136,44 @@ impl XrInput {
         let left_path = instance.string_to_path("/user/hand/left")?;
         let right_path = instance.string_to_path("/user/hand/right")?;
 
-        let grip_action =
-            action_set.create_action::<xr::Posef>("grip_pose", "Grip Pose", &[left_path, right_path])?;
+        let grip_action = action_set.create_action::<xr::Posef>(
+            "grip_pose",
+            "Grip Pose",
+            &[left_path, right_path],
+        )?;
         let trigger_action =
             action_set.create_action::<f32>("trigger", "Trigger", &[left_path, right_path])?;
 
         instance.suggest_interaction_profile_bindings(
             instance.string_to_path("/interaction_profiles/khr/simple_controller")?,
             &[
-                xr::Binding::new(&grip_action, instance.string_to_path("/user/hand/left/input/grip/pose")?),
-                xr::Binding::new(&grip_action, instance.string_to_path("/user/hand/right/input/grip/pose")?),
-                xr::Binding::new(&trigger_action, instance.string_to_path("/user/hand/left/input/select/value")?),
-                xr::Binding::new(&trigger_action, instance.string_to_path("/user/hand/right/input/select/value")?),
+                xr::Binding::new(
+                    &grip_action,
+                    instance.string_to_path("/user/hand/left/input/grip/pose")?,
+                ),
+                xr::Binding::new(
+                    &grip_action,
+                    instance.string_to_path("/user/hand/right/input/grip/pose")?,
+                ),
+                xr::Binding::new(
+                    &trigger_action,
+                    instance.string_to_path("/user/hand/left/input/select/value")?,
+                ),
+                xr::Binding::new(
+                    &trigger_action,
+                    instance.string_to_path("/user/hand/right/input/select/value")?,
+                ),
             ],
         )?;
 
         session.attach_action_sets(&[&action_set])?;
 
-        let base_space = session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
-        let left_space = grip_action.create_space(session.clone(), left_path, xr::Posef::IDENTITY)?;
-        let right_space = grip_action.create_space(session.clone(), right_path, xr::Posef::IDENTITY)?;
+        let base_space =
+            session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
+        let left_space =
+            grip_action.create_space(session.clone(), left_path, xr::Posef::IDENTITY)?;
+        let right_space =
+            grip_action.create_space(session.clone(), right_path, xr::Posef::IDENTITY)?;
 
         Ok(Self {
             session: session.clone(),

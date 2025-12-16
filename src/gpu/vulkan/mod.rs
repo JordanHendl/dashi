@@ -8,6 +8,7 @@ use crate::{
     execution::CommandRing,
     utils::{Handle, Pool},
 };
+use ash::vk::Handle as VkHandle;
 use ash::*;
 pub use error::*;
 use std::{
@@ -23,7 +24,7 @@ pub mod structs;
 pub use structs::*;
 pub mod builders;
 pub mod commands;
-pub use commands::*;
+use commands::*;
 pub mod timing;
 pub use timing::*;
 #[cfg(feature = "dashi-minifb")]
@@ -71,6 +72,116 @@ unsafe extern "system" fn vulkan_debug_callback(
         message.to_string_lossy()
     );
     vk::FALSE
+}
+
+#[derive(Debug)]
+pub struct DebugMessenger {
+    raw_handle: u64,
+    callback_state: Box<DebugMessengerCallbackState>,
+}
+
+impl DebugMessenger {
+    fn raw(&self) -> vk::DebugUtilsMessengerEXT {
+        vk::DebugUtilsMessengerEXT::from_raw(self.raw_handle)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DebugMessengerCallbackState {
+    callback: DebugMessengerCallback,
+    user_data: *mut c_void,
+}
+
+fn vk_severity_flags(flags: DebugMessageSeverity) -> vk::DebugUtilsMessageSeverityFlagsEXT {
+    let mut vk_flags = vk::DebugUtilsMessageSeverityFlagsEXT::empty();
+    if flags.contains(DebugMessageSeverity::VERBOSE) {
+        vk_flags |= vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE;
+    }
+    if flags.contains(DebugMessageSeverity::INFO) {
+        vk_flags |= vk::DebugUtilsMessageSeverityFlagsEXT::INFO;
+    }
+    if flags.contains(DebugMessageSeverity::WARNING) {
+        vk_flags |= vk::DebugUtilsMessageSeverityFlagsEXT::WARNING;
+    }
+    if flags.contains(DebugMessageSeverity::ERROR) {
+        vk_flags |= vk::DebugUtilsMessageSeverityFlagsEXT::ERROR;
+    }
+    vk_flags
+}
+
+fn vk_message_type_flags(flags: DebugMessageType) -> vk::DebugUtilsMessageTypeFlagsEXT {
+    let mut vk_flags = vk::DebugUtilsMessageTypeFlagsEXT::empty();
+    if flags.contains(DebugMessageType::GENERAL) {
+        vk_flags |= vk::DebugUtilsMessageTypeFlagsEXT::GENERAL;
+    }
+    if flags.contains(DebugMessageType::VALIDATION) {
+        vk_flags |= vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION;
+    }
+    if flags.contains(DebugMessageType::PERFORMANCE) {
+        vk_flags |= vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE;
+    }
+    vk_flags
+}
+
+fn debug_severity_from_vk(flags: vk::DebugUtilsMessageSeverityFlagsEXT) -> DebugMessageSeverity {
+    let mut severity = DebugMessageSeverity::empty();
+    if flags.contains(vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE) {
+        severity |= DebugMessageSeverity::VERBOSE;
+    }
+    if flags.contains(vk::DebugUtilsMessageSeverityFlagsEXT::INFO) {
+        severity |= DebugMessageSeverity::INFO;
+    }
+    if flags.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
+        severity |= DebugMessageSeverity::WARNING;
+    }
+    if flags.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
+        severity |= DebugMessageSeverity::ERROR;
+    }
+    severity
+}
+
+fn debug_message_type_from_vk(flags: vk::DebugUtilsMessageTypeFlagsEXT) -> DebugMessageType {
+    let mut message_type = DebugMessageType::empty();
+    if flags.contains(vk::DebugUtilsMessageTypeFlagsEXT::GENERAL) {
+        message_type |= DebugMessageType::GENERAL;
+    }
+    if flags.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION) {
+        message_type |= DebugMessageType::VALIDATION;
+    }
+    if flags.contains(vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE) {
+        message_type |= DebugMessageType::PERFORMANCE;
+    }
+    message_type
+}
+
+unsafe extern "system" fn user_debug_trampoline(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    user_data: *mut c_void,
+) -> vk::Bool32 {
+    let state = &mut *(user_data as *mut DebugMessengerCallbackState);
+
+    let message = if p_callback_data.is_null() || unsafe { (*p_callback_data).p_message.is_null() }
+    {
+        // SAFETY: static null-terminated string.
+        unsafe { CStr::from_bytes_with_nul_unchecked(b"\0") }
+    } else {
+        unsafe { CStr::from_ptr((*p_callback_data).p_message) }
+    };
+
+    let handled = (state.callback)(
+        debug_severity_from_vk(message_severity),
+        debug_message_type_from_vk(message_type),
+        message,
+        state.user_data,
+    );
+
+    if handled {
+        vk::TRUE
+    } else {
+        vk::FALSE
+    }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
@@ -2182,23 +2293,39 @@ impl Context {
     /// Validation layers must be enabled via `DASHI_VALIDATION=1` for this to succeed.
     pub fn create_debug_messenger(
         &self,
-        info: &vk::DebugUtilsMessengerCreateInfoEXT,
-    ) -> Result<vk::DebugUtilsMessengerEXT> {
+        info: &DebugMessengerCreateInfo,
+    ) -> Result<DebugMessenger> {
         let debug_utils = self.debug_utils.as_ref().ok_or(GPUError::Unimplemented(
             "Debug utils unavailable; enable validation to install callbacks",
         ))?;
 
-        unsafe {
+        let mut callback_state = Box::new(DebugMessengerCallbackState {
+            callback: info.user_callback,
+            user_data: info.user_data,
+        });
+
+        let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+            .message_severity(vk_severity_flags(info.message_severity))
+            .message_type(vk_message_type_flags(info.message_type))
+            .pfn_user_callback(Some(user_debug_trampoline))
+            .user_data(callback_state.as_mut() as *mut _ as *mut c_void);
+
+        let messenger = unsafe {
             debug_utils
-                .create_debug_utils_messenger(info, None)
-                .map_err(GPUError::from)
-        }
+                .create_debug_utils_messenger(&messenger_info, None)
+                .map_err(GPUError::from)?
+        };
+
+        Ok(DebugMessenger {
+            raw_handle: messenger.as_raw(),
+            callback_state,
+        })
     }
 
     /// Destroys a debug messenger created via [`create_debug_messenger`].
-    pub fn destroy_debug_messenger(&self, messenger: vk::DebugUtilsMessengerEXT) {
+    pub fn destroy_debug_messenger(&self, messenger: DebugMessenger) {
         if let Some(utils) = &self.debug_utils {
-            unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
+            unsafe { utils.destroy_debug_utils_messenger(messenger.raw(), None) };
         }
     }
 

@@ -2,24 +2,26 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use ash::vk;
-use dashi::gpu::vulkan::{Context, ContextInfo, GPUError};
+use dashi::gpu::vulkan::{
+    Context, ContextInfo, DebugMessageSeverity, DebugMessageType, DebugMessenger,
+    DebugMessengerCreateInfo, GPUError,
+};
 
 unsafe extern "system" fn validation_error_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    _p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    message_severity: DebugMessageSeverity,
+    message_type: DebugMessageType,
+    _message: &std::ffi::CStr,
     user_data: *mut c_void,
-) -> vk::Bool32 {
-    if message_severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR)
-        && message_type.contains(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION)
+) -> bool {
+    if message_severity.contains(DebugMessageSeverity::ERROR)
+        && message_type.contains(DebugMessageType::VALIDATION)
     {
         if let Some(flag) = (!user_data.is_null()).then(|| &*(user_data as *const AtomicBool)) {
             flag.store(true, Ordering::SeqCst);
         }
     }
 
-    vk::FALSE
+    false
 }
 
 pub struct ValidationContext {
@@ -90,7 +92,7 @@ struct ValidationGuard {
     original_validation: Option<String>,
     validation_flag: Arc<AtomicBool>,
     validation_ptr: Option<*const AtomicBool>,
-    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
+    debug_messenger: Option<DebugMessenger>,
 }
 
 impl ValidationGuard {
@@ -98,11 +100,12 @@ impl ValidationGuard {
         let validation_flag = Arc::new(AtomicBool::new(false));
         let validation_ptr = Arc::into_raw(Arc::clone(&validation_flag));
 
-        let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR)
-            .message_type(vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION)
-            .pfn_user_callback(Some(validation_error_callback))
-            .user_data(validation_ptr as *mut c_void);
+        let messenger_info = DebugMessengerCreateInfo {
+            message_severity: DebugMessageSeverity::ERROR,
+            message_type: DebugMessageType::VALIDATION,
+            user_callback: validation_error_callback,
+            user_data: validation_ptr as *mut c_void,
+        };
 
         let debug_messenger = ctx.create_debug_messenger(&messenger_info)?;
 
