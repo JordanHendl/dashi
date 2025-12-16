@@ -1,6 +1,8 @@
 use crate::utils::Handle;
 use ash::vk;
 
+#[cfg(feature = "dashi-openxr")]
+use super::XrSwapchainImage;
 use super::{
     Context, DisplayInfo, Fence, GPUError, Image, ImageView, SampleCount, Semaphore,
     WindowBuffering, WindowInfo,
@@ -56,7 +58,7 @@ pub struct Display {
     #[cfg(feature = "dashi-openxr")]
     pub(crate) xr_swapchain: xr::Swapchain<xr::Vulkan>,
     #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_images: Vec<vk::Image>,
+    pub(crate) xr_images: Vec<XrSwapchainImage>,
     #[cfg(feature = "dashi-openxr")]
     pub(crate) xr_view_config: Vec<xr::ViewConfigurationView>,
     #[cfg(feature = "dashi-openxr")]
@@ -110,7 +112,7 @@ impl Display {
     }
 
     #[cfg(feature = "dashi-openxr")]
-    pub fn xr_swapchain_images(&self) -> &[vk::Image] {
+    pub fn xr_swapchain_images(&self) -> &[XrSwapchainImage] {
         &self.xr_images
     }
 

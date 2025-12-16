@@ -3,8 +3,10 @@ use super::{
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice, SubpassSampleInfo,
 };
 use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
+use bitflags::bitflags;
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ffi::{c_void, CStr};
 use std::hash::{Hash, Hasher};
 
 use bytemuck::{Pod, Zeroable};
@@ -20,6 +22,62 @@ fn hash64<T: Hash>(value: &T) -> u64 {
 
 fn hash_f32<H: Hasher>(value: f32, state: &mut H) {
     state.write(&value.to_bits().to_le_bytes());
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct DebugMessageSeverity: u32 {
+        const VERBOSE = 0x1;
+        const INFO = 0x2;
+        const WARNING = 0x4;
+        const ERROR = 0x8;
+    }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct DebugMessageType: u32 {
+        const GENERAL = 0x1;
+        const VALIDATION = 0x2;
+        const PERFORMANCE = 0x4;
+    }
+}
+
+pub type DebugMessengerCallback = unsafe extern "system" fn(
+    severity: DebugMessageSeverity,
+    message_type: DebugMessageType,
+    message: &CStr,
+    user_data: *mut c_void,
+) -> bool;
+
+#[derive(Clone, Copy)]
+pub struct DebugMessengerCreateInfo {
+    pub message_severity: DebugMessageSeverity,
+    pub message_type: DebugMessageType,
+    pub user_callback: DebugMessengerCallback,
+    pub user_data: *mut c_void,
+}
+
+impl Default for DebugMessengerCreateInfo {
+    fn default() -> Self {
+        Self {
+            message_severity: DebugMessageSeverity::WARNING | DebugMessageSeverity::ERROR,
+            message_type: DebugMessageType::GENERAL
+                | DebugMessageType::VALIDATION
+                | DebugMessageType::PERFORMANCE,
+            user_callback: dummy_debug_callback,
+            user_data: std::ptr::null_mut(),
+        }
+    }
+}
+
+unsafe extern "system" fn dummy_debug_callback(
+    _severity: DebugMessageSeverity,
+    _message_type: DebugMessageType,
+    _message: &CStr,
+    _user_data: *mut c_void,
+) -> bool {
+    false
 }
 
 #[repr(C)]
@@ -198,6 +256,21 @@ pub enum Filter {
 }
 
 unsafe impl Pod for Filter {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct XrSwapchainImage {
+    raw_handle: u64,
+}
+
+impl XrSwapchainImage {
+    pub fn raw_handle(&self) -> u64 {
+        self.raw_handle
+    }
+
+    pub(crate) fn from_raw(raw_handle: u64) -> Self {
+        Self { raw_handle }
+    }
+}
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
