@@ -396,18 +396,18 @@ impl CommandQueue {
         }
     }
 
-    fn ensure_bind_group_state(&mut self, group: Handle<BindGroup>) {
+    fn ensure_bind_group_state(&mut self, group: Handle<BindGroup>, queue: QueueType) {
         if let Some(bg) = self.ctx_ref().bind_groups.get_ref(group) {
             for (buffer, usage) in &bg.buffer_states {
-                self.ensure_buffer_state(*buffer, *usage);
+                self.ensure_buffer_state_on_queue(*buffer, *usage, queue);
             }
         }
     }
 
-    fn ensure_bind_table_state(&mut self, table: Handle<BindTable>) {
+    fn ensure_bind_table_state(&mut self, table: Handle<BindTable>, queue: QueueType) {
         if let Some(bt) = self.ctx_ref().bind_tables.get_ref(table) {
             for (buffer, usage) in &bt.buffer_states {
-                self.ensure_buffer_state(*buffer, *usage);
+                self.ensure_buffer_state_on_queue(*buffer, *usage, queue);
             }
         }
     }
@@ -417,11 +417,12 @@ impl CommandQueue {
         bind_tables: &[Option<Handle<BindTable>>; 4],
         bind_groups: &[Option<Handle<BindGroup>>; 4],
     ) {
+        let queue = self.queue_type;
         for table in bind_tables.iter().flatten() {
-            self.ensure_bind_table_state(*table);
+            self.ensure_bind_table_state(*table, queue);
         }
         for group in bind_groups.iter().flatten() {
-            self.ensure_bind_group_state(*group);
+            self.ensure_bind_group_state(*group, queue);
         }
     }
 
