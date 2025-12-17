@@ -41,6 +41,12 @@ pub struct BufferBarrier {
     pub new_queue: QueueType,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BufferState {
+    usage: UsageBits,
+    queue: QueueType,
+}
+
 #[inline]
 fn pick_layout_for_usage(usage: UsageBits) -> Layout {
     // Priority order: writes/attachments/present beat copies, which beat UAV/general, which beat sampled.
@@ -80,10 +86,9 @@ fn pick_layout_for_usage(usage: UsageBits) -> Layout {
 #[derive(Default)]
 pub struct StateTracker {
     images: HashMap<(Handle<Image>, SubresourceRange), UsageBits>,
-    buffers: HashMap<Handle<Buffer>, UsageBits>,
+    buffers: HashMap<Handle<Buffer>, BufferState>,
     image_layouts: HashMap<(Handle<Image>, SubresourceRange), Layout>,
     image_queues: HashMap<(Handle<Image>, SubresourceRange), QueueType>,
-    buffer_queues: HashMap<Handle<Buffer>, QueueType>,
 }
 
 impl StateTracker {
@@ -93,7 +98,6 @@ impl StateTracker {
             image_layouts: HashMap::new(),
             buffers: HashMap::new(),
             image_queues: HashMap::new(),
-            buffer_queues: HashMap::new(),
         }
     }
 
@@ -102,7 +106,6 @@ impl StateTracker {
         self.buffers.clear();
         self.image_layouts.clear();
         self.image_queues.clear();
-        self.buffer_queues.clear();
     }
 
     /// Returns (usage barrier if usage changed, layout transition if usage or layout changed).
@@ -172,29 +175,21 @@ impl StateTracker {
         usage: UsageBits,
         queue: QueueType,
     ) -> Option<BufferBarrier> {
-        let current = self.buffers.get(&buffer).copied().unwrap_or_default();
-        let usage_changed = current != usage;
-        let old_queue = self.buffer_queues.get(&buffer).copied().unwrap_or(queue);
-        let queue_changed = old_queue != queue;
+        let previous = self.buffers.get(&buffer).copied().unwrap_or(BufferState {
+            usage: UsageBits::empty(),
+            queue,
+        });
+        let usage_changed = previous.usage != usage;
+        let queue_changed = previous.queue != queue;
 
-        if usage_changed {
-            self.buffers.insert(buffer, usage);
-        } else {
-            self.buffers.entry(buffer).or_insert(usage);
-        }
-
-        if queue_changed {
-            self.buffer_queues.insert(buffer, queue);
-        } else {
-            self.buffer_queues.entry(buffer).or_insert(queue);
-        }
+        self.buffers.insert(buffer, BufferState { usage, queue });
 
         if usage_changed || queue_changed {
             Some(BufferBarrier {
                 buffer,
-                old_usage: current,
+                old_usage: previous.usage,
                 new_usage: usage,
-                old_queue,
+                old_queue: previous.queue,
                 new_queue: queue,
             })
         } else {
