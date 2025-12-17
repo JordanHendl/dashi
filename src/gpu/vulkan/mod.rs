@@ -1456,6 +1456,20 @@ impl Context {
         }
     }
 
+    pub fn flush_buffer(&mut self, buffer: BufferView) -> Result<()> {
+        let buf = match self.buffers.get_ref(buffer.handle) {
+            Some(it) => it,
+            None => return Err(GPUError::SlotError()),
+        };
+
+        let buffer_size = buf.size as u64;
+        let available = buffer_size.saturating_sub(buffer.offset.min(buffer_size));
+
+        let info = self.allocator.get_allocation_info(&buf.alloc);
+        self.allocator.flush_allocation(&buf.alloc, info.offset as usize, info.size as usize)?;
+        Ok(())
+    }
+
     pub fn map_buffer_mut<T>(&mut self, view: BufferView) -> Result<&mut [T]> {
         let buf = match self.buffers.get_ref(view.handle) {
             Some(it) => it,
