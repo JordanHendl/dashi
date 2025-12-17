@@ -33,9 +33,13 @@ bitflags! {
         const PRESENT     = 0x40;
         const DEPTH_READ  = 0x80;
         const DEPTH_WRITE = 0x100;
+        const VERTEX_READ = 0x200;
+        const INDEX_READ  = 0x400;
+        const UNIFORM_READ = 0x800;
+        const STORAGE_READ = 0x1000;
+        const STORAGE_WRITE = 0x2000;
     }
 }
 
 unsafe impl Pod for UsageBits {}
 unsafe impl Zeroable for UsageBits {}
-

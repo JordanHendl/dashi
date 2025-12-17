@@ -15,6 +15,7 @@ pub struct BindGroupLayout {
 pub struct BindGroup {
     pub(super) set: vk::DescriptorSet,
     pub(super) set_id: u32,
+    pub(super) buffer_states: Vec<(Handle<Buffer>, UsageBits)>,
 }
 
 #[allow(dead_code)]
@@ -33,6 +34,7 @@ pub struct BindTable {
     pub(super) set: vk::DescriptorSet,
     pub(super) set_id: u32,
     pub(super) layout: Handle<BindTableLayout>,
+    pub(super) buffer_states: Vec<(Handle<Buffer>, UsageBits)>,
 }
 
 impl CommandQueue {

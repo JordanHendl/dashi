@@ -7,6 +7,7 @@ use crate::{
     },
     execution::CommandRing,
     utils::{Handle, Pool},
+    UsageBits,
 };
 use ash::vk::Handle as VkHandle;
 use ash::*;
@@ -2131,6 +2132,7 @@ impl Context {
                     BindGroupVariableType::SampledImage => supports_sampled_uab,
                     BindGroupVariableType::StorageImage => supports_storage_image_uab,
                 };
+                let binding_supports_uab = false && binding_supports_uab;
                 if binding_supports_uab {
                     binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
                     uses_update_after_bind = true;
@@ -2399,6 +2401,34 @@ impl Context {
         }
     }
 
+    fn usage_bits_for_variable(var_type: BindGroupVariableType) -> UsageBits {
+        match var_type {
+            BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
+                UsageBits::UNIFORM_READ
+            }
+            BindGroupVariableType::Storage | BindGroupVariableType::DynamicStorage => {
+                UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
+            }
+            _ => UsageBits::empty(),
+        }
+    }
+
+    fn buffer_usage_from_resource(
+        resource: &ShaderResource,
+        var_type: BindGroupVariableType,
+    ) -> Option<(Handle<Buffer>, UsageBits)> {
+        let usage = Self::usage_bits_for_variable(var_type);
+        match resource {
+            ShaderResource::Buffer(view)
+            | ShaderResource::ConstBuffer(view)
+            | ShaderResource::StorageBuffer(view) => Some((view.handle, usage)),
+            ShaderResource::Dynamic(alloc) | ShaderResource::DynamicStorage(alloc) => {
+                Some((alloc.pool, usage))
+            }
+            _ => None,
+        }
+    }
+
     fn resolve_bind_table_bindings(
         &self,
         table_bindings: &[IndexedBindingInfo],
@@ -2416,16 +2446,18 @@ impl Context {
         table_handle: Handle<BindTable>,
         bindings: &[IndexedBindingInfo],
     ) -> Result<()> {
-        let table = self.bind_tables.get_ref(table_handle).unwrap();
-        let layout = self.bind_table_layouts.get_ref(table.layout).unwrap();
+        let (descriptor_set, layout_handle) = {
+            let table = self.bind_tables.get_ref(table_handle).unwrap();
+            (table.set, table.layout)
+        };
+        let layout = self.bind_table_layouts.get_ref(layout_handle).unwrap();
         let Some(requirements) = layout_binding_requirements(&layout.variables) else {
             return Err(GPUError::InvalidBindTableBinding {
                 binding: u32::MAX,
                 reason: "bind table layout has conflicting bindings".to_string(),
             });
         };
-        let descriptor_set = table.set;
-
+        let mut tracked_states = Vec::new();
         let mut write_descriptor_sets = Vec::with_capacity(9064);
         let mut buffer_infos = Vec::with_capacity(9064);
         let mut image_infos = Vec::with_capacity(9064);
@@ -2472,6 +2504,11 @@ impl Context {
 
                 match &res.resource {
                     ShaderResource::Buffer(view) => {
+                        if let Some((buffer, usage)) =
+                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_states.push((buffer, usage));
+                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
                         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -2522,6 +2559,11 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::Dynamic(alloc) => {
+                        if let Some((buffer, usage)) =
+                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_states.push((buffer, usage));
+                        }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
 
                         let buffer_info = vk::DescriptorBufferInfo::builder()
@@ -2543,6 +2585,11 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::DynamicStorage(alloc) => {
+                        if let Some((buffer, usage)) =
+                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_states.push((buffer, usage));
+                        }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
@@ -2563,6 +2610,11 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::StorageBuffer(view) => {
+                        if let Some((buffer, usage)) =
+                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_states.push((buffer, usage));
+                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
                         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -2591,6 +2643,11 @@ impl Context {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(view) => {
+                        if let Some((buffer, usage)) =
+                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_states.push((buffer, usage));
+                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
 
                         let size = if view.size == 0 {
@@ -2623,6 +2680,9 @@ impl Context {
                 .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
 
+        let table = self.bind_tables.get_mut_ref(table_handle).unwrap();
+        table.buffer_states = tracked_states;
+
         Ok(())
     }
 
@@ -2654,12 +2714,25 @@ impl Context {
             vk::ObjectType::DESCRIPTOR_SET,
         );
 
+        let requirements = layout_binding_requirements(&layout.variables);
+
         // Step 2: Prepare the write operations for the descriptor set
         let mut write_descriptor_sets = Vec::with_capacity(2048);
         let mut buffer_infos = Vec::with_capacity(2048);
         let mut image_infos = Vec::with_capacity(2048);
+        let mut tracked_buffers = Vec::new();
 
         for binding_info in info.bindings.iter() {
+            if let Some(req) = requirements
+                .as_ref()
+                .and_then(|req| req.get(&binding_info.binding))
+            {
+                if let Some((buffer, usage)) =
+                    Self::buffer_usage_from_resource(&binding_info.resource, req.0)
+                {
+                    tracked_buffers.push((buffer, usage));
+                }
+            }
             match &binding_info.resource {
                 ShaderResource::Buffer(view) => {
                     let buffer = self.buffers.get_ref(view.handle).unwrap();
@@ -2812,6 +2885,7 @@ impl Context {
         let bind_group = BindGroup {
             set: descriptor_set,
             set_id: info.set,
+            buffer_states: tracked_buffers,
         };
 
         Ok(self.bind_groups.insert(bind_group).unwrap())
@@ -2839,6 +2913,7 @@ impl Context {
             set: descriptor_set,
             set_id: info.set,
             layout: info.layout,
+            buffer_states: Vec::new(),
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();

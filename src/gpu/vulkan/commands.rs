@@ -8,8 +8,9 @@ use crate::gpu::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError, GraphicsPipeline,
-    Image, ImageView, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
+    BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence,
+    GPUError, GraphicsPipeline, Image, ImageView, QueueType, Rect2D, Result, Semaphore,
+    SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -386,6 +387,35 @@ impl CommandQueue {
         }
     }
 
+    fn ensure_bind_group_state(&mut self, group: Handle<BindGroup>) {
+        if let Some(bg) = self.ctx_ref().bind_groups.get_ref(group) {
+            for (buffer, usage) in &bg.buffer_states {
+                self.ensure_buffer_state(*buffer, *usage);
+            }
+        }
+    }
+
+    fn ensure_bind_table_state(&mut self, table: Handle<BindTable>) {
+        if let Some(bt) = self.ctx_ref().bind_tables.get_ref(table) {
+            for (buffer, usage) in &bt.buffer_states {
+                self.ensure_buffer_state(*buffer, *usage);
+            }
+        }
+    }
+
+    fn ensure_binding_states(
+        &mut self,
+        bind_tables: &[Option<Handle<BindTable>>; 4],
+        bind_groups: &[Option<Handle<BindGroup>>; 4],
+    ) {
+        for table in bind_tables.iter().flatten() {
+            self.ensure_bind_table_state(*table);
+        }
+        for group in bind_groups.iter().flatten() {
+            self.ensure_bind_group_state(*group);
+        }
+    }
+
     fn apply_image_barrier(&mut self, cmd: &LayoutTransition) {
         let ctx = self.ctx_ref();
         let img_data = ctx
@@ -479,11 +509,11 @@ impl CommandQueue {
             .ok_or(GPUError::SlotError())
             .unwrap();
 
-        let src_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-        let src_access = vk::AccessFlags::empty();
+        let src_stage = usage_to_stages(cmd.old_usage);
+        let src_access = usage_to_access(cmd.old_usage);
 
-        let dst_stage = usage_to_stages(cmd.usage);
-        let dst_access = usage_to_access(cmd.usage);
+        let dst_stage = usage_to_stages(cmd.new_usage);
+        let dst_access = usage_to_access(cmd.new_usage);
 
         let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
             (
@@ -1353,6 +1383,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
+        self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1419,6 +1451,9 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
+        self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+        self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
+        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
@@ -1498,6 +1533,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) {
+        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         unsafe {
             self.bind_compute_pipeline(cmd.pipeline).unwrap();
             let layout_handle = self

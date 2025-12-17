@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{Buffer, Image, QueueType};
 use crate::structs::SubresourceRange;
+use crate::{Buffer, Image, QueueType};
 
 use super::types::{Handle, UsageBits};
 
@@ -35,7 +35,8 @@ pub struct LayoutTransition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferBarrier {
     pub buffer: Handle<Buffer>,
-    pub usage: UsageBits,
+    pub old_usage: UsageBits,
+    pub new_usage: UsageBits,
     pub old_queue: QueueType,
     pub new_queue: QueueType,
 }
@@ -62,7 +63,12 @@ fn pick_layout_for_usage(usage: UsageBits) -> Layout {
     if usage.contains(UsageBits::COPY_SRC) {
         return Layout::TransferSrc;
     }
-    if usage.intersects(UsageBits::UAV_READ | UsageBits::UAV_WRITE) {
+    if usage.intersects(
+        UsageBits::UAV_READ
+            | UsageBits::UAV_WRITE
+            | UsageBits::STORAGE_READ
+            | UsageBits::STORAGE_WRITE,
+    ) {
         return Layout::General;
     }
     if usage.contains(UsageBits::SAMPLED) {
@@ -163,7 +169,7 @@ impl StateTracker {
     pub fn request_buffer_state(
         &mut self,
         buffer: Handle<Buffer>,
-        mut usage: UsageBits,
+        usage: UsageBits,
         queue: QueueType,
     ) -> Option<BufferBarrier> {
         let current = self.buffers.get(&buffer).copied().unwrap_or_default();
@@ -174,7 +180,7 @@ impl StateTracker {
         if usage_changed {
             self.buffers.insert(buffer, usage);
         } else {
-            usage = current;
+            self.buffers.entry(buffer).or_insert(usage);
         }
 
         if queue_changed {
@@ -186,7 +192,8 @@ impl StateTracker {
         if usage_changed || queue_changed {
             Some(BufferBarrier {
                 buffer,
-                usage,
+                old_usage: current,
+                new_usage: usage,
                 old_queue,
                 new_queue: queue,
             })
@@ -242,6 +249,8 @@ pub mod vulkan {
             UsageBits::DEPTH_WRITE,
             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         ),
+        (UsageBits::STORAGE_READ, vk::ImageLayout::GENERAL),
+        (UsageBits::STORAGE_WRITE, vk::ImageLayout::GENERAL),
     ];
 
     pub const USAGE_TO_STAGE: &[(UsageBits, vk::PipelineStageFlags)] = &[
@@ -266,6 +275,20 @@ pub mod vulkan {
             UsageBits::DEPTH_WRITE,
             vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
         ),
+        (UsageBits::VERTEX_READ, vk::PipelineStageFlags::VERTEX_INPUT),
+        (UsageBits::INDEX_READ, vk::PipelineStageFlags::VERTEX_INPUT),
+        (
+            UsageBits::UNIFORM_READ,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+        ),
+        (
+            UsageBits::STORAGE_READ,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+        ),
+        (
+            UsageBits::STORAGE_WRITE,
+            vk::PipelineStageFlags::ALL_COMMANDS,
+        ),
     ];
 
     pub const USAGE_TO_ACCESS: &[(UsageBits, vk::AccessFlags)] = &[
@@ -284,40 +307,48 @@ pub mod vulkan {
             UsageBits::DEPTH_WRITE,
             vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
         ),
+        (
+            UsageBits::VERTEX_READ,
+            vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+        ),
+        (UsageBits::INDEX_READ, vk::AccessFlags::INDEX_READ),
+        (UsageBits::UNIFORM_READ, vk::AccessFlags::UNIFORM_READ),
+        (UsageBits::STORAGE_READ, vk::AccessFlags::SHADER_READ),
+        (UsageBits::STORAGE_WRITE, vk::AccessFlags::SHADER_WRITE),
     ];
 }
 
 #[cfg(test)]
 mod tests {
-//
-//    #[test]
-//    fn image_state_changes() {
-//        let mut tracker = StateTracker::new();
-//        let tex = Handle::<Image>::new(1, 0);
-//        let range = SubresourceRange::new(0, 1, 0, 1);
-//        assert!(tracker
-//            .request_image_state(tex, range, UsageBits::SAMPLED)
-//            .is_some());
-//        assert!(tracker
-//            .request_image_state(tex, range, UsageBits::SAMPLED)
-//            .is_none());
-//        assert!(tracker
-//            .request_image_state(tex, range, UsageBits::RT_WRITE)
-//            .is_some());
-//    }
-//
-//    #[test]
-//    fn buffer_state_changes() {
-//        let mut tracker = StateTracker::new();
-//        let buf = Handle::<Buffer>::new(1, 0);
-//        assert!(tracker
-//            .request_buffer_state(buf, UsageBits::COPY_SRC)
-//            .is_some());
-//        assert!(tracker
-//            .request_buffer_state(buf, UsageBits::COPY_SRC)
-//            .is_none());
-//        assert!(tracker
-//            .request_buffer_state(buf, UsageBits::COPY_DST)
-//            .is_some());
-//    }
+    //
+    //    #[test]
+    //    fn image_state_changes() {
+    //        let mut tracker = StateTracker::new();
+    //        let tex = Handle::<Image>::new(1, 0);
+    //        let range = SubresourceRange::new(0, 1, 0, 1);
+    //        assert!(tracker
+    //            .request_image_state(tex, range, UsageBits::SAMPLED)
+    //            .is_some());
+    //        assert!(tracker
+    //            .request_image_state(tex, range, UsageBits::SAMPLED)
+    //            .is_none());
+    //        assert!(tracker
+    //            .request_image_state(tex, range, UsageBits::RT_WRITE)
+    //            .is_some());
+    //    }
+    //
+    //    #[test]
+    //    fn buffer_state_changes() {
+    //        let mut tracker = StateTracker::new();
+    //        let buf = Handle::<Buffer>::new(1, 0);
+    //        assert!(tracker
+    //            .request_buffer_state(buf, UsageBits::COPY_SRC)
+    //            .is_some());
+    //        assert!(tracker
+    //            .request_buffer_state(buf, UsageBits::COPY_SRC)
+    //            .is_none());
+    //        assert!(tracker
+    //            .request_buffer_state(buf, UsageBits::COPY_DST)
+    //            .is_some());
+    //    }
 }
