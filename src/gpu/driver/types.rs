@@ -40,6 +40,7 @@ bitflags! {
         const STORAGE_WRITE = 0x2000;
         const HOST_READ = 0x4000;
         const HOST_WRITE = 0x8000;
+        const COMPUTE_SHADER = 0x9000;
     }
 }
 

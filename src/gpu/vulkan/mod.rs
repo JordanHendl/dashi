@@ -1463,7 +1463,6 @@ impl Context {
         };
 
         let buffer_size = buf.size as u64;
-        let available = buffer_size.saturating_sub(buffer.offset.min(buffer_size));
 
         let info = self.allocator.get_allocation_info(&buf.alloc);
         self.allocator.flush_allocation(&buf.alloc, info.offset as usize, info.size as usize)?;

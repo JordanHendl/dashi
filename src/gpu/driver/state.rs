@@ -248,6 +248,7 @@ pub mod vulkan {
         (UsageBits::STORAGE_WRITE, vk::ImageLayout::GENERAL),
         (UsageBits::HOST_READ, vk::ImageLayout::GENERAL),
         (UsageBits::HOST_WRITE, vk::ImageLayout::GENERAL),
+        (UsageBits::COMPUTE_SHADER, vk::ImageLayout::GENERAL),
     ];
 
     pub const USAGE_TO_STAGE: &[(UsageBits, vk::PipelineStageFlags)] = &[
@@ -260,6 +261,7 @@ pub mod vulkan {
         (UsageBits::UAV_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
         (UsageBits::COPY_SRC, vk::PipelineStageFlags::TRANSFER),
         (UsageBits::COPY_DST, vk::PipelineStageFlags::TRANSFER),
+        (UsageBits::COMPUTE_SHADER, vk::PipelineStageFlags::COMPUTE_SHADER),
         // When transitioning to PRESENT we still need to synchronize with the
         // producing stage (e.g., TRANSFER). Avoid BOTTOM_OF_PIPE, which is
         // incompatible with non-empty access masks.
