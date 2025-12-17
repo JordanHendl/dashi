@@ -25,7 +25,6 @@ pub mod structs;
 pub use structs::*;
 pub mod builders;
 pub mod commands;
-use commands::*;
 pub mod timing;
 pub use timing::*;
 #[cfg(feature = "dashi-minifb")]
