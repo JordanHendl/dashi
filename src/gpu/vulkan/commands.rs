@@ -9,8 +9,8 @@ use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
     BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence,
-    GPUError, GraphicsPipeline, Image, ImageView, QueueType, Rect2D, Result, Semaphore,
-    SubmitInfo2, UsageBits,
+    GPUError, GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2,
+    UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -378,10 +378,19 @@ impl CommandQueue {
     }
 
     fn ensure_buffer_state(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        self.ensure_buffer_state_on_queue(buffer, usage, self.queue_type);
+    }
+
+    fn ensure_buffer_state_on_queue(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+    ) {
         if let Some(barrier) = {
             let ctx = self.ctx_ref();
             ctx.resource_states
-                .request_buffer_state(buffer, usage, self.queue_type)
+                .request_buffer_state(buffer, usage, queue)
         } {
             self.apply_buffer_barrier(&barrier);
         }
@@ -1723,6 +1732,10 @@ impl CommandSink for CommandQueue {
 
     fn transition_image(&mut self, cmd: &crate::gpu::driver::command::TransitionImage) {
         self.ensure_image_state(cmd.image, cmd.range, cmd.usage, cmd.layout);
+    }
+
+    fn prepare_buffer(&mut self, cmd: &crate::gpu::driver::command::PrepareBuffer) {
+        self.ensure_buffer_state_on_queue(cmd.buffer, cmd.usage, cmd.queue);
     }
 
     fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Handle<Fence> {

@@ -2,7 +2,7 @@ use super::{
     BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocatorState,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice, SubpassSampleInfo,
 };
-use crate::{utils::Handle, BindGroup, BindTable, CommandQueue, Semaphore};
+use crate::{utils::Handle, BindTable, CommandQueue, Semaphore};
 use bitflags::bitflags;
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BTreeMap, HashMap, HashSet};

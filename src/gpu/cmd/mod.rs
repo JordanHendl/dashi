@@ -8,7 +8,7 @@ use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
 use crate::gpu::driver::types::Handle;
-use crate::{Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2, Viewport};
+use crate::{Buffer, Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2, UsageBits, Viewport};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
@@ -60,6 +60,24 @@ impl CommandStream<Recording> {
             enc: self.enc,
             _state: PhantomData,
         }
+    }
+
+    /// Explicitly transition a buffer to a desired usage when automatic inference
+    /// is insufficient (for example, after staging uploads or when handing the
+    /// buffer across queues).
+    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    /// Specify the queue that should own the buffer after the transition. This
+    /// is useful for queue family ownership transfers.
+    pub fn prepare_buffer_for_queue(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+    ) {
+        self.enc.prepare_buffer(buffer, usage, Some(queue));
     }
 
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
@@ -115,6 +133,19 @@ impl CommandStream<Recording> {
 }
 
 impl CommandStream<Compute> {
+    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    pub fn prepare_buffer_for_queue(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+    ) {
+        self.enc.prepare_buffer(buffer, usage, Some(queue));
+    }
+
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
         self.enc.copy_buffer(cmd);
     }
@@ -174,6 +205,19 @@ impl CommandStream<PendingGraphics> {
         }
     }
 
+    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    pub fn prepare_buffer_for_queue(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+    ) {
+        self.enc.prepare_buffer(buffer, usage, Some(queue));
+    }
+
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
         self.enc.copy_buffer(cmd);
     }
@@ -219,6 +263,19 @@ impl CommandStream<PendingGraphics> {
 }
 
 impl CommandStream<Graphics> {
+    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+        self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    pub fn prepare_buffer_for_queue(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+    ) {
+        self.enc.prepare_buffer(buffer, usage, Some(queue));
+    }
+
     pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
         self.enc.copy_buffer(cmd);
     }
@@ -304,7 +361,7 @@ impl CommandStream<Executable> {
             f,
         )
     }
-    
+
     pub fn debug_print_commands(&self) {
         for c in self.enc.iter() {
             println!("Op: {:?}", c.op);

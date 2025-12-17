@@ -359,7 +359,7 @@ impl<'a> BindGroupLayoutBuilder<'a> {
 
     /// Finalize and create the BindGroupLayout.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<BindGroupLayout>, GPUError> {
-        let info = crate::BindGroupLayoutInfo {
+        let info = BindGroupLayoutInfo {
             debug_name: self.debug_name,
             shaders: &self.shaders,
         };
@@ -467,7 +467,7 @@ impl<'a> BindTableLayoutBuilder<'a> {
 
     /// Finalize and create the [`BindTableLayout`].
     pub fn build(self, ctx: &mut Context) -> Result<Handle<BindTableLayout>, GPUError> {
-        let info = crate::BindTableLayoutInfo {
+        let info = BindTableLayoutInfo {
             debug_name: self.debug_name,
             shaders: &self.shaders,
         };

@@ -2,10 +2,8 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ColorBlendState, ComputePipeline, CullMode,
-    DepthInfo, DynamicBuffer, DynamicState, Fence, Filter, GraphicsPipeline,
-    GraphicsPipelineDetails, Image, ImageView, QueueType, Rect2D, RenderPass, SampleCount,
-    SubmitInfo2, Topology, VertexOrdering, Viewport,
+    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
+    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -41,6 +39,7 @@ pub enum Op {
     TransitionImage = 17,
     BeginRenderPass = 18,
     NextSubpass = 19,
+    PrepareBuffer = 20,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -266,6 +265,17 @@ pub struct TransitionImage {
     pub layout: Layout,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrepareBuffer {
+    pub buffer: Handle<Buffer>,
+    pub usage: UsageBits,
+    /// Queue that should own the buffer after the transition; the
+    /// [`crate::gpu::cmd::CommandStream`] helpers default this to the
+    /// stream's queue type.
+    pub queue: QueueType,
+}
+
 //===----------------------------------------------------------------------===//
 // Command encoder & stream
 //===----------------------------------------------------------------------===//
@@ -456,6 +466,20 @@ impl CommandEncoder {
         self.transition_image(&transition);
     }
 
+    pub fn prepare_buffer(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: Option<QueueType>,
+    ) {
+        let cmd = PrepareBuffer {
+            buffer,
+            usage,
+            queue: queue.unwrap_or(self.queue),
+        };
+        self.push(Op::PrepareBuffer, &cmd);
+    }
+
     pub fn transition_image(&mut self, cmd: &TransitionImage) {
         self.push(Op::TransitionImage, cmd);
     }
@@ -506,6 +530,10 @@ impl CommandEncoder {
                 Op::DrawIndexed => self.draw_indexed(cmd.payload()),
                 Op::DrawIndirect => todo!(),
                 Op::DispatchIndirect => todo!(),
+                Op::PrepareBuffer => {
+                    let payload = cmd.payload::<PrepareBuffer>();
+                    self.prepare_buffer(payload.buffer, payload.usage, Some(payload.queue));
+                }
                 Op::TransitionImage => self.transition_image(cmd.payload()),
                 Op::BeginRenderPass => self.begin_render_pass(cmd.payload()),
                 Op::NextSubpass => {
@@ -541,6 +569,7 @@ impl CommandEncoder {
                 Op::DrawIndexed => sink.draw_indexed(cmd.payload()),
                 Op::DrawIndirect => todo!(),
                 Op::DispatchIndirect => todo!(),
+                Op::PrepareBuffer => sink.prepare_buffer(cmd.payload()),
                 Op::TransitionImage => sink.transition_image(cmd.payload()),
                 Op::BeginRenderPass => sink.begin_render_pass(cmd.payload()),
                 Op::NextSubpass => sink.next_subpass(cmd.payload()),
@@ -709,6 +738,7 @@ impl Op {
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
             x if x == Op::NextSubpass as u16 => Some(Op::NextSubpass),
             x if x == Op::TransitionImage as u16 => Some(Op::TransitionImage),
+            x if x == Op::PrepareBuffer as u16 => Some(Op::PrepareBuffer),
             _ => None,
         }
     }
@@ -730,6 +760,7 @@ pub trait CommandSink {
     fn copy_image(&mut self, cmd: &CopyImage);
     fn resolve_image(&mut self, cmd: &MSImageResolve);
     fn transition_image(&mut self, cmd: &TransitionImage);
+    fn prepare_buffer(&mut self, cmd: &PrepareBuffer);
     fn next_subpass(&mut self, cmd: &NextSubpass);
     fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);

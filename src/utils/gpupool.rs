@@ -1,7 +1,7 @@
 #[cfg(test)]
 use crate::QueueType;
 use crate::{
-    cmd::Recording, gpu::driver::command::CopyBuffer, Buffer, BufferInfo, BufferView, CommandQueue,
+    cmd::Recording, gpu::driver::command::CopyBuffer, Buffer, BufferInfo, BufferView,
     CommandStream, Context, MemoryVisibility,
 };
 
