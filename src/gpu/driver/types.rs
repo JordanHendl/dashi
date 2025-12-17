@@ -38,6 +38,8 @@ bitflags! {
         const UNIFORM_READ = 0x800;
         const STORAGE_READ = 0x1000;
         const STORAGE_WRITE = 0x2000;
+        const HOST_READ = 0x4000;
+        const HOST_WRITE = 0x8000;
     }
 }
 

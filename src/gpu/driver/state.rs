@@ -246,6 +246,8 @@ pub mod vulkan {
         ),
         (UsageBits::STORAGE_READ, vk::ImageLayout::GENERAL),
         (UsageBits::STORAGE_WRITE, vk::ImageLayout::GENERAL),
+        (UsageBits::HOST_READ, vk::ImageLayout::GENERAL),
+        (UsageBits::HOST_WRITE, vk::ImageLayout::GENERAL),
     ];
 
     pub const USAGE_TO_STAGE: &[(UsageBits, vk::PipelineStageFlags)] = &[
@@ -284,6 +286,8 @@ pub mod vulkan {
             UsageBits::STORAGE_WRITE,
             vk::PipelineStageFlags::ALL_COMMANDS,
         ),
+        (UsageBits::HOST_READ, vk::PipelineStageFlags::HOST),
+        (UsageBits::HOST_WRITE, vk::PipelineStageFlags::HOST),
     ];
 
     pub const USAGE_TO_ACCESS: &[(UsageBits, vk::AccessFlags)] = &[
@@ -310,6 +314,8 @@ pub mod vulkan {
         (UsageBits::UNIFORM_READ, vk::AccessFlags::UNIFORM_READ),
         (UsageBits::STORAGE_READ, vk::AccessFlags::SHADER_READ),
         (UsageBits::STORAGE_WRITE, vk::AccessFlags::SHADER_WRITE),
+        (UsageBits::HOST_READ, vk::AccessFlags::HOST_READ),
+        (UsageBits::HOST_WRITE, vk::AccessFlags::HOST_WRITE),
     ];
 }
 
