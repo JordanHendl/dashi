@@ -205,31 +205,6 @@ impl CommandStream<PendingGraphics> {
         }
     }
 
-    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
-        self.enc.prepare_buffer(buffer, usage, None);
-    }
-
-    pub fn prepare_buffer_for_queue(
-        &mut self,
-        buffer: Handle<Buffer>,
-        usage: UsageBits,
-        queue: QueueType,
-    ) {
-        self.enc.prepare_buffer(buffer, usage, Some(queue));
-    }
-
-    pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
-        self.enc.copy_buffer(cmd);
-    }
-
-    pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
-        self.enc.copy_buffer_to_image(cmd);
-    }
-
-    pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
-        self.enc.copy_image_to_buffer(cmd);
-    }
-
     pub fn bind_graphics_pipeline(
         mut self,
         pipeline: Handle<GraphicsPipeline>,
@@ -239,14 +214,6 @@ impl CommandStream<PendingGraphics> {
             enc: self.enc,
             _state: PhantomData,
         }
-    }
-
-    pub fn blit_images(&mut self, cmd: &BlitImage) {
-        self.enc.blit_image(cmd);
-    }
-
-    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
-        self.enc.resolve_image(cmd);
     }
 
     pub fn next_subpass(&mut self) {
@@ -263,30 +230,6 @@ impl CommandStream<PendingGraphics> {
 }
 
 impl CommandStream<Graphics> {
-    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
-        self.enc.prepare_buffer(buffer, usage, None);
-    }
-
-    pub fn prepare_buffer_for_queue(
-        &mut self,
-        buffer: Handle<Buffer>,
-        usage: UsageBits,
-        queue: QueueType,
-    ) {
-        self.enc.prepare_buffer(buffer, usage, Some(queue));
-    }
-
-    pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
-        self.enc.copy_buffer(cmd);
-    }
-
-    pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
-        self.enc.copy_buffer_to_image(cmd);
-    }
-
-    pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
-        self.enc.copy_image_to_buffer(cmd);
-    }
 
     pub fn bind_graphics_pipeline(mut self, pipeline: Handle<GraphicsPipeline>) {
         self.enc.bind_graphics_pipeline(pipeline);
@@ -299,20 +242,8 @@ impl CommandStream<Graphics> {
         }
     }
 
-    pub fn blit_images(&mut self, cmd: &BlitImage) {
-        self.enc.blit_image(cmd);
-    }
-
-    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
-        self.enc.resolve_image(cmd);
-    }
-
     pub fn next_subpass(&mut self) {
         self.enc.next_subpass();
-    }
-
-    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
-        self.enc.prepare_for_presentation(image);
     }
 
     pub fn draw(&mut self, cmd: &Draw) {
