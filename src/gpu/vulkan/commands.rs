@@ -291,6 +291,7 @@ impl CommandQueue {
         if self.curr_pipeline == Some(pipeline) {
             return Ok(());
         }
+
         let gfx = self
             .ctx_ref()
             .gfx_pipelines
@@ -1393,8 +1394,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
-        self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+       // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+       // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1461,9 +1462,9 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
-        self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-        self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
-        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+       // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+       // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
+       // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
