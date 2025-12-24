@@ -20,6 +20,25 @@ pub enum IndexType {
     U32,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum ResourceUse {
+    CopySrc,
+    CopyDst,
+    Sampled,
+    StorageRead,
+    StorageWrite,
+    ColorAttachment,
+    DepthAttachment,
+    DepthRead,
+    Present,
+    VertexRead,
+    IndexRead,
+    UniformRead,
+    HostRead,
+    HostWrite,
+    ComputeShader,
+}
+
 bitflags! {
     #[repr(C)]
     #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]

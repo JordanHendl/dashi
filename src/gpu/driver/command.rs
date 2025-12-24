@@ -7,8 +7,8 @@ use crate::{
 };
 
 use super::{
-    state::Layout,
-    types::{Handle, UsageBits},
+    state::{resource_use_to_buffer_usage, resource_use_to_image_usage_layout, Layout},
+    types::{Handle, ResourceUse, UsageBits},
 };
 use crate::structs::SubresourceRange;
 
@@ -461,12 +461,17 @@ impl CommandEncoder {
 
     /// Transition an image to presentation layout.
     pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+        self.prepare_image_for(image, ResourceUse::Present);
+    }
+
+    pub fn prepare_image_for(&mut self, image: Handle<Image>, usage: ResourceUse) {
         let range = SubresourceRange::default();
+        let (usage, layout) = resource_use_to_image_usage_layout(usage);
         let transition = TransitionImage {
             image,
             range,
-            usage: UsageBits::PRESENT,
-            layout: Layout::Present,
+            usage,
+            layout,
         };
         self.transition_image(&transition);
     }
@@ -483,6 +488,11 @@ impl CommandEncoder {
             queue: queue.unwrap_or(self.queue),
         };
         self.push(Op::PrepareBuffer, &cmd);
+    }
+
+    pub fn prepare_buffer_for(&mut self, buffer: Handle<Buffer>, usage: ResourceUse) {
+        let usage = resource_use_to_buffer_usage(usage);
+        self.prepare_buffer(buffer, usage, None);
     }
 
     pub fn transition_image(&mut self, cmd: &TransitionImage) {
