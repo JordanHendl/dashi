@@ -226,26 +226,26 @@ void main() {
         .begin(ctx_ptr, "copy_then_compute", false)
         .unwrap();
 
-    let mut stream = CommandStream::new().begin();
-    stream.copy_buffers(&CopyBuffer {
-        src: staging,
-        dst: storage,
-        src_offset: 0,
-        dst_offset: 0,
-        amount: (data.len() * std::mem::size_of::<u32>()) as u32,
-    });
-
-    let stream = stream.dispatch(&Dispatch {
-        x: 1,
-        y: 1,
-        z: 1,
-        pipeline,
-        bind_groups: [Some(bind_group), None, None, None],
-        bind_tables: [None, None, None, None],
-        dynamic_buffers: [None, None, None, None],
-    });
-
-    let stream = stream.unbind_pipeline().end();
+    let stream = CommandStream::new()
+        .begin()
+        .copy_buffers(&CopyBuffer {
+            src: staging,
+            dst: storage,
+            src_offset: 0,
+            dst_offset: 0,
+            amount: (data.len() * std::mem::size_of::<u32>()) as u32,
+        })
+        .dispatch(&Dispatch {
+            x: 1,
+            y: 1,
+            z: 1,
+            pipeline,
+            bind_groups: [Some(bind_group), None, None, None],
+            bind_tables: [None, None, None, None],
+            dynamic_buffers: [None, None, None, None],
+        })
+        .unbind_pipeline()
+        .end();
     stream.append(&mut list);
 
     let fence = ctx.submit(&mut list, &Default::default()).unwrap();

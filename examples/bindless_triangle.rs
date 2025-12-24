@@ -406,7 +406,7 @@ void main() {
             let ctx_ptr = &mut ctx as *mut _;
 
             // Begin render pass & bind pipeline
-            let mut stream = CommandStream::new().begin();
+            let stream = CommandStream::new().begin();
 
             let mut color_attachments = [None; 8];
             color_attachments[0] = Some(color_view);
@@ -421,9 +421,8 @@ void main() {
                 depth_attachment: None,
                 clear_values,
                 ..Default::default()
-            });
-
-            drawing.update_viewport(&viewport);
+            })
+            .update_viewport(&viewport);
 
             for slot in 0..transforms.len() {
                 #[repr(C)]
@@ -436,7 +435,7 @@ void main() {
                     tid: slot as u32,
                     texid: slot as u32 % 3,
                 };
-                drawing.draw_indexed(&DrawIndexed {
+                drawing = drawing.draw_indexed(&DrawIndexed {
                     vertices,
                     indices,
                     index_count: INDICES.len() as u32,
@@ -447,16 +446,13 @@ void main() {
                 });
             }
 
-            stream = drawing.stop_drawing();
-
-            // Resolve the multisampled framebuffer to the display's image
-            stream.resolve_images(&MSImageResolve {
+            let stream = drawing.stop_drawing().resolve_images(&MSImageResolve {
                 src: color_view.img,
                 dst: img.img,
                 ..Default::default()
             });
             // Transition the display image for presentation
-            stream.prepare_for_presentation(img.img);
+            let stream = stream.prepare_for_presentation(img.img);
 
             stream.end().append(list);
         })

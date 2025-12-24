@@ -43,14 +43,15 @@ fn main() -> Result<(), GPUError> {
     let mut transfer_list =
         ctx.pool_mut(QueueType::Transfer)
             .begin(ctx_ptr, "transfer_upload", false)?;
-    let mut upload_stream = CommandStream::new_with_queue(QueueType::Transfer).begin();
-    upload_stream.copy_buffers(&CopyBuffer {
-        src: staging,
-        dst: device_buffer,
-        src_offset: 0,
-        dst_offset: 0,
-        amount: byte_size,
-    });
+    let upload_stream = CommandStream::new_with_queue(QueueType::Transfer)
+        .begin()
+        .copy_buffers(&CopyBuffer {
+            src: staging,
+            dst: device_buffer,
+            src_offset: 0,
+            dst_offset: 0,
+            amount: byte_size,
+        });
     upload_stream.end().append(&mut transfer_list);
     let upload_fence = ctx.submit(&mut transfer_list, &Default::default())?;
     ctx.wait(upload_fence)?;
@@ -111,22 +112,23 @@ fn main() -> Result<(), GPUError> {
         ctx.pool_mut(QueueType::Compute)
             .begin(ctx_ptr, "compute_dispatch", false)?;
     let compute_stream = CommandStream::new_with_queue(QueueType::Compute).begin();
-    let mut compute_stream = compute_stream.dispatch(&Dispatch {
-        x: values.len() as u32,
-        y: 1,
-        z: 1,
-        pipeline,
-        bind_groups: [Some(bind_group), None, None, None],
-        bind_tables: Default::default(),
-        dynamic_buffers: Default::default(),
-    });
-    compute_stream.copy_buffers(&CopyBuffer {
-        src: device_buffer,
-        dst: readback,
-        src_offset: 0,
-        dst_offset: 0,
-        amount: byte_size,
-    });
+    let compute_stream = compute_stream
+        .dispatch(&Dispatch {
+            x: values.len() as u32,
+            y: 1,
+            z: 1,
+            pipeline,
+            bind_groups: [Some(bind_group), None, None, None],
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+        })
+        .copy_buffers(&CopyBuffer {
+            src: device_buffer,
+            dst: readback,
+            src_offset: 0,
+            dst_offset: 0,
+            amount: byte_size,
+        });
     compute_stream.end().append(&mut compute_list);
 
     let compute_fence = ctx.submit(&mut compute_list, &Default::default())?;

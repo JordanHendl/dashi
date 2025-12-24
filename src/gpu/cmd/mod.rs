@@ -25,8 +25,9 @@ pub struct PendingGraphics;
 pub struct Compute;
 
 impl<T> CommandStream<T> {
-    pub fn combine<G>(&mut self, sink: CommandStream<G>) {
+    pub fn combine<G>(mut self, sink: CommandStream<G>) -> Self {
         self.enc.combine(&sink.enc);
+        self
     }
 
     /// Returns the queue type this command stream targets.
@@ -70,43 +71,51 @@ impl CommandStream<Recording> {
     /// Explicitly transition a buffer to a desired usage when automatic inference
     /// is insufficient (for example, after staging uploads or when handing the
     /// buffer across queues).
-    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+    pub fn prepare_buffer(mut self, buffer: Handle<Buffer>, usage: UsageBits) -> Self {
         self.enc.prepare_buffer(buffer, usage, None);
+        self
     }
 
     /// Specify the queue that should own the buffer after the transition. This
     /// is useful for queue family ownership transfers.
     pub fn prepare_buffer_for_queue(
-        &mut self,
+        mut self,
         buffer: Handle<Buffer>,
         usage: UsageBits,
         queue: QueueType,
-    ) {
+    ) -> Self {
         self.enc.prepare_buffer(buffer, usage, Some(queue));
+        self
     }
 
-    pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
+    pub fn copy_buffers(mut self, cmd: &CopyBuffer) -> Self {
         self.enc.copy_buffer(cmd);
+        self
     }
 
-    pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
+    pub fn copy_buffer_to_image(mut self, cmd: &CopyBufferImage) -> Self {
         self.enc.copy_buffer_to_image(cmd);
+        self
     }
 
-    pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
+    pub fn copy_image_to_buffer(mut self, cmd: &CopyImageBuffer) -> Self {
         self.enc.copy_image_to_buffer(cmd);
+        self
     }
 
-    pub fn blit_images(&mut self, cmd: &BlitImage) {
+    pub fn blit_images(mut self, cmd: &BlitImage) -> Self {
         self.enc.blit_image(cmd);
+        self
     }
 
-    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+    pub fn resolve_images(mut self, cmd: &MSImageResolve) -> Self {
         self.enc.resolve_image(cmd);
+        self
     }
 
-    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+    pub fn prepare_for_presentation(mut self, image: Handle<Image>) -> Self {
         self.enc.prepare_for_presentation(image);
+        self
     }
 
     pub fn begin_render_pass(mut self, cmd: &BeginRenderPass) -> CommandStream<PendingGraphics> {
@@ -119,13 +128,12 @@ impl CommandStream<Recording> {
 
     pub fn begin_drawing(mut self, cmd: &BeginDrawing) -> CommandStream<Graphics> {
         self.enc.begin_drawing(cmd);
-        let mut new = CommandStream {
+        let new = CommandStream {
             enc: self.enc,
             _state: PhantomData,
         };
 
-        new.update_viewport(&cmd.viewport);
-        new
+        new.update_viewport(&cmd.viewport)
     }
 
     pub fn dispatch(mut self, cmd: &Dispatch) -> CommandStream<Compute> {
@@ -138,45 +146,54 @@ impl CommandStream<Recording> {
 }
 
 impl CommandStream<Compute> {
-    pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
+    pub fn prepare_buffer(mut self, buffer: Handle<Buffer>, usage: UsageBits) -> Self {
         self.enc.prepare_buffer(buffer, usage, None);
+        self
     }
 
     pub fn prepare_buffer_for_queue(
-        &mut self,
+        mut self,
         buffer: Handle<Buffer>,
         usage: UsageBits,
         queue: QueueType,
-    ) {
+    ) -> Self {
         self.enc.prepare_buffer(buffer, usage, Some(queue));
+        self
     }
 
-    pub fn copy_buffers(&mut self, cmd: &CopyBuffer) {
+    pub fn copy_buffers(mut self, cmd: &CopyBuffer) -> Self {
         self.enc.copy_buffer(cmd);
+        self
     }
 
-    pub fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) {
+    pub fn copy_buffer_to_image(mut self, cmd: &CopyBufferImage) -> Self {
         self.enc.copy_buffer_to_image(cmd);
+        self
     }
 
-    pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
+    pub fn copy_image_to_buffer(mut self, cmd: &CopyImageBuffer) -> Self {
         self.enc.copy_image_to_buffer(cmd);
+        self
     }
 
-    pub fn blit_images(&mut self, cmd: &BlitImage) {
+    pub fn blit_images(mut self, cmd: &BlitImage) -> Self {
         self.enc.blit_image(cmd);
+        self
     }
 
-    pub fn resolve_images(&mut self, cmd: &MSImageResolve) {
+    pub fn resolve_images(mut self, cmd: &MSImageResolve) -> Self {
         self.enc.resolve_image(cmd);
+        self
     }
 
-    pub fn prepare_for_presentation(&mut self, image: Handle<Image>) {
+    pub fn prepare_for_presentation(mut self, image: Handle<Image>) -> Self {
         self.enc.prepare_for_presentation(image);
+        self
     }
 
-    pub fn dispatch(&mut self, cmd: &Dispatch) {
+    pub fn dispatch(mut self, cmd: &Dispatch) -> Self {
         self.enc.dispatch(cmd);
+        self
     }
 
     pub fn unbind_pipeline(self) -> CommandStream<Recording> {
@@ -221,8 +238,9 @@ impl CommandStream<PendingGraphics> {
         }
     }
 
-    pub fn next_subpass(&mut self) {
+    pub fn next_subpass(mut self) -> Self {
         self.enc.next_subpass();
+        self
     }
 
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {
@@ -235,9 +253,9 @@ impl CommandStream<PendingGraphics> {
 }
 
 impl CommandStream<Graphics> {
-
-    pub fn bind_graphics_pipeline(mut self, pipeline: Handle<GraphicsPipeline>) {
+    pub fn bind_graphics_pipeline(mut self, pipeline: Handle<GraphicsPipeline>) -> Self {
         self.enc.bind_graphics_pipeline(pipeline);
+        self
     }
 
     pub fn unbind_graphics_pipeline(self) -> CommandStream<PendingGraphics> {
@@ -247,22 +265,26 @@ impl CommandStream<Graphics> {
         }
     }
 
-    pub fn next_subpass(&mut self) {
+    pub fn next_subpass(mut self) -> Self {
         self.enc.next_subpass();
+        self
     }
 
-    pub fn draw(&mut self, cmd: &Draw) {
+    pub fn draw(mut self, cmd: &Draw) -> Self {
         self.enc.draw(cmd);
+        self
     }
 
-    pub fn draw_indexed(&mut self, cmd: &DrawIndexed) {
+    pub fn draw_indexed(mut self, cmd: &DrawIndexed) -> Self {
         self.enc.draw_indexed(cmd);
+        self
     }
 
-    pub fn update_viewport(&mut self, viewport: &Viewport) {
+    pub fn update_viewport(mut self, viewport: &Viewport) -> Self {
         let mut update = GraphicsPipelineStateUpdate::default();
         update.viewport = Some(*viewport);
         self.enc.update_graphics_pipeline_state(&update);
+        self
     }
 
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {

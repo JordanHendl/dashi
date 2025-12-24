@@ -310,10 +310,10 @@ void main() {
         let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
 
         ring.record(|list| {
-                let mut stream = CommandStream::new().begin();
+                let stream = CommandStream::new().begin();
 
                 // Begin render pass & bind pipeline
-                let mut draw = stream.begin_drawing(&BeginDrawing {
+                let draw = stream.begin_drawing(&BeginDrawing {
                     viewport: Viewport {
                         area: FRect2D {
                             w: WIDTH as f32,
@@ -346,7 +346,7 @@ void main() {
                 pos[1] = (timer.elapsed_ms() as f32 / 1000.0).cos();
 
                 // Append a draw call using our vertices & indices & dynamic buffers
-                draw.draw_indexed(&DrawIndexed {
+                let draw = draw.draw_indexed(&DrawIndexed {
                     vertices,
                     indices,
                     index_count: INDICES.len() as u32,
@@ -355,11 +355,8 @@ void main() {
                     ..Default::default()
                 });
 
-                // End drawing.
-                let mut stream = draw.stop_drawing();
-
-                // Blit the framebuffer to the display's image
-                stream.blit_images(&BlitImage {
+                // End drawing and blit the framebuffer to the display's image.
+                let stream = draw.stop_drawing().blit_images(&BlitImage {
                     src: fb,
                     dst: img.img,
                     filter: Filter::Nearest,
@@ -367,7 +364,7 @@ void main() {
                 });
 
                 // Transition display image for presentation
-                stream.prepare_for_presentation(img.img);
+                let stream = stream.prepare_for_presentation(img.img);
 
                 stream.end().append(list);
             }).unwrap();

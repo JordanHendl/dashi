@@ -1540,8 +1540,7 @@ impl Context {
 
                 let ctx_ptr = self as *mut _;
                 let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
-                let mut stream = CommandStream::new().begin();
-                stream.copy_buffers(&CopyBuffer {
+                let stream = CommandStream::new().begin().copy_buffers(&CopyBuffer {
                     src: staging,
                     dst: buf,
                     src_offset: 0,
@@ -1585,8 +1584,7 @@ impl Context {
 
         let ctx_ptr = self as *mut _;
         let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
-        let mut cmd = CommandStream::new().begin();
-        cmd.copy_buffer_to_image(&CopyBufferImage {
+        let mut cmd = CommandStream::new().begin().copy_buffer_to_image(&CopyBufferImage {
             src: staging,
             dst: image,
             range: SubresourceRange {
@@ -1600,7 +1598,7 @@ impl Context {
 
         if info.mip_levels > 1 {
             for i in 0..info.mip_levels - 1 {
-                cmd.copy_buffer_to_image(&CopyBufferImage {
+                cmd = cmd.copy_buffer_to_image(&CopyBufferImage {
                     src: staging,
                     dst: image,
                     range: SubresourceRange {
