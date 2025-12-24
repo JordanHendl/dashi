@@ -15,13 +15,15 @@ compile_error!(
 
 #[macro_export]
 macro_rules! fill {
-    // Only fill: fill![..=> fill; N]
-    (..=> $fill:expr ; $len:expr $(,)?) => {{
+    // === Just fill ===
+    // fill![fill; N]
+    ($fill:expr ; $len:expr $(,)?) => {{
         [$fill; $len]
     }};
 
-    // Prefix + fill: fill![a, b, ..=> fill; N]
-    ($($val:expr),+ , ..=> $fill:expr ; $len:expr $(,)?) => {{
+    // === Prefix + fill ===
+    // fill![a, b, c; fill; N]
+    ($($val:expr),+ $(,)? ; $fill:expr ; $len:expr $(,)?) => {{
         let mut __arr = [$fill; $len];
         let mut __i = 0usize;
         $(
