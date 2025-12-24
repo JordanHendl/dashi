@@ -463,11 +463,7 @@ impl CommandQueue {
         } else {
             usage_to_stages(cmd.new_usage)
         };
-        let src_stage = if cmd.new_usage.contains(UsageBits::PRESENT) {
-            usage_to_stages(cmd.old_usage)
-        } else {
-            self.last_op_stage
-        };
+        let src_stage = usage_to_stages(cmd.old_usage);
         let src_access = usage_to_access(cmd.old_usage);
         let dst_access = usage_to_access(cmd.new_usage);
 
