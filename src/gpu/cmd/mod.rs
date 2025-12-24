@@ -8,7 +8,10 @@ use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
 use crate::gpu::driver::types::Handle;
-use crate::{Buffer, Fence, GraphicsPipeline, Image, QueueType, SubmitInfo2, UsageBits, Viewport};
+use crate::{
+    Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, SubmitInfo2, UsageBits,
+    Viewport,
+};
 
 /// Generic command buffer with type-state tracking.
 pub struct CommandStream<S> {
@@ -72,6 +75,14 @@ impl CommandStream<Recording> {
     /// buffer across queues).
     pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
         self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    pub fn prepare_buffer_for(&mut self, buffer: Handle<Buffer>, usage: ResourceUse) {
+        self.enc.prepare_buffer_for(buffer, usage);
+    }
+
+    pub fn prepare_image_for(&mut self, image: Handle<Image>, usage: ResourceUse) {
+        self.enc.prepare_image_for(image, usage);
     }
 
     /// Specify the queue that should own the buffer after the transition. This
@@ -140,6 +151,14 @@ impl CommandStream<Recording> {
 impl CommandStream<Compute> {
     pub fn prepare_buffer(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
         self.enc.prepare_buffer(buffer, usage, None);
+    }
+
+    pub fn prepare_buffer_for(&mut self, buffer: Handle<Buffer>, usage: ResourceUse) {
+        self.enc.prepare_buffer_for(buffer, usage);
+    }
+
+    pub fn prepare_image_for(&mut self, image: Handle<Image>, usage: ResourceUse) {
+        self.enc.prepare_image_for(image, usage);
     }
 
     pub fn prepare_buffer_for_queue(

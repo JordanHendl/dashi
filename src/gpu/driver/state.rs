@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::structs::SubresourceRange;
 use crate::{Buffer, Image, QueueType};
 
-use super::types::{Handle, UsageBits};
+use super::types::{Handle, ResourceUse, UsageBits};
 
 // --- New: backend-agnostic image layout + transition info ---
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -17,6 +17,48 @@ pub enum Layout {
     TransferSrc,
     TransferDst,
     Present,
+}
+
+#[inline]
+pub fn resource_use_to_image_usage_layout(resource_use: ResourceUse) -> (UsageBits, Layout) {
+    match resource_use {
+        ResourceUse::CopySrc => (UsageBits::COPY_SRC, Layout::TransferSrc),
+        ResourceUse::CopyDst => (UsageBits::COPY_DST, Layout::TransferDst),
+        ResourceUse::Sampled => (UsageBits::SAMPLED, Layout::ShaderReadOnly),
+        ResourceUse::StorageRead => (UsageBits::STORAGE_READ, Layout::General),
+        ResourceUse::StorageWrite => (UsageBits::STORAGE_WRITE, Layout::General),
+        ResourceUse::ColorAttachment => (UsageBits::RT_WRITE, Layout::ColorAttachment),
+        ResourceUse::DepthAttachment => (UsageBits::DEPTH_WRITE, Layout::DepthStencilAttachment),
+        ResourceUse::DepthRead => (UsageBits::DEPTH_READ, Layout::DepthStencilReadOnly),
+        ResourceUse::Present => (UsageBits::PRESENT, Layout::Present),
+        ResourceUse::VertexRead => (UsageBits::VERTEX_READ, Layout::General),
+        ResourceUse::IndexRead => (UsageBits::INDEX_READ, Layout::General),
+        ResourceUse::UniformRead => (UsageBits::UNIFORM_READ, Layout::General),
+        ResourceUse::HostRead => (UsageBits::HOST_READ, Layout::General),
+        ResourceUse::HostWrite => (UsageBits::HOST_WRITE, Layout::General),
+        ResourceUse::ComputeShader => (UsageBits::COMPUTE_SHADER, Layout::General),
+    }
+}
+
+#[inline]
+pub fn resource_use_to_buffer_usage(resource_use: ResourceUse) -> UsageBits {
+    match resource_use {
+        ResourceUse::CopySrc => UsageBits::COPY_SRC,
+        ResourceUse::CopyDst => UsageBits::COPY_DST,
+        ResourceUse::Sampled => UsageBits::SAMPLED,
+        ResourceUse::StorageRead => UsageBits::STORAGE_READ,
+        ResourceUse::StorageWrite => UsageBits::STORAGE_WRITE,
+        ResourceUse::ColorAttachment => UsageBits::RT_WRITE,
+        ResourceUse::DepthAttachment => UsageBits::DEPTH_WRITE,
+        ResourceUse::DepthRead => UsageBits::DEPTH_READ,
+        ResourceUse::Present => UsageBits::PRESENT,
+        ResourceUse::VertexRead => UsageBits::VERTEX_READ,
+        ResourceUse::IndexRead => UsageBits::INDEX_READ,
+        ResourceUse::UniformRead => UsageBits::UNIFORM_READ,
+        ResourceUse::HostRead => UsageBits::HOST_READ,
+        ResourceUse::HostWrite => UsageBits::HOST_WRITE,
+        ResourceUse::ComputeShader => UsageBits::COMPUTE_SHADER,
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
