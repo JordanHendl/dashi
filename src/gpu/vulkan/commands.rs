@@ -4,7 +4,6 @@ use ash::vk;
 
 use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
 use crate::gpu::driver::command::CommandSink;
-use crate::gpu::driver::state::vulkan::{USAGE_TO_ACCESS, USAGE_TO_STAGE};
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
@@ -27,32 +26,6 @@ pub(super) fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
         Layout::TransferDst => vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         Layout::Present => vk::ImageLayout::PRESENT_SRC_KHR,
     }
-}
-
-#[inline]
-pub(super) fn usage_to_stages(usage: UsageBits) -> vk::PipelineStageFlags {
-    let mut flags = vk::PipelineStageFlags::empty();
-    for (u, s) in USAGE_TO_STAGE {
-        if usage.contains(*u) {
-            flags |= *s;
-        }
-    }
-    // Fallback: something benign
-    if flags.is_empty() {
-        flags = vk::PipelineStageFlags::TOP_OF_PIPE;
-    }
-    flags
-}
-
-#[inline]
-pub(super) fn usage_to_access(usage: UsageBits) -> vk::AccessFlags {
-    let mut flags = vk::AccessFlags::empty();
-    for (u, a) in USAGE_TO_ACCESS {
-        if usage.contains(*u) {
-            flags |= *a;
-        }
-    }
-    flags
 }
 
 #[inline]
@@ -456,20 +429,10 @@ impl CommandQueue {
             layer_count: cmd.range.layer_count,
         };
 
-        let dst_stage = if cmd.new_usage.contains(UsageBits::PRESENT) {
-            // Present requires waiting for the producing stage; reuse the
-            // previous usage's stages rather than BOTTOM_OF_PIPE.
-            usage_to_stages(cmd.old_usage)
-        } else {
-            usage_to_stages(cmd.new_usage)
-        };
-        let src_stage = if cmd.new_usage.contains(UsageBits::PRESENT) {
-            usage_to_stages(cmd.old_usage)
-        } else {
-            self.last_op_stage
-        };
-        let src_access = usage_to_access(cmd.old_usage);
-        let dst_access = usage_to_access(cmd.new_usage);
+        let src_stage = cmd.old_stage;
+        let dst_stage = cmd.new_stage;
+        let src_access = cmd.old_access;
+        let dst_access = cmd.new_access;
 
         let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
             (
@@ -479,6 +442,21 @@ impl CommandQueue {
         } else {
             (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
         };
+
+        #[cfg(debug_assertions)]
+        if cmd.old_queue != cmd.new_queue {
+            if src_family == dst_family {
+                eprintln!(
+                    "Queue ownership transfer requested for image {:?} from {:?} to {:?}, but both map to queue family {}.",
+                    cmd.image, cmd.old_queue, cmd.new_queue, src_family
+                );
+            } else {
+                eprintln!(
+                    "Queue ownership transfer for image {:?} from {:?} (family {}) to {:?} (family {}).",
+                    cmd.image, cmd.old_queue, src_family, cmd.new_queue, dst_family
+                );
+            }
+        }
 
         let barrier = vk::ImageMemoryBarrier::builder()
             .src_access_mask(src_access)
@@ -520,11 +498,11 @@ impl CommandQueue {
             .ok_or(GPUError::SlotError())
             .unwrap();
 
-        let src_stage = usage_to_stages(cmd.old_usage);
-        let src_access = usage_to_access(cmd.old_usage);
+        let src_stage = cmd.old_stage;
+        let src_access = cmd.old_access;
 
-        let dst_stage = usage_to_stages(cmd.new_usage);
-        let dst_access = usage_to_access(cmd.new_usage);
+        let dst_stage = cmd.new_stage;
+        let dst_access = cmd.new_access;
 
         let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
             (
@@ -534,6 +512,21 @@ impl CommandQueue {
         } else {
             (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
         };
+
+        #[cfg(debug_assertions)]
+        if cmd.old_queue != cmd.new_queue {
+            if src_family == dst_family {
+                eprintln!(
+                    "Queue ownership transfer requested for buffer {:?} from {:?} to {:?}, but both map to queue family {}.",
+                    cmd.buffer, cmd.old_queue, cmd.new_queue, src_family
+                );
+            } else {
+                eprintln!(
+                    "Queue ownership transfer for buffer {:?} from {:?} (family {}) to {:?} (family {}).",
+                    cmd.buffer, cmd.old_queue, src_family, cmd.new_queue, dst_family
+                );
+            }
+        }
 
         let barrier = vk::BufferMemoryBarrier::builder()
             .buffer(buffer.buf)

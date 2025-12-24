@@ -5,6 +5,18 @@ use crate::{Buffer, Image, QueueType};
 
 use super::types::{Handle, UsageBits};
 
+#[cfg(feature = "vulkan")]
+pub type PipelineStage = ash::vk::PipelineStageFlags;
+#[cfg(not(feature = "vulkan"))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct PipelineStage;
+
+#[cfg(feature = "vulkan")]
+pub type Access = ash::vk::AccessFlags;
+#[cfg(not(feature = "vulkan"))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Access;
+
 // --- New: backend-agnostic image layout + transition info ---
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Layout {
@@ -25,6 +37,10 @@ pub struct LayoutTransition {
     pub range: SubresourceRange,
     pub old_usage: UsageBits,
     pub new_usage: UsageBits,
+    pub old_stage: PipelineStage,
+    pub new_stage: PipelineStage,
+    pub old_access: Access,
+    pub new_access: Access,
     pub old_layout: Layout,
     pub new_layout: Layout,
     pub old_queue: QueueType,
@@ -37,14 +53,20 @@ pub struct BufferBarrier {
     pub buffer: Handle<Buffer>,
     pub old_usage: UsageBits,
     pub new_usage: UsageBits,
+    pub old_stage: PipelineStage,
+    pub new_stage: PipelineStage,
+    pub old_access: Access,
+    pub new_access: Access,
     pub old_queue: QueueType,
     pub new_queue: QueueType,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BufferState {
     usage: UsageBits,
     queue: QueueType,
+    stage: PipelineStage,
+    access: Access,
 }
 
 #[inline]
@@ -83,12 +105,53 @@ fn pick_layout_for_usage(usage: UsageBits) -> Layout {
     Layout::General
 }
 
+#[cfg(feature = "vulkan")]
+#[inline]
+pub fn usage_to_stage(usage: UsageBits) -> PipelineStage {
+    let mut flags = PipelineStage::empty();
+    for (u, s) in vulkan::USAGE_TO_STAGE {
+        if usage.contains(*u) {
+            flags |= *s;
+        }
+    }
+    if flags.is_empty() {
+        flags = PipelineStage::TOP_OF_PIPE;
+    }
+    flags
+}
+
+#[cfg(not(feature = "vulkan"))]
+#[inline]
+pub fn usage_to_stage(_usage: UsageBits) -> PipelineStage {
+    PipelineStage
+}
+
+#[cfg(feature = "vulkan")]
+#[inline]
+pub fn usage_to_access(usage: UsageBits) -> Access {
+    let mut flags = Access::empty();
+    for (u, a) in vulkan::USAGE_TO_ACCESS {
+        if usage.contains(*u) {
+            flags |= *a;
+        }
+    }
+    flags
+}
+
+#[cfg(not(feature = "vulkan"))]
+#[inline]
+pub fn usage_to_access(_usage: UsageBits) -> Access {
+    Access
+}
+
 #[derive(Default)]
 pub struct StateTracker {
     images: HashMap<(Handle<Image>, SubresourceRange), UsageBits>,
     buffers: HashMap<Handle<Buffer>, BufferState>,
     image_layouts: HashMap<(Handle<Image>, SubresourceRange), Layout>,
     image_queues: HashMap<(Handle<Image>, SubresourceRange), QueueType>,
+    image_stages: HashMap<(Handle<Image>, SubresourceRange), PipelineStage>,
+    image_accesses: HashMap<(Handle<Image>, SubresourceRange), Access>,
 }
 
 impl StateTracker {
@@ -98,6 +161,8 @@ impl StateTracker {
             image_layouts: HashMap::new(),
             buffers: HashMap::new(),
             image_queues: HashMap::new(),
+            image_stages: HashMap::new(),
+            image_accesses: HashMap::new(),
         }
     }
 
@@ -106,6 +171,8 @@ impl StateTracker {
         self.buffers.clear();
         self.image_layouts.clear();
         self.image_queues.clear();
+        self.image_stages.clear();
+        self.image_accesses.clear();
     }
 
     /// Returns (usage barrier if usage changed, layout transition if usage or layout changed).
@@ -133,11 +200,27 @@ impl StateTracker {
         let old_queue = self.image_queues.get(&key).copied().unwrap_or(queue);
         let queue_changed = old_queue != queue;
 
+        let old_stage = self
+            .image_stages
+            .get(&key)
+            .copied()
+            .unwrap_or_else(|| usage_to_stage(old_usage));
+        let old_access = self
+            .image_accesses
+            .get(&key)
+            .copied()
+            .unwrap_or_else(|| usage_to_access(old_usage));
+
+        let mut new_stage = usage_to_stage(new_usage);
+        let mut new_access = usage_to_access(new_usage);
+
         // Persist tracker state.
         if usage_changed {
             self.images.insert(key, new_usage);
         } else {
             new_usage = old_usage;
+            new_stage = old_stage;
+            new_access = old_access;
         }
         if layout_changed {
             self.image_layouts.insert(key, new_layout);
@@ -152,6 +235,8 @@ impl StateTracker {
         } else {
             self.image_queues.entry(key).or_insert(queue);
         }
+        self.image_stages.insert(key, new_stage);
+        self.image_accesses.insert(key, new_access);
 
         if usage_changed || layout_changed || queue_changed {
             Some(LayoutTransition {
@@ -159,6 +244,10 @@ impl StateTracker {
                 range,
                 old_usage,
                 new_usage,
+                old_stage,
+                new_stage,
+                old_access,
+                new_access,
                 old_layout,
                 new_layout,
                 old_queue,
@@ -178,17 +267,34 @@ impl StateTracker {
         let previous = self.buffers.get(&buffer).copied().unwrap_or(BufferState {
             usage: UsageBits::empty(),
             queue,
+            stage: usage_to_stage(UsageBits::empty()),
+            access: usage_to_access(UsageBits::empty()),
         });
         let usage_changed = previous.usage != usage;
         let queue_changed = previous.queue != queue;
 
-        self.buffers.insert(buffer, BufferState { usage, queue });
+        let stage = usage_to_stage(usage);
+        let access = usage_to_access(usage);
+
+        self.buffers.insert(
+            buffer,
+            BufferState {
+                usage,
+                queue,
+                stage,
+                access,
+            },
+        );
 
         if usage_changed || queue_changed {
             Some(BufferBarrier {
                 buffer,
                 old_usage: previous.usage,
                 new_usage: usage,
+                old_stage: previous.stage,
+                new_stage: stage,
+                old_access: previous.access,
+                new_access: access,
                 old_queue: previous.queue,
                 new_queue: queue,
             })
