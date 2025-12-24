@@ -310,6 +310,11 @@ impl CommandEncoder {
         }
     }
 
+    /// Returns the queue type this encoder targets.
+    pub fn queue_type(&self) -> QueueType {
+        self.queue
+    }
+
     /// Clear all recorded commands while retaining allocated arenas.
     pub fn reset(&mut self) {
         self.data.clear();

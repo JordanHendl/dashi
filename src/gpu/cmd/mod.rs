@@ -28,6 +28,11 @@ impl<T> CommandStream<T> {
     pub fn combine<G>(&mut self, sink: CommandStream<G>) {
         self.enc.combine(&sink.enc);
     }
+
+    /// Returns the queue type this command stream targets.
+    pub fn queue_type(&self) -> QueueType {
+        self.enc.queue_type()
+    }
 }
 
 impl CommandStream<Initial> {
