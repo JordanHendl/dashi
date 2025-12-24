@@ -81,24 +81,24 @@ impl<T> GPUPool<T> {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
-        list.copy_buffers(&CopyBuffer {
+    pub fn sync_down(&mut self, list: CommandStream<Recording>) -> Result<CommandStream<Recording>> {
+        let list = list.copy_buffers(&CopyBuffer {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
         });
 
-        Ok(())
+        Ok(list)
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
-        list.copy_buffers(&CopyBuffer {
+    pub fn sync_up(&mut self, list: CommandStream<Recording>) -> Result<CommandStream<Recording>> {
+        let list = list.copy_buffers(&CopyBuffer {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
         });
 
-        Ok(())
+        Ok(list)
     }
 
     pub fn get_empty(&self) -> &[u32] {
@@ -191,24 +191,24 @@ impl DynamicGPUPool {
         return self.buffer;
     }
 
-    pub fn sync_down(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
-        list.copy_buffers(&CopyBuffer {
+    pub fn sync_down(&mut self, list: CommandStream<Recording>) -> Result<CommandStream<Recording>> {
+        let list = list.copy_buffers(&CopyBuffer {
             src: self.buffer,
             dst: self.staging,
             ..Default::default()
         });
 
-        Ok(())
+        Ok(list)
     }
 
-    pub fn sync_up(&mut self, list: &mut CommandStream<Recording>) -> Result<()> {
-        list.copy_buffers(&CopyBuffer {
+    pub fn sync_up(&mut self, list: CommandStream<Recording>) -> Result<CommandStream<Recording>> {
+        let list = list.copy_buffers(&CopyBuffer {
             src: self.staging,
             dst: self.buffer,
             ..Default::default()
         });
 
-        Ok(())
+        Ok(list)
     }
 
     pub fn get_empty(&self) -> &[u32] {
@@ -301,8 +301,8 @@ mod tests {
             .begin(ctx_ptr, "", false)
             .unwrap();
 
-        let mut stream = CommandStream::new().begin();
-        pool.sync_up(&mut stream).unwrap();
+        let stream = CommandStream::new().begin();
+        let stream = pool.sync_up(stream).unwrap();
         ctx.submit(&mut list, &Default::default())
             .expect("ASSERT: Should be able to sync data up");
 
