@@ -1387,8 +1387,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
-       // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-       // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+        // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+        // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1398,11 +1398,26 @@ impl CommandSink for CommandQueue {
                 &[v.offset as u64],
             );
         }
-        let offsets: Vec<u32> = cmd
+        let mut offsets: Vec<u32> = cmd
             .dynamic_buffers
             .iter()
-            .filter_map(|&d| d.map(|b| b.alloc.offset))
+            .map(|b| {
+                if b.is_some() {
+                    b.unwrap().alloc.offset
+                } else {
+                    0
+                }
+            })
             .collect();
+
+        offsets.shrink_to(
+            cmd.bind_tables
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
+                .unwrap_or(0),
+        );
 
         if let Some(pipe) = self.curr_pipeline {
             let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
@@ -1422,20 +1437,6 @@ impl CommandSink for CommandQueue {
                             l.layout,
                             bt_data.set_id,
                             &[bt_data.set],
-                            &[],
-                        );
-                    }
-                }
-
-                for group in cmd.bind_groups {
-                    if let Some(bg) = group {
-                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
-                        self.ctx_ref().device.cmd_bind_descriptor_sets(
-                            self.cmd_buf,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            l.layout,
-                            bg_data.set_id,
-                            &[bg_data.set],
                             &offsets,
                         );
                     }
@@ -1455,9 +1456,10 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
-       // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-       // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
-       // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+        // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
+        // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
+        // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
@@ -1475,12 +1477,26 @@ impl CommandSink for CommandQueue {
                 vk::IndexType::UINT32,
             );
         }
-        let offsets: Vec<u32> = cmd
+        let mut offsets: Vec<u32> = cmd
             .dynamic_buffers
             .iter()
-            .filter_map(|&d| d.map(|b| b.alloc.offset))
+            .map(|b| {
+                if b.is_some() {
+                    b.unwrap().alloc.offset
+                } else {
+                    0
+                }
+            })
             .collect();
 
+        offsets.shrink_to(
+            cmd.bind_tables
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
+                .unwrap_or(0),
+        );
         if let Some(pipe) = self.curr_pipeline {
             let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
             let l = self
@@ -1499,20 +1515,6 @@ impl CommandSink for CommandQueue {
                             l.layout,
                             bt_data.set_id,
                             &[bt_data.set],
-                            &[],
-                        );
-                    }
-                }
-
-                for group in cmd.bind_groups {
-                    if let Some(bg) = group {
-                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
-                        self.ctx_ref().device.cmd_bind_descriptor_sets(
-                            self.cmd_buf,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            l.layout,
-                            bg_data.set_id,
-                            &[bg_data.set],
                             &offsets,
                         );
                     }
@@ -1556,11 +1558,26 @@ impl CommandSink for CommandQueue {
                 .unwrap();
 
             unsafe {
-                let offsets: Vec<u32> = cmd
+                let mut offsets: Vec<u32> = cmd
                     .dynamic_buffers
                     .iter()
-                    .filter_map(|&d| d.map(|b| b.alloc.offset))
+                    .map(|b| {
+                        if b.is_some() {
+                            b.unwrap().alloc.offset
+                        } else {
+                            0
+                        }
+                    })
                     .collect();
+
+                offsets.shrink_to(
+                    cmd.bind_tables
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
+                        .unwrap_or(0),
+                );
 
                 for table in &cmd.bind_tables {
                     if let Some(bt) = *table {
@@ -1571,20 +1588,6 @@ impl CommandSink for CommandQueue {
                             layout.layout,
                             bt_data.set_id,
                             &[bt_data.set],
-                            &[],
-                        );
-                    }
-                }
-
-                for group in cmd.bind_groups {
-                    if let Some(bg) = group {
-                        let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
-                        self.ctx_ref().device.cmd_bind_descriptor_sets(
-                            self.cmd_buf,
-                            vk::PipelineBindPoint::COMPUTE,
-                            layout.layout,
-                            bg_data.set_id,
-                            &[bg_data.set],
                             &offsets,
                         );
                     }
