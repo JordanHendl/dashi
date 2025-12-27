@@ -2,8 +2,8 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
+    BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter, GraphicsPipeline,
+    Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -121,7 +121,6 @@ pub struct Draw {
     /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
     /// Resources to bind before drawing.
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     /// Number of instances to draw.
@@ -137,7 +136,6 @@ pub struct DrawIndexed {
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
     /// Resources to bind before drawing.
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
     /// Number of instances to draw.
@@ -155,7 +153,6 @@ impl Default for DrawIndexed {
             index_count: Default::default(),
             instance_count: 1,
             first_instance: 0,
-            bind_groups: Default::default(),
             bind_tables: Default::default(),
             dynamic_buffers: Default::default(),
         }
@@ -169,7 +166,6 @@ pub struct Dispatch {
     pub y: u32,
     pub z: u32,
     pub pipeline: Handle<ComputePipeline>,
-    pub bind_groups: [Option<Handle<BindGroup>>; 4],
     pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
 }
@@ -804,7 +800,7 @@ pub mod compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BindGroup, Buffer, ComputePipeline, DynamicBuffer};
+    use crate::{BindTable, Buffer, ComputePipeline, DynamicBuffer};
 
     fn sample_copy_buffer(src: u16, dst: u16) -> CopyBuffer {
         CopyBuffer {
@@ -816,19 +812,18 @@ mod tests {
         }
     }
 
-    fn sample_dispatch(pipe: u16, bind_group: u16) -> Dispatch {
+    fn sample_dispatch(pipe: u16, bind_table: u16) -> Dispatch {
         Dispatch {
             x: 8,
             y: 4,
             z: 2,
             pipeline: Handle::<ComputePipeline>::new(pipe, 0),
-            bind_groups: [
-                Some(Handle::<BindGroup>::new(bind_group, 0)),
+            bind_tables: [
+                Some(Handle::<BindTable>::new(bind_table, 0)),
                 None,
                 None,
                 None,
             ],
-            bind_tables: Default::default(),
             dynamic_buffers: Default::default(),
         }
     }
@@ -852,7 +847,7 @@ mod tests {
         assert_eq!(cmd2.op, Op::Dispatch);
         let payload = cmd2.payload::<Dispatch>();
         assert_eq!(payload.pipeline, dispatch.pipeline);
-        assert_eq!(payload.bind_groups[0], dispatch.bind_groups[0]);
+        assert_eq!(payload.bind_tables[0], dispatch.bind_tables[0]);
         assert_eq!(payload.x, dispatch.x);
         assert_eq!(payload.y, dispatch.y);
         assert_eq!(payload.z, dispatch.z);
@@ -877,13 +872,13 @@ mod tests {
         assert_eq!(first.op, Op::Dispatch);
         let first_payload = first.payload::<Dispatch>();
         assert_eq!(first_payload.pipeline, dispatch_a.pipeline);
-        assert_eq!(first_payload.bind_groups[0], dispatch_a.bind_groups[0]);
+        assert_eq!(first_payload.bind_tables[0], dispatch_a.bind_tables[0]);
 
         let second = iter.next().unwrap();
         assert_eq!(second.op, Op::Dispatch);
         let second_payload = second.payload::<Dispatch>();
         assert_eq!(second_payload.pipeline, dispatch_b.pipeline);
-        assert_eq!(second_payload.bind_groups[0], dispatch_b.bind_groups[0]);
+        assert_eq!(second_payload.bind_tables[0], dispatch_b.bind_tables[0]);
 
         assert!(iter.next().is_none());
     }

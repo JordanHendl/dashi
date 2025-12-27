@@ -84,7 +84,6 @@ fn pipeline_switch() {
                 stride: 0,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo {
@@ -110,7 +109,6 @@ fn pipeline_switch() {
                 stride: 0,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [None, None, None, None],
             bt_layouts: [None, None, None, None],
             shaders: &[
                 PipelineShaderInfo {

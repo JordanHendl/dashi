@@ -140,8 +140,8 @@ fn minifb_triangle() {
         .make_bind_table_layout(&BindTableLayoutInfo {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Vertex,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::DynamicUniform,
                     binding: 0,
                     ..Default::default()
                 }],
@@ -162,7 +162,6 @@ fn minifb_triangle() {
                 stride: 8,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [None, None, None, None],
             bt_layouts: [Some(bt_layout), None, None, None],
             shaders: &[
                 PipelineShaderInfo {

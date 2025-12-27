@@ -7,9 +7,8 @@ use crate::gpu::driver::command::CommandSink;
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BindGroup, BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence,
-    GPUError, GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2,
-    UsageBits,
+    BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError,
+    GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -370,14 +369,6 @@ impl CommandQueue {
         }
     }
 
-    fn ensure_bind_group_state(&mut self, group: Handle<BindGroup>, queue: QueueType) {
-        if let Some(bg) = self.ctx_ref().bind_groups.get_ref(group) {
-            for (buffer, usage) in &bg.buffer_states {
-                self.ensure_buffer_state_on_queue(*buffer, *usage, queue);
-            }
-        }
-    }
-
     fn ensure_bind_table_state(&mut self, table: Handle<BindTable>, queue: QueueType) {
         if let Some(bt) = self.ctx_ref().bind_tables.get_ref(table) {
             for (buffer, usage) in &bt.buffer_states {
@@ -386,17 +377,10 @@ impl CommandQueue {
         }
     }
 
-    fn ensure_binding_states(
-        &mut self,
-        bind_tables: &[Option<Handle<BindTable>>; 4],
-        bind_groups: &[Option<Handle<BindGroup>>; 4],
-    ) {
+    fn ensure_binding_states(&mut self, bind_tables: &[Option<Handle<BindTable>>; 4]) {
         let queue = self.queue_type;
         for table in bind_tables.iter().flatten() {
             self.ensure_bind_table_state(*table, queue);
-        }
-        for group in bind_groups.iter().flatten() {
-            self.ensure_bind_group_state(*group, queue);
         }
     }
 
@@ -1388,7 +1372,7 @@ impl CommandSink for CommandQueue {
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-        // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+        // self.ensure_binding_states(&cmd.bind_tables);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1398,27 +1382,6 @@ impl CommandSink for CommandQueue {
                 &[v.offset as u64],
             );
         }
-        let mut offsets: Vec<u32> = cmd
-            .dynamic_buffers
-            .iter()
-            .map(|b| {
-                if b.is_some() {
-                    b.unwrap().alloc.offset
-                } else {
-                    0
-                }
-            })
-            .collect();
-
-        offsets.shrink_to(
-            cmd.bind_tables
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
-                .unwrap_or(0),
-        );
-
         if let Some(pipe) = self.curr_pipeline {
             let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
             let l = self
@@ -1428,9 +1391,15 @@ impl CommandSink for CommandQueue {
                 .unwrap();
 
             unsafe {
-                for table in &cmd.bind_tables {
+                for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
                         let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let offsets = cmd
+                            .dynamic_buffers
+                            .get(index)
+                            .and_then(|&d| d.map(|b| b.alloc.offset))
+                            .into_iter()
+                            .collect::<Vec<_>>();
                         self.ctx_ref().device.cmd_bind_descriptor_sets(
                             self.cmd_buf,
                             vk::PipelineBindPoint::GRAPHICS,
@@ -1458,8 +1427,7 @@ impl CommandSink for CommandQueue {
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
-        // self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
-
+        // self.ensure_binding_states(&cmd.bind_tables);
         let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
         let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
         unsafe {
@@ -1477,26 +1445,6 @@ impl CommandSink for CommandQueue {
                 vk::IndexType::UINT32,
             );
         }
-        let mut offsets: Vec<u32> = cmd
-            .dynamic_buffers
-            .iter()
-            .map(|b| {
-                if b.is_some() {
-                    b.unwrap().alloc.offset
-                } else {
-                    0
-                }
-            })
-            .collect();
-
-        offsets.shrink_to(
-            cmd.bind_tables
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
-                .unwrap_or(0),
-        );
         if let Some(pipe) = self.curr_pipeline {
             let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
             let l = self
@@ -1506,9 +1454,15 @@ impl CommandSink for CommandQueue {
                 .unwrap();
 
             unsafe {
-                for table in &cmd.bind_tables {
+                for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
                         let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let offsets = cmd
+                            .dynamic_buffers
+                            .get(index)
+                            .and_then(|&d| d.map(|b| b.alloc.offset))
+                            .into_iter()
+                            .collect::<Vec<_>>();
                         self.ctx_ref().device.cmd_bind_descriptor_sets(
                             self.cmd_buf,
                             vk::PipelineBindPoint::GRAPHICS,
@@ -1539,7 +1493,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) {
-        self.ensure_binding_states(&cmd.bind_tables, &cmd.bind_groups);
+        self.ensure_binding_states(&cmd.bind_tables);
         unsafe {
             self.bind_compute_pipeline(cmd.pipeline).unwrap();
             let layout_handle = self
@@ -1558,30 +1512,15 @@ impl CommandSink for CommandQueue {
                 .unwrap();
 
             unsafe {
-                let mut offsets: Vec<u32> = cmd
-                    .dynamic_buffers
-                    .iter()
-                    .map(|b| {
-                        if b.is_some() {
-                            b.unwrap().alloc.offset
-                        } else {
-                            0
-                        }
-                    })
-                    .collect();
-
-                offsets.shrink_to(
-                    cmd.bind_tables
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find_map(|(idx, opt)| if opt.is_some() { Some(idx) } else { None })
-                        .unwrap_or(0),
-                );
-
-                for table in &cmd.bind_tables {
+                for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
                         let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let offsets = cmd
+                            .dynamic_buffers
+                            .get(index)
+                            .and_then(|&d| d.map(|b| b.alloc.offset))
+                            .into_iter()
+                            .collect::<Vec<_>>();
                         self.ctx_ref().device.cmd_bind_descriptor_sets(
                             self.cmd_buf,
                             vk::PipelineBindPoint::COMPUTE,

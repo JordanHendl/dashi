@@ -4,12 +4,12 @@ use crate::utils::Handle;
 #[cfg(feature = "dashi-openxr")]
 use crate::XrDisplayInfo;
 use crate::{
-    AttachmentDescription, BindGroupLayout, BindGroupLayoutInfo, BindTable, BindTableLayout,
-    BindTableLayoutInfo, ComputePipeline, ComputePipelineInfo, ComputePipelineLayout,
-    ComputePipelineLayoutInfo, Display, DisplayInfo, DynamicState, GraphicsPipeline,
-    GraphicsPipelineDetails, GraphicsPipelineInfo, GraphicsPipelineLayout,
-    GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency,
-    SubpassDescription, VertexDescriptionInfo, Viewport, WindowBuffering,
+    AttachmentDescription, BindTable, BindTableLayout, BindTableLayoutInfo, ComputePipeline,
+    ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
+    DynamicState, GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo,
+    GraphicsPipelineLayout, GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass,
+    RenderPassInfo, SubpassDependency, SubpassDescription, VertexDescriptionInfo, Viewport,
+    WindowBuffering,
 };
 use crate::{Context, GPUError};
 use smallvec::SmallVec;
@@ -192,7 +192,6 @@ impl<'a> GraphicsPipelineLayoutBuilder<'a> {
         let info = GraphicsPipelineLayoutInfo {
             debug_name: self.debug_name,
             vertex_info: self.vertex_info.expect("vertex_info is required"),
-            bg_layouts: [None; 4],
             bt_layouts: self.bt_layouts,
             shaders: &self.shaders,
             details: self.details,
@@ -298,7 +297,6 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
     /// Finalize and create the ComputePipelineLayout.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<ComputePipelineLayout>, GPUError> {
         let info = ComputePipelineLayoutInfo {
-            bg_layouts: [None; 4],
             bt_layouts: self.bt_layouts,
             shader: &self.shader.expect("shader is required"),
         };
@@ -334,99 +332,6 @@ impl ComputePipelineBuilder {
             layout: self.layout,
         };
         ctx.make_compute_pipeline(&info)
-    }
-}
-/// Builds a BindGroupLayout via the builder pattern.
-pub struct BindGroupLayoutBuilder<'a> {
-    debug_name: &'a str,
-    shaders: SmallVec<[crate::ShaderInfo<'a>; 4]>,
-}
-
-impl<'a> BindGroupLayoutBuilder<'a> {
-    /// Start a new builder with a debug name.
-    pub fn new(debug_name: &'a str) -> Self {
-        Self {
-            debug_name,
-            shaders: SmallVec::new(),
-        }
-    }
-
-    /// Add a shader stage with its variable descriptors.
-    pub fn shader(mut self, shader_info: crate::ShaderInfo<'a>) -> Self {
-        self.shaders.push(shader_info);
-        self
-    }
-
-    /// Finalize and create the BindGroupLayout.
-    pub fn build(self, ctx: &mut Context) -> Result<Handle<BindGroupLayout>, GPUError> {
-        let info = BindGroupLayoutInfo {
-            debug_name: self.debug_name,
-            shaders: &self.shaders,
-        };
-        ctx.make_bind_group_layout(&info)
-    }
-}
-
-#[cfg(test)]
-impl<'a> BindGroupLayoutBuilder<'a> {
-    fn shaders_spilled(&self) -> bool {
-        self.shaders.spilled()
-    }
-}
-
-/// Builds a BindGroup via the builder pattern.
-pub struct BindGroupBuilder<'a> {
-    debug_name: &'a str,
-    layout: Handle<BindGroupLayout>,
-    bindings: SmallVec<[crate::BindingInfo; 8]>,
-    set: u32,
-}
-
-impl<'a> BindGroupBuilder<'a> {
-    /// Start a new builder for a bind group.
-    pub fn new(debug_name: &'a str) -> Self {
-        Self {
-            debug_name,
-            layout: Handle::default(),
-            bindings: SmallVec::new(),
-            set: 0,
-        }
-    }
-
-    /// Specify the layout handle to allocate from.
-    pub fn layout(mut self, layout: Handle<BindGroupLayout>) -> Self {
-        self.layout = layout;
-        self
-    }
-
-    /// Add a binding with its resource at a binding slot.
-    pub fn binding(mut self, binding: u32, resource: crate::ShaderResource) -> Self {
-        self.bindings.push(crate::BindingInfo { binding, resource });
-        self
-    }
-
-    /// Set the descriptor set index.
-    pub fn set(mut self, set: u32) -> Self {
-        self.set = set;
-        self
-    }
-
-    /// Finalize and create the BindGroup.
-    pub fn build(self, ctx: &mut Context) -> Result<Handle<crate::BindGroup>, GPUError> {
-        let info = crate::BindGroupInfo {
-            debug_name: self.debug_name,
-            layout: self.layout,
-            bindings: &self.bindings,
-            set: self.set,
-        };
-        ctx.make_bind_group(&info)
-    }
-}
-
-#[cfg(test)]
-impl<'a> BindGroupBuilder<'a> {
-    fn bindings_spilled(&self) -> bool {
-        self.bindings.spilled()
     }
 }
 
@@ -652,39 +557,6 @@ mod tests {
         }));
         ctx.destroy();
         assert!(result.is_err());
-    }
-
-    #[test]
-    #[serial]
-    fn test_bind_group_layout_builder() {
-        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
-        let shader_info = crate::ShaderInfo {
-            shader_type: crate::ShaderType::All,
-            variables: &[],
-        };
-        let builder = BindGroupLayoutBuilder::new("bgl").shader(shader_info);
-        assert!(!builder.shaders_spilled());
-        let _bgl = builder.build(&mut ctx).unwrap();
-        //        ctx.destroy_bind_group_layout(_bgl);
-        ctx.destroy();
-    }
-
-    #[test]
-    #[serial]
-    fn test_bind_group_builder() {
-        let mut ctx = Context::headless(&ContextInfo::default()).unwrap();
-        let shader_info = crate::ShaderInfo {
-            shader_type: crate::ShaderType::All,
-            variables: &[],
-        };
-        let bgl_builder = BindGroupLayoutBuilder::new("bgl").shader(shader_info);
-        assert!(!bgl_builder.shaders_spilled());
-        let bgl = bgl_builder.build(&mut ctx).unwrap();
-        let bg_builder = BindGroupBuilder::new("bg").layout(bgl);
-        assert!(!bg_builder.bindings_spilled());
-        let _bg = bg_builder.build(&mut ctx).unwrap();
-        //    ctx.destroy_bind_group(_bg);
-        ctx.destroy();
     }
 
     #[test]

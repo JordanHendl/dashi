@@ -6,36 +6,6 @@ use serial_test::serial;
 
 #[test]
 #[serial]
-fn bind_group_layout_disables_update_after_bind() {
-    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
-
-    let layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
-            debug_name: "legacy_bind_group",
-            shaders: &[ShaderInfo {
-                shader_type: ShaderType::Compute,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
-                    binding: 0,
-                    count: 1,
-                }],
-            }],
-        })
-        .unwrap();
-
-    let flags = ctx.bind_group_layout_flags(layout);
-    assert!(
-        !flags.update_after_bind,
-        "bind groups must not enable update-after-bind"
-    );
-    assert!(
-        !flags.partially_bound,
-        "bind groups must not allow partial binding"
-    );
-}
-
-#[test]
-#[serial]
 fn bind_table_layout_exposes_descriptor_flags() {
     let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
@@ -44,8 +14,8 @@ fn bind_table_layout_exposes_descriptor_flags() {
             debug_name: "bind_table_flags",
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::DynamicUniform,
                     binding: 0,
                     count: 4,
                 }],
@@ -74,8 +44,8 @@ fn bind_table_updates_validate_variable_types() {
             debug_name: "bind_table_updates",
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::DynamicUniform,
                     binding: 0,
                     count: 1,
                 }],

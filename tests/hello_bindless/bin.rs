@@ -12,8 +12,8 @@ fn main() {
     // One dynamic uniform at binding 0.
     let shader_info = ShaderInfo {
         shader_type: ShaderType::Compute,
-        variables: &[BindGroupVariable {
-            var_type: BindGroupVariableType::DynamicUniform,
+        variables: &[BindTableVariable {
+            var_type: BindTableVariableType::DynamicUniform,
             binding: 0,
             count: 1,
         }],
@@ -24,17 +24,11 @@ fn main() {
         .shader(shader_info)
         .build(&mut ctx)
         .unwrap();
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
-            debug_name: "bindless_bg_layout",
-            shaders: &[shader_info],
-        })
-        .unwrap();
 
     // Compute pipeline using the layout above.
     let pipeline_layout = ctx
         .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
-            bg_layouts: [Some(bg_layout), None, None, None],
+            bt_layouts: [Some(bt_layout), None, None, None],
             shader: &PipelineShaderInfo {
                 stage: ShaderType::Compute,
                 spirv: inline_spirv::inline_spirv!(

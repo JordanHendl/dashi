@@ -67,10 +67,10 @@ fn openxr_triangle() {
         ..Default::default()
     }).unwrap();
     let fb_view = ImageView { img: fb, ..Default::default() };
-    let bg_layout = ctx.make_bind_group_layout(&BindGroupLayoutInfo{
+    let table_layout = ctx.make_bind_table_layout(&BindTableLayoutInfo{
         shaders:&[ShaderInfo{
             shader_type:ShaderType::Vertex,
-            variables:&[BindGroupVariable{var_type:BindGroupVariableType::DynamicUniform,binding:0,..Default::default()}]
+            variables:&[BindTableVariable{var_type:BindTableVariableType::DynamicUniform,binding:0,..Default::default()}]
         }],
         debug_name:"OpenXR Triangle"
     }).unwrap();
@@ -80,8 +80,7 @@ fn openxr_triangle() {
             stride:8,
             rate:VertexRate::Vertex
         },
-        bg_layouts:[Some(bg_layout),None,None,None],
-        bt_layouts:[None,None,None,None],
+        bt_layouts:[Some(table_layout),None,None,None],
         shaders:&[
             PipelineShaderInfo{
                 stage:ShaderType::Vertex,
@@ -113,7 +112,15 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
     let subpass_info = ctx.render_pass_subpass_info(render_pass, 0).expect("render pass subpass info");
     let graphics_pipeline = ctx.make_graphics_pipeline(&GraphicsPipelineInfo{layout:pipeline_layout,attachment_formats:subpass_info.color_formats,depth_format:subpass_info.depth_format,subpass_samples:subpass_info.samples,debug_name:"Pipeline",..Default::default()}).unwrap();
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    let bind_group = ctx.make_bind_group(&BindGroupInfo{debug_name:"OpenXR Triangle",layout:bg_layout,bindings:&[BindingInfo{resource:ShaderResource::Dynamic(&allocator),binding:0}],..Default::default()}).unwrap();
+    let bind_table = ctx.make_bind_table(&BindTableInfo{
+        debug_name:"OpenXR Triangle",
+        layout:table_layout,
+        bindings:&[IndexedBindingInfo{
+            binding:0,
+            resources:&[IndexedResource{resource:ShaderResource::Dynamic(&allocator),slot:0}],
+        }],
+        ..Default::default()
+    }).unwrap();
     let mut timer = Timer::new();
     timer.start();
     let mut framed_list =
@@ -136,7 +143,7 @@ void main(){ out_color=vec4(frag_color.xy,0,1); }",frag),
             indices,
             index_count: INDICES.len() as u32,
             bindings: Bindings {
-                bind_groups: [Some(bind_group), None, None, None],
+                bind_tables: [Some(bind_table), None, None, None],
                 dynamic_buffers: [Some(buf), None, None, None],
                 ..Default::default()
             },

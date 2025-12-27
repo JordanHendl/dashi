@@ -26,13 +26,13 @@ fn main() -> Result<(), GPUError> {
     let shader_info = ShaderInfo {
         shader_type: ShaderType::All,
         variables: &[
-            BindGroupVariable {
-                var_type: BindGroupVariableType::Storage,
+            BindTableVariable {
+                var_type: BindTableVariableType::Storage,
                 binding: 0,
                 count: NUM_TRANSFORMS as u32,
             },
-            BindGroupVariable {
-                var_type: BindGroupVariableType::SampledImage,
+            BindTableVariable {
+                var_type: BindTableVariableType::SampledImage,
                 binding: 1,
                 count: NUM_TRANSFORMS as u32,
             },
@@ -173,8 +173,8 @@ fn main() -> Result<(), GPUError> {
     // Bind table layout for the per-draw instance index.
     let instance_shader_info = ShaderInfo {
         shader_type: ShaderType::All,
-        variables: &[BindGroupVariable {
-            var_type: BindGroupVariableType::DynamicUniform,
+        variables: &[BindTableVariable {
+            var_type: BindTableVariableType::DynamicUniform,
             binding: 0,
             count: 1,
         }],
@@ -439,7 +439,6 @@ void main() {
                     vertices,
                     indices,
                     index_count: INDICES.len() as u32,
-                    bind_groups: [None, None, None, None],
                     bind_tables: [Some(instance_table), Some(table), None, None],
                     dynamic_buffers: [Some(buf), None, None, None],
                     ..Default::default()
