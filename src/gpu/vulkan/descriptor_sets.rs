@@ -2,28 +2,10 @@ use super::*;
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct BindGroupLayout {
-    pub(super) pool: vk::DescriptorPool,
-    pub(super) layout: vk::DescriptorSetLayout,
-    pub(super) variables: Vec<BindGroupVariable>,
-    pub(super) update_after_bind: bool,
-    pub(super) partially_bound: bool,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct BindGroup {
-    pub(super) set: vk::DescriptorSet,
-    pub(super) set_id: u32,
-    pub(super) buffer_states: Vec<(Handle<Buffer>, UsageBits)>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
 pub struct BindTableLayout {
     pub(super) pool: vk::DescriptorPool,
     pub(super) layout: vk::DescriptorSetLayout,
-    pub(super) variables: Vec<BindGroupVariable>,
+    pub(super) variables: Vec<BindTableVariable>,
     pub(super) update_after_bind: bool,
     pub(super) partially_bound: bool,
 }
@@ -43,7 +25,6 @@ impl CommandQueue {
         bind_point: vk::PipelineBindPoint,
         layout: vk::PipelineLayout,
         table: Option<Handle<BindTable>>,
-        group: Option<Handle<BindGroup>>,
         offsets: &[u32],
     ) {
         unsafe {
@@ -55,16 +36,6 @@ impl CommandQueue {
                     layout,
                     bt_data.set_id,
                     &[bt_data.set],
-                    &[],
-                );
-            } else if let Some(bg) = group {
-                let bg_data = self.ctx_ref().bind_groups.get_ref(bg).unwrap();
-                self.ctx_ref().device.cmd_bind_descriptor_sets(
-                    self.cmd_buf,
-                    bind_point,
-                    layout,
-                    bg_data.set_id,
-                    &[bg_data.set],
                     offsets,
                 );
             }

@@ -303,8 +303,6 @@ pub struct Context {
     pub(super) image_views: Pool<VkImageView>,
     pub(super) image_view_cache: HashMap<ImageView, Handle<VkImageView>>,
     pub(super) samplers: Pool<Sampler>,
-    pub(super) bind_group_layouts: Pool<BindGroupLayout>,
-    pub(super) bind_groups: Pool<BindGroup>,
     pub(super) bind_table_layouts: Pool<BindTableLayout>,
     pub(super) bind_tables: Pool<BindTable>,
     pub(super) gfx_pipeline_layouts: Pool<GraphicsPipelineLayout>,
@@ -803,8 +801,6 @@ impl Context {
             image_views: Default::default(),
             image_view_cache: HashMap::new(),
             samplers: Default::default(),
-            bind_group_layouts: Default::default(),
-            bind_groups: Default::default(),
             bind_table_layouts: Default::default(),
             bind_tables: Default::default(),
             gfx_pipeline_layouts: Default::default(),
@@ -941,8 +937,6 @@ impl Context {
             image_views: Default::default(),
             image_view_cache: HashMap::new(),
             samplers: Default::default(),
-            bind_group_layouts: Default::default(),
-            bind_groups: Default::default(),
             bind_table_layouts: Default::default(),
             bind_tables: Default::default(),
             gfx_pipeline_layouts: Default::default(),
@@ -1837,14 +1831,6 @@ impl Context {
                 .destroy_descriptor_set_layout(self.empty_set_layout, None);
         }
 
-        // Bind group layouts
-        self.bind_group_layouts
-            .for_each_occupied_mut(|layout| unsafe {
-                self.device
-                    .destroy_descriptor_set_layout(layout.layout, None);
-                self.device.destroy_descriptor_pool(layout.pool, None);
-            });
-
         // Bind table layouts
         self.bind_table_layouts
             .for_each_occupied_mut(|layout| unsafe {
@@ -2107,16 +2093,16 @@ impl Context {
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
                 let descriptor_type = match variable.var_type {
-                    BindGroupVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
-                    BindGroupVariableType::DynamicUniform => {
+                    BindTableVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                    BindTableVariableType::DynamicUniform => {
                         vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
                     }
-                    BindGroupVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
-                    BindGroupVariableType::SampledImage => {
+                    BindTableVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                    BindTableVariableType::SampledImage => {
                         vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                     }
-                    BindGroupVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
-                    BindGroupVariableType::DynamicStorage => {
+                    BindTableVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
+                    BindTableVariableType::DynamicStorage => {
                         vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
                     }
                 };
@@ -2133,14 +2119,14 @@ impl Context {
                     binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
                 }
                 let binding_supports_uab = match variable.var_type {
-                    BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
+                    BindTableVariableType::Uniform | BindTableVariableType::DynamicUniform => {
                         supports_uab
                     }
-                    BindGroupVariableType::DynamicStorage | BindGroupVariableType::Storage => {
+                    BindTableVariableType::DynamicStorage | BindTableVariableType::Storage => {
                         supports_storage_uab
                     }
-                    BindGroupVariableType::SampledImage => supports_sampled_uab,
-                    BindGroupVariableType::StorageImage => supports_storage_image_uab,
+                    BindTableVariableType::SampledImage => supports_sampled_uab,
+                    BindTableVariableType::StorageImage => supports_storage_image_uab,
                 };
                 let binding_supports_uab = false && binding_supports_uab;
                 if binding_supports_uab {
@@ -2227,128 +2213,6 @@ impl Context {
             .unwrap());
     }
 
-    /// Creates a bind group layout for standard resources.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn make_bind_group_layout(
-        &mut self,
-        info: &BindGroupLayoutInfo,
-    ) -> Result<Handle<BindGroupLayout>, GPUError> {
-        let max_descriptor_sets: u32 = 2048;
-        let mut bindings = Vec::new();
-        let mut flags = Vec::new();
-        for shader_info in info.shaders.iter() {
-            for variable in shader_info.variables.iter() {
-                let descriptor_type = match variable.var_type {
-                    BindGroupVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
-                    BindGroupVariableType::DynamicUniform => {
-                        vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
-                    }
-                    BindGroupVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
-                    BindGroupVariableType::SampledImage => {
-                        vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-                    }
-                    BindGroupVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
-                    BindGroupVariableType::DynamicStorage => {
-                        vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
-                    }
-                };
-
-                let stage_flags = match shader_info.shader_type {
-                    ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
-                    ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
-                    ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
-                    ShaderType::All => vk::ShaderStageFlags::ALL,
-                };
-
-                flags.push(vk::DescriptorBindingFlags::empty());
-                let layout_binding = vk::DescriptorSetLayoutBinding::builder()
-                    .binding(variable.binding)
-                    .descriptor_type(descriptor_type)
-                    .descriptor_count(variable.count) // Assuming one per binding
-                    .stage_flags(stage_flags)
-                    .build();
-
-                bindings.push(layout_binding);
-            }
-        }
-
-        let layout_binding_info =
-            vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
-
-        let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
-
-        let mut layout_binding_info = layout_binding_info.build();
-        if flags.iter().any(|f| !f.is_empty()) {
-            layout_info = layout_info.push_next(&mut layout_binding_info);
-        }
-
-        let layout_info = layout_info.build();
-
-        let descriptor_set_layout = unsafe {
-            self.device
-                .create_descriptor_set_layout(&layout_info, None)?
-        };
-
-        let pool_sizes = bindings
-            .iter()
-            .map(|binding| {
-                vk::DescriptorPoolSize::builder()
-                    .ty(binding.descriptor_type)
-                    .descriptor_count(max_descriptor_sets) // Assuming one per binding
-                    .build()
-            })
-            .collect::<Vec<_>>();
-
-        let pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .pool_sizes(&pool_sizes)
-            .max_sets(max_descriptor_sets);
-
-        let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
-
-        self.set_name(
-            descriptor_set_layout,
-            info.debug_name,
-            vk::ObjectType::DESCRIPTOR_SET_LAYOUT,
-        );
-        self.set_name(
-            descriptor_pool,
-            info.debug_name,
-            vk::ObjectType::DESCRIPTOR_POOL,
-        );
-
-        // Step 4: Return the BindGroupLayout
-        return Ok(self
-            .bind_group_layouts
-            .insert(BindGroupLayout {
-                pool: descriptor_pool,
-                layout: descriptor_set_layout,
-                variables: info
-                    .shaders
-                    .iter()
-                    .flat_map(|shader| shader.variables.iter().cloned())
-                    .collect(),
-                update_after_bind: false,
-                partially_bound: false,
-            })
-            .unwrap());
-    }
-
-    pub fn layouts_compatible(
-        &self,
-        bg1: Handle<BindGroupLayout>,
-        bg2: Handle<BindGroupLayout>,
-    ) -> bool {
-        let bg1 = self.bind_group_layouts.get_ref(bg1).unwrap();
-        let bg2 = self.bind_group_layouts.get_ref(bg2).unwrap();
-        bg1.variables == bg2.variables
-    }
-
     pub fn table_layouts_compatible(
         &self,
         bg1: Handle<BindTableLayout>,
@@ -2359,15 +2223,6 @@ impl Context {
         bg1.variables == bg2.variables
     }
 
-    pub fn bind_group_compatible(
-        &self,
-        layout: Handle<BindGroupLayout>,
-        bindings: &[BindingInfo],
-    ) -> bool {
-        let layout = self.bind_group_layouts.get_ref(layout).unwrap();
-        bindings_compatible_with_layout(&layout.variables, bindings)
-    }
-
     pub fn bind_table_compatible(
         &self,
         layout: Handle<BindTableLayout>,
@@ -2375,10 +2230,6 @@ impl Context {
     ) -> bool {
         let layout = self.bind_table_layouts.get_ref(layout).unwrap();
         indexed_bindings_compatible_with_layout(&layout.variables, bindings)
-    }
-
-    pub fn bind_group_info_compatible(&self, info: &BindGroupInfo) -> bool {
-        self.bind_group_compatible(info.layout, info.bindings)
     }
 
     pub fn bind_table_info_compatible(&self, info: &BindTableInfo) -> bool {
@@ -2400,23 +2251,12 @@ impl Context {
         }
     }
 
-    pub fn bind_group_layout_flags(
-        &self,
-        layout: Handle<BindGroupLayout>,
-    ) -> DescriptorBindingFlagsInfo {
-        let layout = self.bind_group_layouts.get_ref(layout).unwrap();
-        DescriptorBindingFlagsInfo {
-            update_after_bind: layout.update_after_bind,
-            partially_bound: layout.partially_bound,
-        }
-    }
-
-    fn usage_bits_for_variable(var_type: BindGroupVariableType) -> UsageBits {
+    fn usage_bits_for_variable(var_type: BindTableVariableType) -> UsageBits {
         match var_type {
-            BindGroupVariableType::Uniform | BindGroupVariableType::DynamicUniform => {
+            BindTableVariableType::Uniform | BindTableVariableType::DynamicUniform => {
                 UsageBits::UNIFORM_READ
             }
-            BindGroupVariableType::Storage | BindGroupVariableType::DynamicStorage => {
+            BindTableVariableType::Storage | BindTableVariableType::DynamicStorage => {
                 UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
             }
             _ => UsageBits::empty(),
@@ -2425,7 +2265,7 @@ impl Context {
 
     fn buffer_usage_from_resource(
         resource: &ShaderResource,
-        var_type: BindGroupVariableType,
+        var_type: BindTableVariableType,
     ) -> Option<(Handle<Buffer>, UsageBits)> {
         let usage = Self::usage_bits_for_variable(var_type);
         match resource {
@@ -2696,211 +2536,6 @@ impl Context {
         Ok(())
     }
 
-    /// Creates a bind group from the provided bindings.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn make_bind_group(&mut self, info: &BindGroupInfo) -> Result<Handle<BindGroup>, GPUError> {
-        // Retrieve the BindGroupLayout from the handle
-        let layout = self.bind_group_layouts.get_ref(info.layout).unwrap();
-
-        // Step 1: Allocate Descriptor Set
-        let alloc_info = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(layout.pool)
-            .set_layouts(&[layout.layout])
-            .build();
-
-        let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
-
-        let descriptor_set = descriptor_sets[0]; // We are allocating one descriptor set
-
-        self.set_name(
-            descriptor_set,
-            info.debug_name,
-            vk::ObjectType::DESCRIPTOR_SET,
-        );
-
-        let requirements = layout_binding_requirements(&layout.variables);
-
-        // Step 2: Prepare the write operations for the descriptor set
-        let mut write_descriptor_sets = Vec::with_capacity(2048);
-        let mut buffer_infos = Vec::with_capacity(2048);
-        let mut image_infos = Vec::with_capacity(2048);
-        let mut tracked_buffers = Vec::new();
-
-        for binding_info in info.bindings.iter() {
-            if let Some(req) = requirements
-                .as_ref()
-                .and_then(|req| req.get(&binding_info.binding))
-            {
-                if let Some((buffer, usage)) =
-                    Self::buffer_usage_from_resource(&binding_info.resource, req.0)
-                {
-                    tracked_buffers.push((buffer, usage));
-                }
-            }
-            match &binding_info.resource {
-                ShaderResource::Buffer(view) => {
-                    let buffer = self.buffers.get_ref(view.handle).unwrap();
-                    let buffer_size = buffer.size as u64;
-                    let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
-                    let size = if view.size == 0 {
-                        available
-                    } else {
-                        view.size.min(available)
-                    };
-
-                    let buffer_info = vk::DescriptorBufferInfo::builder()
-                        .buffer(buffer.buf)
-                        .offset(buffer.offset as u64 + view.offset)
-                        .range(size)
-                        .build();
-
-                    buffer_infos.push(buffer_info);
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
-                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-                ShaderResource::SampledImage(image_view, sampler) => {
-                    let handle = self.get_or_create_image_view(image_view)?;
-                    let image = self.image_views.get_ref(handle).unwrap();
-                    let sampler = self.samplers.get_ref(*sampler).unwrap();
-
-                    let image_info = vk::DescriptorImageInfo::builder()
-                        .image_view(image.view)
-                        .image_layout(vk::ImageLayout::GENERAL)
-                        .sampler(sampler.sampler)
-                        .build();
-
-                    image_infos.push(image_info);
-
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER) // Assuming a sampled image
-                        .image_info(&image_infos[image_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-                ShaderResource::Dynamic(alloc) => {
-                    let buffer = self.buffers.get_ref(alloc.pool).unwrap();
-
-                    let buffer_info = vk::DescriptorBufferInfo::builder()
-                        .buffer(buffer.buf)
-                        .offset(0)
-                        .range(alloc.min_alloc_size as u64)
-                        .build();
-
-                    buffer_infos.push(buffer_info);
-
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
-                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-                ShaderResource::DynamicStorage(alloc) => {
-                    let buffer = self.buffers.get_ref(alloc.pool).unwrap();
-
-                    let buffer_info = vk::DescriptorBufferInfo::builder()
-                        .buffer(buffer.buf)
-                        .offset(0)
-                        .range(alloc.min_alloc_size as u64)
-                        .build();
-
-                    buffer_infos.push(buffer_info);
-
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER_DYNAMIC) // Assuming a uniform buffer for now
-                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-                ShaderResource::StorageBuffer(view) => {
-                    let buffer = self.buffers.get_ref(view.handle).unwrap();
-                    let buffer_size = buffer.size as u64;
-                    let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
-                    let size = if view.size == 0 {
-                        available
-                    } else {
-                        view.size.min(available)
-                    };
-
-                    let buffer_info = vk::DescriptorBufferInfo::builder()
-                        .buffer(buffer.buf)
-                        .offset(buffer.offset as u64 + view.offset)
-                        .range(size)
-                        .build();
-
-                    buffer_infos.push(buffer_info);
-
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-                ShaderResource::ConstBuffer(view) => {
-                    let buffer = self.buffers.get_ref(view.handle).unwrap();
-
-                    let size = if view.size == 0 {
-                        buffer.size as u64
-                    } else {
-                        view.size
-                    };
-                    let buffer_info = vk::DescriptorBufferInfo::builder()
-                        .buffer(buffer.buf)
-                        .offset(view.offset as u64)
-                        .range(size as u64)
-                        .build();
-
-                    buffer_infos.push(buffer_info);
-                    let write_descriptor_set = vk::WriteDescriptorSet::builder()
-                        .dst_set(descriptor_set)
-                        .dst_binding(binding_info.binding)
-                        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER) // Assuming a uniform buffer for now
-                        .buffer_info(&buffer_infos[buffer_infos.len() - 1..])
-                        .build();
-
-                    write_descriptor_sets.push(write_descriptor_set);
-                }
-            }
-        }
-
-        unsafe {
-            self.device
-                .update_descriptor_sets(&write_descriptor_sets, &[]);
-        }
-
-        // Step 4: Create the BindGroup and return a handle
-        let bind_group = BindGroup {
-            set: descriptor_set,
-            set_id: info.set,
-            buffer_states: tracked_buffers,
-        };
-
-        Ok(self.bind_groups.insert(bind_group).unwrap())
-    }
-
     /// Creates a bind table and initializes it with the provided bindings.
     pub fn make_bind_table(&mut self, info: &BindTableInfo) -> Result<Handle<BindTable>, GPUError> {
         let layout = self.bind_table_layouts.get_ref(info.layout).unwrap();
@@ -2938,33 +2573,20 @@ impl Context {
 
     fn create_pipeline_layout(
         &self,
-        bind_group_layout_handle: &[Option<Handle<BindGroupLayout>>],
         bind_table_layout_handle: &[Option<Handle<BindTableLayout>>],
     ) -> Result<vk::PipelineLayout> {
-        let max_index = bind_group_layout_handle
+        let max_index = bind_table_layout_handle
             .iter()
             .enumerate()
             .filter_map(|(idx, h)| h.map(|_| idx))
-            .chain(
-                bind_table_layout_handle
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, h)| h.map(|_| idx)),
-            )
             .max();
 
         let mut layouts = Vec::new();
         if let Some(max_index) = max_index {
             layouts.reserve(max_index + 1);
             for index in 0..=max_index {
-                match (
-                    bind_group_layout_handle.get(index),
-                    bind_table_layout_handle.get(index),
-                ) {
-                    (Some(Some(b)), _) => {
-                        layouts.push(self.bind_group_layouts.get_ref(*b).unwrap().layout)
-                    }
-                    (Some(None), Some(Some(t))) | (None, Some(Some(t))) => {
+                match bind_table_layout_handle.get(index) {
+                    Some(Some(t)) => {
                         layouts.push(self.bind_table_layouts.get_ref(*t).unwrap().layout)
                     }
                     _ => layouts.push(self.empty_set_layout),
@@ -3144,50 +2766,6 @@ impl Context {
     pub fn make_render_pass_from_yaml_file(&mut self, path: &str) -> Result<RenderPassWithImages> {
         let s = cfg::load_text(path)?;
         self.make_render_pass_from_yaml(&s)
-    }
-
-    #[cfg(feature = "dashi-serde")]
-    pub fn make_bind_group_layout_from_yaml(
-        &mut self,
-        yaml_str: &str,
-    ) -> Result<Handle<BindGroupLayout>> {
-        let cfg = cfg::BindGroupLayoutCfg::from_yaml(yaml_str)?;
-        let borrowed = cfg.borrow();
-        let info = borrowed.info();
-        self.make_bind_group_layout(&info)
-    }
-
-    #[cfg(feature = "dashi-serde")]
-    pub fn make_bind_group_layouts_from_yaml(
-        &mut self,
-        yaml_str: &str,
-    ) -> Result<Vec<Handle<BindGroupLayout>>> {
-        let cfgs = cfg::BindGroupLayoutCfg::vec_from_yaml(yaml_str)?;
-        cfgs.iter()
-            .map(|cfg| {
-                let borrowed = cfg.borrow();
-                let info = borrowed.info();
-                self.make_bind_group_layout(&info)
-            })
-            .collect()
-    }
-
-    #[cfg(feature = "dashi-serde")]
-    pub fn make_bind_group_layout_from_yaml_file(
-        &mut self,
-        path: &str,
-    ) -> Result<Handle<BindGroupLayout>> {
-        let s = cfg::load_text(path)?;
-        self.make_bind_group_layout_from_yaml(&s)
-    }
-
-    #[cfg(feature = "dashi-serde")]
-    pub fn make_bind_group_layouts_from_yaml_file(
-        &mut self,
-        path: &str,
-    ) -> Result<Vec<Handle<BindGroupLayout>>> {
-        let s = cfg::load_text(path)?;
-        self.make_bind_group_layouts_from_yaml(&s)
     }
 
     #[cfg(feature = "dashi-serde")]
@@ -3441,7 +3019,7 @@ impl Context {
         })
     }
 
-    /// Creates a compute pipeline layout from shader and bind group layouts.
+    /// Creates a compute pipeline layout from shader and bind table layouts.
     ///
     /// # Prerequisites
     /// - Correct attachment formats.
@@ -3459,7 +3037,7 @@ impl Context {
             .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
             .build();
 
-        let layout = self.create_pipeline_layout(&info.bg_layouts, &info.bt_layouts)?;
+        let layout = self.create_pipeline_layout(&info.bt_layouts)?;
 
         return Ok(self
             .compute_pipeline_layouts
@@ -3579,7 +3157,7 @@ impl Context {
         };
 
         // Step 9: Create Pipeline Layout (assume we have a layout creation function)
-        let layout = self.create_pipeline_layout(&info.bg_layouts, &info.bt_layouts)?;
+        let layout = self.create_pipeline_layout(&info.bt_layouts)?;
 
         self.set_name(layout, info.debug_name, vk::ObjectType::PIPELINE_LAYOUT);
 

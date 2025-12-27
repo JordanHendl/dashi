@@ -4,7 +4,7 @@ use dashi::*;
 /// Minimal example showing how to create a bindless `BindTable`.
 /// Use `BindTable` when you need to index many resources from shaders or
 /// frequently change resource bindings. For small, fixed sets of resources,
-/// a classic `BindGroup` is usually simpler.
+/// a classic `BindTable` is usually simpler.
 fn main() -> Result<(), GPUError> {
     // Create a headless context.
     let mut ctx = gpu::Context::headless(&ContextInfo::default())?;
@@ -12,8 +12,8 @@ fn main() -> Result<(), GPUError> {
     // Describe a single dynamic uniform buffer at binding 0.
     let shader_info = ShaderInfo {
         shader_type: ShaderType::All,
-        variables: &[BindGroupVariable {
-            var_type: BindGroupVariableType::DynamicUniform,
+        variables: &[BindTableVariable {
+            var_type: BindTableVariableType::DynamicUniform,
             binding: 0,
             count: 1,
         }],

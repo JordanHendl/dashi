@@ -114,12 +114,12 @@ fn main() {
         .unwrap();
     let fb_view = ImageView { img: fb, ..Default::default() };
 
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
+    let table_layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Vertex,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::DynamicUniform,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::DynamicUniform,
                     binding: 0,
                     ..Default::default()
                 }],
@@ -139,8 +139,7 @@ fn main() {
                 stride: 12,
                 rate: VertexRate::Vertex,
             },
-            bg_layouts: [Some(bg_layout), None, None, None],
-            bt_layouts: [None, None, None, None],
+            bt_layouts: [Some(table_layout), None, None, None],
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
@@ -205,11 +204,17 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
         .unwrap();
 
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
+    let bind_table = ctx
+        .make_bind_table(&BindTableInfo {
             debug_name: "OpenXR Simple Scene",
-            layout: bg_layout,
-            bindings: &[BindingInfo { resource: ShaderResource::Dynamic(&allocator), binding: 0 }],
+            layout: table_layout,
+            bindings: &[IndexedBindingInfo {
+                binding: 0,
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::Dynamic(&allocator),
+                }],
+            }],
             ..Default::default()
         })
         .unwrap();
@@ -251,7 +256,7 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
                 indices,
                 index_count: INDICES.len() as u32,
                 bindings: Bindings {
-                    bind_groups: [Some(bind_group), None, None, None],
+                    bind_tables: [Some(bind_table), None, None, None],
                     dynamic_buffers: [Some(buf), None, None, None],
                     ..Default::default()
                 },

@@ -80,23 +80,23 @@
 //
 //    // bind table layout for storage buffer used in compute and fragment stages
 //    let bg_layout = ctx
-//        .make_bind_group_layout(&BindGroupLayoutInfo {
+//        .make_bind_group_layout(&BindTableLayoutInfo {
 //            debug_name: "bg_layout",
 //            shaders: &[
 //                ShaderInfo {
 //                    shader_type: ShaderType::Compute,
-//                    variables: &[BindGroupVariable { var_type: BindGroupVariableType::Storage, binding: 0, count: 1 }],
+//                    variables: &[BindTableVariable { var_type: BindTableVariableType::Storage, binding: 0, count: 1 }],
 //                },
 //                ShaderInfo {
 //                    shader_type: ShaderType::Fragment,
-//                    variables: &[BindGroupVariable { var_type: BindGroupVariableType::Storage, binding: 0, count: 1 }],
+//                    variables: &[BindTableVariable { var_type: BindTableVariableType::Storage, binding: 0, count: 1 }],
 //                },
 //            ],
 //        })
 //        .unwrap();
 //
 //    let bind_group = ctx
-//        .make_bind_group(&BindGroupInfo {
+//        .make_bind_group(&BindTableInfo {
 //            debug_name: "bg",
 //            layout: bg_layout,
 //            bindings: &[BindingInfo { resource: ShaderResource::StorageBuffer(color_buf), binding: 0 }],

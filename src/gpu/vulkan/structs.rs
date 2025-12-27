@@ -1,6 +1,6 @@
 use super::{
-    BindGroupLayout, BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocatorState,
-    GraphicsPipelineLayout, Image, RenderPass, Sampler, SelectedDevice, SubpassSampleInfo,
+    BindTableLayout, Buffer, ComputePipelineLayout, DynamicAllocatorState, GraphicsPipelineLayout,
+    Image, RenderPass, Sampler, SelectedDevice, SubpassSampleInfo,
 };
 use crate::{utils::Handle, BindTable, CommandQueue, Semaphore};
 use bitflags::bitflags;
@@ -689,7 +689,7 @@ impl Default for AttachmentDescription {
 #[repr(u8)]
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
-pub enum BindGroupVariableType {
+pub enum BindTableVariableType {
     Uniform,
     DynamicUniform,
     DynamicStorage,
@@ -709,16 +709,16 @@ pub enum ShaderType {
 
 #[derive(Hash, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
-pub struct BindGroupVariable {
-    pub var_type: BindGroupVariableType,
+pub struct BindTableVariable {
+    pub var_type: BindTableVariableType,
     pub binding: u32,
     pub count: u32,
 }
 
-impl Default for BindGroupVariable {
+impl Default for BindTableVariable {
     fn default() -> Self {
         Self {
-            var_type: BindGroupVariableType::Uniform,
+            var_type: BindTableVariableType::Uniform,
             binding: Default::default(),
             count: 1,
         }
@@ -728,19 +728,7 @@ impl Default for BindGroupVariable {
 #[derive(Hash, Clone, Debug)]
 pub struct ShaderInfo<'a> {
     pub shader_type: ShaderType,
-    pub variables: &'a [BindGroupVariable],
-}
-
-#[derive(Clone, Debug)]
-pub struct BindGroupLayoutInfo<'a> {
-    pub debug_name: &'a str,
-    pub shaders: &'a [ShaderInfo<'a>],
-}
-
-impl Hash for BindGroupLayoutInfo<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        hash_from_shaders(self.shaders).hash(state);
-    }
+    pub variables: &'a [BindTableVariable],
 }
 
 #[derive(Clone, Debug)]
@@ -812,19 +800,14 @@ fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
     hash64(&norm)
 }
 
-/// Stable, order-independent hash for a BindGroupLayoutInfo (ignores `debug_name`).
-pub fn hash_bind_group_layout_info(info: &BindGroupLayoutInfo<'_>) -> u64 {
-    hash_from_shaders(info.shaders)
-}
-
 /// Stable, order-independent hash for a BindTableLayoutInfo (ignores `debug_name`).
 pub fn hash_bind_table_layout_info(info: &BindTableLayoutInfo<'_>) -> u64 {
     hash_from_shaders(info.shaders)
 }
 
 pub(crate) fn layout_binding_requirements(
-    variables: &[BindGroupVariable],
-) -> Option<HashMap<u32, (BindGroupVariableType, u32)>> {
+    variables: &[BindTableVariable],
+) -> Option<HashMap<u32, (BindTableVariableType, u32)>> {
     let mut requirements = HashMap::new();
 
     for var in variables {
@@ -844,51 +827,20 @@ pub(crate) fn layout_binding_requirements(
     Some(requirements)
 }
 
-pub(crate) fn resource_var_type(resource: &ShaderResource) -> BindGroupVariableType {
+pub(crate) fn resource_var_type(resource: &ShaderResource) -> BindTableVariableType {
     match resource {
         ShaderResource::Buffer(_) | ShaderResource::ConstBuffer(_) => {
-            BindGroupVariableType::Uniform
+            BindTableVariableType::Uniform
         }
-        ShaderResource::Dynamic(_) => BindGroupVariableType::DynamicUniform,
-        ShaderResource::DynamicStorage(_) => BindGroupVariableType::DynamicStorage,
-        ShaderResource::StorageBuffer(_) => BindGroupVariableType::Storage,
-        ShaderResource::SampledImage(_, _) => BindGroupVariableType::SampledImage,
+        ShaderResource::Dynamic(_) => BindTableVariableType::DynamicUniform,
+        ShaderResource::DynamicStorage(_) => BindTableVariableType::DynamicStorage,
+        ShaderResource::StorageBuffer(_) => BindTableVariableType::Storage,
+        ShaderResource::SampledImage(_, _) => BindTableVariableType::SampledImage,
     }
-}
-
-pub(crate) fn bindings_compatible_with_layout(
-    variables: &[BindGroupVariable],
-    bindings: &[BindingInfo],
-) -> bool {
-    let Some(requirements) = layout_binding_requirements(variables) else {
-        return false;
-    };
-
-    let mut seen_bindings = HashSet::new();
-
-    for binding in bindings {
-        let Some((expected_type, expected_count)) = requirements.get(&binding.binding) else {
-            return false;
-        };
-
-        if resource_var_type(&binding.resource) != *expected_type {
-            return false;
-        }
-
-        if *expected_count == 0 {
-            return false;
-        }
-
-        if !seen_bindings.insert(binding.binding) {
-            return false;
-        }
-    }
-
-    true
 }
 
 pub(crate) fn indexed_bindings_compatible_with_layout(
-    variables: &[BindGroupVariable],
+    variables: &[BindTableVariable],
     bindings: &[IndexedBindingInfo],
 ) -> bool {
     let Some(requirements) = layout_binding_requirements(variables) else {
@@ -927,54 +879,69 @@ mod layout_validation_tests {
     use super::*;
 
     #[test]
-    fn accepts_matching_bind_group_bindings() {
+    fn accepts_matching_bind_table_bindings() {
         let layout_vars = vec![
-            BindGroupVariable {
-                var_type: BindGroupVariableType::Uniform,
+            BindTableVariable {
+                var_type: BindTableVariableType::Uniform,
                 binding: 0,
                 count: 1,
             },
-            BindGroupVariable {
-                var_type: BindGroupVariableType::Storage,
+            BindTableVariable {
+                var_type: BindTableVariableType::Storage,
                 binding: 1,
                 count: 3,
             },
         ];
 
         let bindings = [
-            BindingInfo {
+            IndexedBindingInfo {
                 binding: 0,
-                resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
+                }],
             },
-            BindingInfo {
+            IndexedBindingInfo {
                 binding: 1,
-                resource: ShaderResource::StorageBuffer(BufferView::new(Handle::new(1, 0))),
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::StorageBuffer(BufferView::new(Handle::new(1, 0))),
+                }],
             },
         ];
 
-        assert!(bindings_compatible_with_layout(&layout_vars, &bindings));
+        assert!(indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &bindings
+        ));
     }
 
     #[test]
     fn rejects_mismatched_binding_type() {
-        let layout_vars = vec![BindGroupVariable {
-            var_type: BindGroupVariableType::SampledImage,
+        let layout_vars = vec![BindTableVariable {
+            var_type: BindTableVariableType::SampledImage,
             binding: 0,
             count: 1,
         }];
 
-        let bindings = [BindingInfo {
+        let bindings = [IndexedBindingInfo {
             binding: 0,
-            resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
+            resources: &[IndexedResource {
+                slot: 0,
+                resource: ShaderResource::Buffer(BufferView::new(Handle::new(0, 0))),
+            }],
         }];
 
-        assert!(!bindings_compatible_with_layout(&layout_vars, &bindings));
+        assert!(!indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &bindings
+        ));
     }
 
     #[test]
     fn validates_indexed_slots_and_types() {
-        let layout_vars = vec![BindGroupVariable {
-            var_type: BindGroupVariableType::SampledImage,
+        let layout_vars = vec![BindTableVariable {
+            var_type: BindTableVariableType::SampledImage,
             binding: 2,
             count: 2,
         }];
@@ -1055,12 +1022,6 @@ pub enum ShaderResource {
 }
 
 #[derive(Debug, Clone, Hash)]
-pub struct BindingInfo {
-    pub resource: ShaderResource,
-    pub binding: u32,
-}
-
-#[derive(Debug, Clone, Hash)]
 pub struct IndexedResource {
     pub resource: ShaderResource,
     pub slot: u32,
@@ -1088,14 +1049,6 @@ pub struct BindTableUpdateInfo<'a> {
 }
 
 #[derive(Clone)]
-pub struct BindGroupInfo<'a> {
-    pub debug_name: &'a str,
-    pub layout: Handle<BindGroupLayout>,
-    pub bindings: &'a [BindingInfo],
-    pub set: u32,
-}
-
-#[derive(Clone)]
 pub struct BindTableInfo<'a> {
     pub debug_name: &'a str,
     pub layout: Handle<BindTableLayout>,
@@ -1103,30 +1056,11 @@ pub struct BindTableInfo<'a> {
     pub set: u32,
 }
 
-impl Hash for BindGroupInfo<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.layout.hash(state);
-        self.bindings.hash(state);
-        self.set.hash(state);
-    }
-}
-
 impl Hash for BindTableInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.layout.hash(state);
         self.bindings.hash(state);
         self.set.hash(state);
-    }
-}
-
-impl<'a> Default for BindGroupInfo<'a> {
-    fn default() -> Self {
-        Self {
-            layout: Default::default(),
-            bindings: &[],
-            set: 0,
-            debug_name: "",
-        }
     }
 }
 
@@ -1632,14 +1566,12 @@ pub struct PipelineShaderInfo<'a> {
 
 #[derive(Debug)]
 pub struct ComputePipelineLayoutInfo<'a> {
-    pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     pub bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     pub shader: &'a PipelineShaderInfo<'a>,
 }
 
 impl Hash for ComputePipelineLayoutInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.bg_layouts.hash(state);
         self.bt_layouts.hash(state);
         self.shader.hash(state);
     }
@@ -1649,7 +1581,6 @@ impl Hash for ComputePipelineLayoutInfo<'_> {
 pub struct GraphicsPipelineLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub vertex_info: VertexDescriptionInfo<'a>,
-    pub bg_layouts: [Option<Handle<BindGroupLayout>>; 4],
     pub bt_layouts: [Option<Handle<BindTableLayout>>; 4],
     pub shaders: &'a [PipelineShaderInfo<'a>],
     pub details: GraphicsPipelineDetails,
@@ -1658,7 +1589,6 @@ pub struct GraphicsPipelineLayoutInfo<'a> {
 impl Hash for GraphicsPipelineLayoutInfo<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.vertex_info.hash(state);
-        self.bg_layouts.hash(state);
         self.bt_layouts.hash(state);
         self.shaders.hash(state);
         self.details.hash(state);
@@ -1818,63 +1748,14 @@ pub mod cfg {
         }
     }
 
-    // ---------------- BindGroupLayout authoring ----------------
+    // ---------------- BindTableLayout authoring ----------------
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ShaderInfoCfg {
         pub stage: ShaderType,
         #[serde(default)]
-        pub variables: Vec<BindGroupVariable>,
+        pub variables: Vec<BindTableVariable>,
     }
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct BindGroupLayoutCfg {
-        pub debug_name: String,
-        #[serde(default)]
-        pub shaders: Vec<ShaderInfoCfg>,
-    }
-
-    impl BindGroupLayoutCfg {
-        pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
-            serde_json::from_str(s)
-        }
-        pub fn from_yaml(s: &str) -> Result<Self, serde_yaml::Error> {
-            serde_yaml::from_str(s)
-        }
-        pub fn vec_from_yaml(s: &str) -> Result<Vec<Self>, serde_yaml::Error> {
-            serde_yaml::from_str(s)
-        }
-    }
-
-    pub struct BindGroupLayoutBorrowed<'a> {
-        cfg: &'a BindGroupLayoutCfg,
-        shaders: Vec<ShaderInfo<'a>>,
-    }
-
-    impl BindGroupLayoutBorrowed<'_> {
-        pub fn info(&self) -> BindGroupLayoutInfo<'_> {
-            BindGroupLayoutInfo {
-                debug_name: &self.cfg.debug_name,
-                shaders: &self.shaders,
-            }
-        }
-    }
-
-    impl BindGroupLayoutCfg {
-        pub fn borrow(&self) -> BindGroupLayoutBorrowed<'_> {
-            let shaders = self
-                .shaders
-                .iter()
-                .map(|shader| ShaderInfo {
-                    shader_type: shader.stage,
-                    variables: &shader.variables,
-                })
-                .collect();
-
-            BindGroupLayoutBorrowed { cfg: self, shaders }
-        }
-    }
-
-    // ---------------- BindTableLayout authoring ----------------
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct BindTableLayoutCfg {
         pub debug_name: String,
@@ -1953,7 +1834,6 @@ pub mod cfg {
     #[derive(Debug, Clone, Serialize, Deserialize, Default)]
     pub struct PipelineLayoutsRef {
         /// Names for BG/BT layouts you resolve to Handles at build time.
-        pub bg_layouts: [Option<String>; 4],
         pub bt_layouts: [Option<String>; 4],
     }
 

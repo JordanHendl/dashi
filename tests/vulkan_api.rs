@@ -165,13 +165,13 @@ fn buffer_copy_then_compute_reads() {
         })
         .unwrap();
 
-    let bg_layout = ctx
-        .make_bind_group_layout(&BindGroupLayoutInfo {
+    let table_layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
             debug_name: "copy_then_compute_layout",
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
-                variables: &[BindGroupVariable {
-                    var_type: BindGroupVariableType::Storage,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::Storage,
                     binding: 0,
                     count: 1,
                 }],
@@ -179,13 +179,16 @@ fn buffer_copy_then_compute_reads() {
         })
         .unwrap();
 
-    let bind_group = ctx
-        .make_bind_group(&BindGroupInfo {
-            debug_name: "copy_then_compute_group",
-            layout: bg_layout,
-            bindings: &[BindingInfo {
-                resource: ShaderResource::StorageBuffer(BufferView::new(storage)),
+    let bind_table = ctx
+        .make_bind_table(&BindTableInfo {
+            debug_name: "copy_then_compute_table",
+            layout: table_layout,
+            bindings: &[IndexedBindingInfo {
                 binding: 0,
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::StorageBuffer(BufferView::new(storage)),
+                }],
             }],
             set: 0,
         })
@@ -193,8 +196,7 @@ fn buffer_copy_then_compute_reads() {
 
     let pipeline_layout = ctx
         .make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
-            bg_layouts: [Some(bg_layout), None, None, None],
-            bt_layouts: [None, None, None, None],
+            bt_layouts: [Some(table_layout), None, None, None],
             shader: &PipelineShaderInfo {
                 stage: ShaderType::Compute,
                 spirv: inline_spirv::inline_spirv!(
@@ -240,8 +242,7 @@ void main() {
             y: 1,
             z: 1,
             pipeline,
-            bind_groups: [Some(bind_group), None, None, None],
-            bind_tables: [None, None, None, None],
+            bind_tables: [Some(bind_table), None, None, None],
             dynamic_buffers: [None, None, None, None],
         })
         .unbind_pipeline()

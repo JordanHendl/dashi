@@ -59,21 +59,20 @@ fn main() -> Result<(), GPUError> {
     // Build a simple compute pipeline that doubles each element in the buffer.
     let shader_info = ShaderInfo {
         shader_type: ShaderType::Compute,
-        variables: &[BindGroupVariable {
-            var_type: BindGroupVariableType::Storage,
+        variables: &[BindTableVariable {
+            var_type: BindTableVariableType::Storage,
             binding: 0,
             count: 1,
         }],
     };
 
-    let bg_layout = ctx.make_bind_group_layout(&BindGroupLayoutInfo {
-        debug_name: "transfer_compute_bg_layout",
+    let table_layout = ctx.make_bind_table_layout(&BindTableLayoutInfo {
+        debug_name: "transfer_compute_table_layout",
         shaders: &[shader_info],
     })?;
 
     let pipeline_layout = ctx.make_compute_pipeline_layout(&ComputePipelineLayoutInfo {
-        bg_layouts: [Some(bg_layout), None, None, None],
-        bt_layouts: [None, None, None, None],
+        bt_layouts: [Some(table_layout), None, None, None],
         shader: &PipelineShaderInfo {
             stage: ShaderType::Compute,
             spirv: inline_spirv::inline_spirv!(
@@ -97,12 +96,15 @@ fn main() -> Result<(), GPUError> {
         layout: pipeline_layout,
     })?;
 
-    let bind_group = ctx.make_bind_group(&BindGroupInfo {
-        debug_name: "transfer_compute_bg",
-        layout: bg_layout,
-        bindings: &[BindingInfo {
-            resource: ShaderResource::StorageBuffer(BufferView::new(device_buffer)),
+    let bind_table = ctx.make_bind_table(&BindTableInfo {
+        debug_name: "transfer_compute_table",
+        layout: table_layout,
+        bindings: &[IndexedBindingInfo {
             binding: 0,
+            resources: &[IndexedResource {
+                slot: 0,
+                resource: ShaderResource::StorageBuffer(BufferView::new(device_buffer)),
+            }],
         }],
         set: 0,
     })?;
@@ -118,8 +120,7 @@ fn main() -> Result<(), GPUError> {
             y: 1,
             z: 1,
             pipeline,
-            bind_groups: [Some(bind_group), None, None, None],
-            bind_tables: Default::default(),
+            bind_tables: [Some(bind_table), None, None, None],
             dynamic_buffers: Default::default(),
         })
         .copy_buffers(&CopyBuffer {
