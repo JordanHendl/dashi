@@ -222,10 +222,8 @@ void main() {
         })
         .unwrap();
 
-    let ctx_ptr = ctx.as_mut_ptr();
     let mut list = ctx
-        .pool_mut(QueueType::Graphics)
-        .begin(ctx_ptr, "copy_then_compute", false)
+        .begin_command_queue(QueueType::Graphics, "copy_then_compute", false)
         .unwrap();
 
     let stream = CommandStream::new()

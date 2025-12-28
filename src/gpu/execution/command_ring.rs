@@ -5,6 +5,7 @@ use crate::{
     Fence,
     QueueType,
     SubmitInfo,
+    VulkanContext,
     Result,
 };
 use std::ptr::NonNull;
@@ -12,7 +13,7 @@ use std::ptr::NonNull;
 pub struct CommandRing {
     cmds: Vec<CommandQueue>,
     fences: Vec<Option<Handle<Fence>>>,
-    ctx: NonNull<Context>,
+    ctx: NonNull<VulkanContext>,
     curr: u16,
 }
 
@@ -23,10 +24,32 @@ impl CommandRing {
         frame_count: usize,
         queue_type: QueueType,
     ) -> Result<Self> {
+        let ctx_ptr = ctx.backend_mut_ptr();
+        unsafe { Self::new_from_ptr(ctx_ptr, name, frame_count, queue_type) }
+    }
+
+    pub(crate) fn new_with_vulkan(
+        ctx: &mut VulkanContext,
+        name: &str,
+        frame_count: usize,
+        queue_type: QueueType,
+    ) -> Result<Self> {
+        let ctx_ptr = ctx as *mut VulkanContext;
+        unsafe { Self::new_from_ptr(ctx_ptr, name, frame_count, queue_type) }
+    }
+
+    unsafe fn new_from_ptr(
+        ctx_ptr: *mut VulkanContext,
+        name: &str,
+        frame_count: usize,
+        queue_type: QueueType,
+    ) -> Result<Self> {
         let mut cmds = Vec::new();
-        let ctx_ptr = ctx as *mut Context;
+        let ctx_ref = unsafe { &mut *ctx_ptr };
         for _i in 0..frame_count {
-            let cmd = ctx.pool_mut(queue_type).begin(ctx_ptr, name, false)?;
+            let cmd = ctx_ref
+                .pool_mut(queue_type)
+                .begin_raw(ctx_ptr, name, false)?;
             cmds.push(cmd);
         }
 
@@ -36,7 +59,7 @@ impl CommandRing {
             cmds,
             fences,
             curr: 0,
-            ctx: NonNull::from(ctx),
+            ctx: NonNull::new(ctx_ptr).expect("CommandRing received null context pointer"),
         })
     }
 

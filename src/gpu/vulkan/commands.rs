@@ -7,9 +7,10 @@ use crate::gpu::driver::command::CommandSink;
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Context, Fence, GPUError,
+    BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Fence, GPUError,
     GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
 };
+use super::VulkanContext;
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
 #[inline]
@@ -28,7 +29,7 @@ pub(super) fn layout_to_vk(layout: Layout) -> vk::ImageLayout {
 }
 
 #[inline]
-fn queue_family_index(ctx: &Context, ty: QueueType) -> u32 {
+fn queue_family_index(ctx: &VulkanContext, ty: QueueType) -> u32 {
     match ty {
         QueueType::Graphics => ctx.gfx_queue.family,
         QueueType::Compute => ctx.compute_queue.as_ref().unwrap_or(&ctx.gfx_queue).family,
@@ -190,7 +191,7 @@ impl CommandQueue {
 
     /// Begin recording a secondary command queue using the same pool.
     fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
-        unsafe { (*self.pool).begin(self.ctx, debug_name, true) }
+        unsafe { (*self.pool).begin_raw(self.ctx, debug_name, true) }
     }
     fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {
@@ -534,7 +535,7 @@ impl CommandQueue {
         };
         self.update_last_access(dst_stage, dst_access);
     }
-    pub(crate) fn ctx_ref(&self) -> &'static mut Context {
+    pub(crate) fn ctx_ref(&self) -> &'static mut VulkanContext {
         unsafe { &mut *self.ctx }
     }
 

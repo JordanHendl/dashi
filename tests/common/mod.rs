@@ -3,9 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dashi::gpu::vulkan::{
-    Context, ContextInfo, DebugMessageSeverity, DebugMessageType, DebugMessenger,
+    ContextInfo, DebugMessageSeverity, DebugMessageType, DebugMessenger,
     DebugMessengerCreateInfo, GPUError,
 };
+use dashi::Context;
 
 unsafe extern "system" fn validation_error_callback(
     message_severity: DebugMessageSeverity,
@@ -54,12 +55,6 @@ impl ValidationContext {
         })
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut Context {
-        self.ctx
-            .as_mut()
-            .map(|ctx| ctx as *mut Context)
-            .expect("context should be present")
-    }
 }
 
 impl std::ops::Deref for ValidationContext {

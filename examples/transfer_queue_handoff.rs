@@ -37,12 +37,8 @@ fn main() -> Result<(), GPUError> {
         initial_data: None,
     })?;
 
-    let ctx_ptr = &mut ctx as *mut _;
-
     // Upload data on the transfer queue.
-    let mut transfer_list =
-        ctx.pool_mut(QueueType::Transfer)
-            .begin(ctx_ptr, "transfer_upload", false)?;
+    let mut transfer_list = ctx.begin_command_queue(QueueType::Transfer, "transfer_upload", false)?;
     let upload_stream = CommandStream::new_with_queue(QueueType::Transfer)
         .begin()
         .copy_buffers(&CopyBuffer {
@@ -111,8 +107,7 @@ fn main() -> Result<(), GPUError> {
 
     // Dispatch on the compute queue and copy the results back for verification.
     let mut compute_list =
-        ctx.pool_mut(QueueType::Compute)
-            .begin(ctx_ptr, "compute_dispatch", false)?;
+        ctx.begin_command_queue(QueueType::Compute, "compute_dispatch", false)?;
     let compute_stream = CommandStream::new_with_queue(QueueType::Compute).begin();
     let compute_stream = compute_stream
         .dispatch(&Dispatch {

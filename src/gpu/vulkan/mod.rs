@@ -242,7 +242,7 @@ pub struct CommandQueue {
     cmd_buf: vk::CommandBuffer,
     fence: Handle<Fence>,
     dirty: bool,
-    ctx: *mut Context,
+    ctx: *mut VulkanContext,
     pool: *mut CommandPool,
     curr_rp: Option<Handle<RenderPass>>,
     curr_subpass: Option<usize>,
@@ -281,7 +281,7 @@ pub(super) struct Queue {
     family: u32,
 }
 
-pub struct Context {
+pub struct VulkanContext {
     pub(super) entry: ash::Entry,
     pub(super) instance: ash::Instance,
     pub(super) pdevice: vk::PhysicalDevice,
@@ -326,9 +326,9 @@ pub struct Context {
     pub(super) debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
-impl std::panic::UnwindSafe for Context {}
+impl std::panic::UnwindSafe for VulkanContext {}
 
-impl Drop for Context {
+impl Drop for VulkanContext {
     fn drop(&mut self) {
         if let (Some(utils), Some(messenger)) = (&self.debug_utils, self.debug_messenger) {
             unsafe {
@@ -392,7 +392,7 @@ mod tests {
     }
 }
 
-impl Context {
+impl VulkanContext {
     fn init_core(
         info: &ContextInfo,
         windowed: bool,
@@ -778,7 +778,7 @@ impl Context {
         let empty_set_layout =
             Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
 
-        let mut ctx = Context {
+        let mut ctx = VulkanContext {
             entry,
             instance,
             pdevice,
@@ -914,7 +914,7 @@ impl Context {
         let empty_set_layout =
             Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
 
-        let mut ctx = Context {
+        let mut ctx = VulkanContext {
             entry,
             instance,
             pdevice,
@@ -1085,12 +1085,17 @@ impl Context {
 
     /// Creates a ringbuffer of CommandQueues
     pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
-        Ok(CommandRing::new(self, info.debug_name, 3, info.queue_type)?)
+        Ok(CommandRing::new_with_vulkan(
+            self,
+            info.debug_name,
+            3,
+            info.queue_type,
+        )?)
     }
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
         let ctx_ptr = self as *mut _;
-        let mut list = self.gfx_pool.begin(ctx_ptr, "", false).unwrap();
+        let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false).unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
@@ -1108,7 +1113,7 @@ impl Context {
         let ctx_ptr = self as *mut _;
         let mut list = self
             .gfx_pool
-            .begin(ctx_ptr, "oneshot_transition", false)
+            .begin_raw(ctx_ptr, "oneshot_transition", false)
             .unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
@@ -1533,7 +1538,7 @@ impl Context {
                 let staging = self.make_buffer(&new_info)?;
 
                 let ctx_ptr = self as *mut _;
-                let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
+                let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false)?;
                 let stream = CommandStream::new().begin().copy_buffers(&CopyBuffer {
                     src: staging,
                     dst: buf,
@@ -1577,7 +1582,7 @@ impl Context {
         })?;
 
         let ctx_ptr = self as *mut _;
-        let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
+        let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false)?;
         let mut cmd = CommandStream::new().begin().copy_buffer_to_image(&CopyBufferImage {
             src: staging,
             dst: image,
