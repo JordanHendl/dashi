@@ -1,51 +1,92 @@
 #[cfg(feature = "vulkan")]
+use crate::gpu::vulkan::{ContextInfo, Result, VulkanContext};
+#[cfg(feature = "webgpu")]
+use crate::gpu::webgpu::Context as WebGpuContext;
 use crate::gpu::vulkan::{ContextInfo, VulkanContext};
 use crate::{CommandQueue, Fence, QueueType, Result, SubmitInfo};
 use super::execution::CommandRing;
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 enum ContextBackend {
+    #[cfg(feature = "vulkan")]
     Vulkan(VulkanContext),
+    #[cfg(feature = "webgpu")]
+    WebGpu(WebGpuContext),
 }
 
 /// Public GPU context facade that dispatches to the selected backend.
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 pub struct Context {
     backend: ContextBackend,
 }
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 impl Context {
     /// Construct a [`Context`] with windowing support.
     pub fn new(info: &ContextInfo) -> Result<Self> {
-        Ok(Self {
-            backend: ContextBackend::Vulkan(VulkanContext::new(info)?),
-        })
+        #[cfg(feature = "webgpu")]
+        {
+            return Ok(Self {
+                backend: ContextBackend::WebGpu(WebGpuContext::new(info)?),
+            });
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            return Ok(Self {
+                backend: ContextBackend::Vulkan(VulkanContext::new(info)?),
+            });
+        }
+        #[allow(unreachable_code)]
+        Err(crate::gpu::vulkan::GPUError::Unimplemented(
+            "No GPU backend enabled",
+        ))
     }
 
     /// Construct a [`Context`] without any windowing support.
     pub fn headless(info: &ContextInfo) -> Result<Self> {
-        Ok(Self {
-            backend: ContextBackend::Vulkan(VulkanContext::headless(info)?),
-        })
+        #[cfg(feature = "webgpu")]
+        {
+            return Ok(Self {
+                backend: ContextBackend::WebGpu(WebGpuContext::headless(info)?),
+            });
+        }
+        #[cfg(feature = "vulkan")]
+        {
+            return Ok(Self {
+                backend: ContextBackend::Vulkan(VulkanContext::headless(info)?),
+            });
+        }
+        #[allow(unreachable_code)]
+        Err(crate::gpu::vulkan::GPUError::Unimplemented(
+            "No GPU backend enabled",
+        ))
     }
 
     /// Explicitly destroy the context and release backend resources.
     pub fn destroy(self) {
         match self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.destroy(),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy(),
         }
     }
 
     pub(crate) fn vulkan(&self) -> Option<&VulkanContext> {
         match &self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => Some(ctx),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => Some(&*ctx),
         }
     }
 
     pub(crate) fn vulkan_mut(&mut self) -> Option<&mut VulkanContext> {
         match &mut self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => Some(ctx),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => Some(&mut *ctx),
         }
     }
 
@@ -87,13 +128,16 @@ impl Context {
     }
 
     pub(crate) fn backend_mut_ptr(&mut self) -> *mut VulkanContext {
-        self.vulkan_mut()
-            .map(|ctx| ctx as *mut VulkanContext)
-            .expect("Vulkan backend not active")
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx as *mut VulkanContext,
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.backend_mut_ptr(),
+        }
     }
 }
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 impl std::ops::Deref for Context {
     type Target = VulkanContext;
 
@@ -103,7 +147,7 @@ impl std::ops::Deref for Context {
     }
 }
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 impl std::ops::DerefMut for Context {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.vulkan_mut()
