@@ -54,11 +54,8 @@ impl CommandDispatchBackend {
 
     fn dispatch(&mut self, stream: CommandStream<Executable>, submit: &SubmitInfo2) -> Result<()> {
         let queue_type = stream.queue_type();
-        let ctx_ptr = unsafe { self.ctx.as_mut().backend_mut_ptr() };
-        let ctx_ref = unsafe { &mut *ctx_ptr };
-        let mut queue = ctx_ref
-            .pool_mut(queue_type)
-            .begin_raw(ctx_ptr, &self.debug_name, false)?;
+        let ctx = unsafe { self.ctx.as_mut() };
+        let mut queue = ctx.begin_command_queue(queue_type, &self.debug_name, false)?;
         if !submit
             .wait_sems
             .iter()
@@ -79,13 +76,12 @@ impl CommandDispatchBackend {
             let _ = self.tick();
             return Ok(());
         }
-        ctx_ref.destroy_cmd_queue(queue);
+        ctx.destroy_command_queue(queue);
         Ok(())
     }
 
     fn tick(&mut self) -> Result<usize> {
-        let ctx_ptr = unsafe { self.ctx.as_mut().backend_mut_ptr() };
-        let ctx_ref = unsafe { &mut *ctx_ptr };
+        let ctx = unsafe { self.ctx.as_mut() };
         let now = Instant::now();
         let mut completed = 0;
         let mut idx = 0;
@@ -95,8 +91,8 @@ impl CommandDispatchBackend {
                 continue;
             }
             let pending = self.pending.swap_remove(idx);
-            ctx_ref.wait(pending.fence)?;
-            ctx_ref.destroy_cmd_queue(pending.queue);
+            ctx.wait_fence(pending.fence)?;
+            ctx.destroy_command_queue(pending.queue);
             completed += 1;
         }
         Ok(completed)

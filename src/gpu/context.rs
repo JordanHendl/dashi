@@ -2,7 +2,9 @@
 use crate::gpu::vulkan::{ContextInfo, Result, VulkanContext};
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
-use crate::{CommandQueue, QueueType};
+use crate::gpu::vulkan::{ContextInfo, VulkanContext};
+use crate::{CommandQueue, Fence, QueueType, Result, SubmitInfo};
+use super::execution::CommandRing;
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 enum ContextBackend {
@@ -97,6 +99,32 @@ impl Context {
         let ctx_ptr = self.backend_mut_ptr();
         self.pool_mut(queue_type)
             .begin_raw(ctx_ptr, debug_name, is_secondary)
+    }
+
+    pub fn submit_command_queue(
+        &mut self,
+        queue: &mut CommandQueue,
+        info: &SubmitInfo,
+    ) -> Result<crate::Handle<Fence>> {
+        match &mut self.backend {
+            ContextBackend::Vulkan(ctx) => ctx.submit(queue, info),
+        }
+    }
+
+    pub fn wait_fence(&mut self, fence: crate::Handle<Fence>) -> Result<()> {
+        match &mut self.backend {
+            ContextBackend::Vulkan(ctx) => ctx.wait(fence),
+        }
+    }
+
+    pub fn destroy_command_queue(&mut self, queue: CommandQueue) {
+        match &mut self.backend {
+            ContextBackend::Vulkan(ctx) => ctx.destroy_cmd_queue(queue),
+        }
+    }
+
+    pub fn make_command_ring(&mut self, info: &crate::CommandQueueInfo2) -> Result<CommandRing> {
+        CommandRing::new(self, info.debug_name, 3, info.queue_type)
     }
 
     pub(crate) fn backend_mut_ptr(&mut self) -> *mut VulkanContext {
