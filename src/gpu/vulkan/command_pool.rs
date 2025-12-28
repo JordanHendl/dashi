@@ -4,6 +4,7 @@ use std::{cell::UnsafeCell, marker::PhantomData, thread::ThreadId};
 use crate::{utils::Handle, Result};
 
 use super::{CommandQueue, Fence, QueueType, VulkanContext};
+use crate::Context;
 
 /// Thin wrapper around a Vulkan command pool.
 ///
@@ -79,7 +80,7 @@ impl CommandPool {
     }
 
     /// Begin recording a command queue from this pool.
-    pub fn begin(
+    pub(crate) fn begin_raw(
         &mut self,
         ctx: *mut VulkanContext,
         debug_name: &str,
@@ -118,6 +119,17 @@ impl CommandPool {
                 ..Default::default()
             })
         }
+    }
+
+    /// Begin recording a command queue from this pool using the public context facade.
+    pub fn begin(
+        &mut self,
+        ctx: &mut Context,
+        debug_name: &str,
+        is_secondary: bool,
+    ) -> Result<CommandQueue> {
+        let ctx_ptr = ctx.backend_mut_ptr();
+        self.begin_raw(ctx_ptr, debug_name, is_secondary)
     }
 
     /// Recycle a command queue after GPU completion, returning its fence handle.

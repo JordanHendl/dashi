@@ -1,5 +1,6 @@
 #[cfg(feature = "vulkan")]
 use crate::gpu::vulkan::{ContextInfo, Result, VulkanContext};
+use crate::{CommandQueue, QueueType};
 
 #[cfg(feature = "vulkan")]
 enum ContextBackend {
@@ -47,8 +48,18 @@ impl Context {
         }
     }
 
-    #[doc(hidden)]
-    pub fn vulkan_mut_ptr(&mut self) -> *mut VulkanContext {
+    pub fn begin_command_queue(
+        &mut self,
+        queue_type: QueueType,
+        debug_name: &str,
+        is_secondary: bool,
+    ) -> Result<CommandQueue> {
+        let ctx_ptr = self.backend_mut_ptr();
+        self.pool_mut(queue_type)
+            .begin_raw(ctx_ptr, debug_name, is_secondary)
+    }
+
+    pub(crate) fn backend_mut_ptr(&mut self) -> *mut VulkanContext {
         self.vulkan_mut()
             .map(|ctx| ctx as *mut VulkanContext)
             .expect("Vulkan backend not active")

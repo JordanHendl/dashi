@@ -24,7 +24,7 @@ impl CommandRing {
         frame_count: usize,
         queue_type: QueueType,
     ) -> Result<Self> {
-        let ctx_ptr = ctx.vulkan_mut_ptr();
+        let ctx_ptr = ctx.backend_mut_ptr();
         unsafe { Self::new_from_ptr(ctx_ptr, name, frame_count, queue_type) }
     }
 
@@ -47,7 +47,9 @@ impl CommandRing {
         let mut cmds = Vec::new();
         let ctx_ref = unsafe { &mut *ctx_ptr };
         for _i in 0..frame_count {
-            let cmd = ctx_ref.pool_mut(queue_type).begin(ctx_ptr, name, false)?;
+            let cmd = ctx_ref
+                .pool_mut(queue_type)
+                .begin_raw(ctx_ptr, name, false)?;
             cmds.push(cmd);
         }
 

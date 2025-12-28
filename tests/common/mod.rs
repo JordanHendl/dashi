@@ -55,12 +55,6 @@ impl ValidationContext {
         })
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut dashi::VulkanContext {
-        self.ctx
-            .as_mut()
-            .map(|ctx| ctx.vulkan_mut_ptr())
-            .expect("context should be present")
-    }
 }
 
 impl std::ops::Deref for ValidationContext {

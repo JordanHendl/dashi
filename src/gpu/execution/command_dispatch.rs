@@ -54,11 +54,11 @@ impl CommandDispatchBackend {
 
     fn dispatch(&mut self, stream: CommandStream<Executable>, submit: &SubmitInfo2) -> Result<()> {
         let queue_type = stream.queue_type();
-        let ctx_ptr = unsafe { self.ctx.as_mut().vulkan_mut_ptr() };
+        let ctx_ptr = unsafe { self.ctx.as_mut().backend_mut_ptr() };
         let ctx_ref = unsafe { &mut *ctx_ptr };
         let mut queue = ctx_ref
             .pool_mut(queue_type)
-            .begin(ctx_ptr, &self.debug_name, false)?;
+            .begin_raw(ctx_ptr, &self.debug_name, false)?;
         if !submit
             .wait_sems
             .iter()
@@ -84,8 +84,8 @@ impl CommandDispatchBackend {
     }
 
     fn tick(&mut self) -> Result<usize> {
-        let ctx = unsafe { self.ctx.as_mut().vulkan_mut_ptr() };
-        let ctx_ref = unsafe { &mut *ctx };
+        let ctx_ptr = unsafe { self.ctx.as_mut().backend_mut_ptr() };
+        let ctx_ref = unsafe { &mut *ctx_ptr };
         let now = Instant::now();
         let mut completed = 0;
         let mut idx = 0;

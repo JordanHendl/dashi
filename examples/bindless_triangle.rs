@@ -403,8 +403,6 @@ void main() {
 
         allocator.reset();
         ring.record(|list| {
-            let ctx_ptr = &mut ctx as *mut _;
-
             // Begin render pass & bind pipeline
             let stream = CommandStream::new().begin();
 

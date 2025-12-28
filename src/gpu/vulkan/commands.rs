@@ -191,7 +191,7 @@ impl CommandQueue {
 
     /// Begin recording a secondary command queue using the same pool.
     fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
-        unsafe { (*self.pool).begin(self.ctx, debug_name, true) }
+        unsafe { (*self.pool).begin_raw(self.ctx, debug_name, true) }
     }
     fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {

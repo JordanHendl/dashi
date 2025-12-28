@@ -1095,7 +1095,7 @@ impl VulkanContext {
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
         let ctx_ptr = self as *mut _;
-        let mut list = self.gfx_pool.begin(ctx_ptr, "", false).unwrap();
+        let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false).unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
         self.wait(fence).unwrap();
@@ -1113,7 +1113,7 @@ impl VulkanContext {
         let ctx_ptr = self as *mut _;
         let mut list = self
             .gfx_pool
-            .begin(ctx_ptr, "oneshot_transition", false)
+            .begin_raw(ctx_ptr, "oneshot_transition", false)
             .unwrap();
         self.transition_image(list.cmd_buf, view_handle, layout);
         let fence = self.submit(&mut list, &Default::default()).unwrap();
@@ -1538,7 +1538,7 @@ impl VulkanContext {
                 let staging = self.make_buffer(&new_info)?;
 
                 let ctx_ptr = self as *mut _;
-                let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
+                let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false)?;
                 let stream = CommandStream::new().begin().copy_buffers(&CopyBuffer {
                     src: staging,
                     dst: buf,
@@ -1582,7 +1582,7 @@ impl VulkanContext {
         })?;
 
         let ctx_ptr = self as *mut _;
-        let mut list = self.gfx_pool.begin(ctx_ptr, "", false)?;
+        let mut list = self.gfx_pool.begin_raw(ctx_ptr, "", false)?;
         let mut cmd = CommandStream::new().begin().copy_buffer_to_image(&CopyBufferImage {
             src: staging,
             dst: image,
