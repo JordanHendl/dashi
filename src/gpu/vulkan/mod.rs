@@ -5,7 +5,6 @@ use crate::{
         command::{CopyBuffer, CopyBufferImage},
         state::StateTracker,
     },
-    execution::CommandRing,
     utils::{Handle, Pool},
     UsageBits,
 };
@@ -1083,15 +1082,6 @@ impl VulkanContext {
         }
     }
 
-    /// Creates a ringbuffer of CommandQueues
-    pub fn make_command_ring(&mut self, info: &CommandQueueInfo2) -> Result<CommandRing> {
-        Ok(CommandRing::new_with_vulkan(
-            self,
-            info.debug_name,
-            3,
-            info.queue_type,
-        )?)
-    }
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
         let ctx_ptr = self as *mut _;

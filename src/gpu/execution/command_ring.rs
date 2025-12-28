@@ -1,19 +1,10 @@
-use crate::{
-    utils::Handle,
-    CommandQueue,
-    Context,
-    Fence,
-    QueueType,
-    SubmitInfo,
-    VulkanContext,
-    Result,
-};
+use crate::{utils::Handle, CommandQueue, Context, Fence, QueueType, Result, SubmitInfo};
 use std::ptr::NonNull;
 
 pub struct CommandRing {
     cmds: Vec<CommandQueue>,
     fences: Vec<Option<Handle<Fence>>>,
-    ctx: NonNull<VulkanContext>,
+    ctx: NonNull<Context>,
     curr: u16,
 }
 
@@ -24,32 +15,9 @@ impl CommandRing {
         frame_count: usize,
         queue_type: QueueType,
     ) -> Result<Self> {
-        let ctx_ptr = ctx.backend_mut_ptr();
-        unsafe { Self::new_from_ptr(ctx_ptr, name, frame_count, queue_type) }
-    }
-
-    pub(crate) fn new_with_vulkan(
-        ctx: &mut VulkanContext,
-        name: &str,
-        frame_count: usize,
-        queue_type: QueueType,
-    ) -> Result<Self> {
-        let ctx_ptr = ctx as *mut VulkanContext;
-        unsafe { Self::new_from_ptr(ctx_ptr, name, frame_count, queue_type) }
-    }
-
-    unsafe fn new_from_ptr(
-        ctx_ptr: *mut VulkanContext,
-        name: &str,
-        frame_count: usize,
-        queue_type: QueueType,
-    ) -> Result<Self> {
         let mut cmds = Vec::new();
-        let ctx_ref = unsafe { &mut *ctx_ptr };
         for _i in 0..frame_count {
-            let cmd = ctx_ref
-                .pool_mut(queue_type)
-                .begin_raw(ctx_ptr, name, false)?;
+            let cmd = ctx.begin_command_queue(queue_type, name, false)?;
             cmds.push(cmd);
         }
 
@@ -59,7 +27,7 @@ impl CommandRing {
             cmds,
             fences,
             curr: 0,
-            ctx: NonNull::new(ctx_ptr).expect("CommandRing received null context pointer"),
+            ctx: NonNull::from(ctx),
         })
     }
 
@@ -74,7 +42,7 @@ impl CommandRing {
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
-                self.ctx.as_mut().wait(fence.clone())?;
+                self.ctx.as_mut().wait_fence(fence.clone())?;
             }
             self.fences[self.curr as usize] = None;
         }
@@ -89,7 +57,7 @@ impl CommandRing {
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
-                self.ctx.as_mut().wait(fence.clone())?;
+                self.ctx.as_mut().wait_fence(fence.clone())?;
             }
             self.fences[self.curr as usize] = None;
         }
@@ -105,7 +73,7 @@ impl CommandRing {
     {
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
             unsafe {
-                self.ctx.as_mut().wait(fence.clone())?;
+                self.ctx.as_mut().wait_fence(fence.clone())?;
             }
             self.fences[self.curr as usize] = None;
         }
@@ -119,7 +87,7 @@ impl CommandRing {
         self.fences[self.curr as usize] = Some(unsafe {
             self.ctx
                 .as_mut()
-                .submit(&mut self.cmds[self.curr as usize], info)?
+                .submit_command_queue(&mut self.cmds[self.curr as usize], info)?
         });
 
         self.advance();
@@ -135,7 +103,7 @@ impl CommandRing {
         for slot in self.fences.iter_mut() {
             if let Some(fence) = slot.take() {
                 unsafe {
-                    self.ctx.as_mut().wait(fence)?;
+                    self.ctx.as_mut().wait_fence(fence)?;
                 }
             }
         }
@@ -151,7 +119,7 @@ impl CommandRing {
         for idx in 0..count {
             if let Some(fence) = self.fences[idx].take() {
                 unsafe {
-                    self.ctx.as_mut().wait(fence)?;
+                    self.ctx.as_mut().wait_fence(fence)?;
                 }
             }
             self.cmds[idx].reset()?;
@@ -170,7 +138,7 @@ impl CommandRing {
             let ui = idx as usize;
             if let Some(fence) = self.fences[ui].take() {
                 unsafe {
-                    self.ctx.as_mut().wait(fence)?;
+                    self.ctx.as_mut().wait_fence(fence)?;
                 }
             }
             self.cmds[ui].reset()?;
@@ -187,7 +155,7 @@ impl CommandRing {
         unsafe {
             let ctx = self.ctx.as_mut();
             for cmd in self.cmds.drain(..) {
-                ctx.destroy_cmd_queue(cmd);
+                ctx.destroy_command_queue(cmd);
             }
         }
     }
