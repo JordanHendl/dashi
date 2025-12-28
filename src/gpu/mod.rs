@@ -34,3 +34,6 @@ pub use vulkan::*;
 
 #[cfg(feature = "webgpu")]
 pub mod webgpu;
+
+#[cfg(feature = "webgpu")]
+pub use webgpu::*;

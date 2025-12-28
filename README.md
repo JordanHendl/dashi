@@ -94,6 +94,22 @@ OpenXR headsets are supported via the `dashi-openxr` feature.
 Only one of these window features can be enabled at a time, and `dashi-openxr`
 is mutually exclusive with them.
 
+### GPU Backends
+
+The default build enables the Vulkan backend via the `vulkan` feature. To switch
+to the WebGPU backend, enable the `webgpu` feature (and disable defaults if you
+do not want Vulkan's other default features):
+
+```bash
+cargo build --no-default-features --features webgpu
+```
+
+The `webgpu` feature pulls in the optional `wgpu` dependency and related wasm
+bindings for future browser support. When both `vulkan` and `webgpu` are
+enabled, the `Context` constructor prefers the WebGPU backend.
+When targeting `wasm32-unknown-unknown`, the same feature enables the
+`wasm-bindgen`, `js-sys`, and `web-sys` dependencies used by browser builds.
+
 ## Documentation
 
 Detailed documentation is available [here](https://github.com/JordanHendl/dashi/wiki). It includes guides, API references, and examples to help you get the most out of Dashi.
@@ -118,5 +134,3 @@ Dashi is licensed under the [MIT License](LICENSE).
 ## Contact
 
 For questions or suggestions, feel free to reach out via [GitHub Issues](https://github.com/JordanHendl/dashi/issues).
-
-
