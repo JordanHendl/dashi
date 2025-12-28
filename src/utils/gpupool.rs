@@ -295,7 +295,7 @@ mod tests {
         }
         assert!(pool.len() == TEST_AMT);
 
-        let ctx_ptr = &mut ctx as *mut _;
+        let ctx_ptr = ctx.vulkan_mut_ptr();
         let mut list = ctx
             .pool_mut(QueueType::Graphics)
             .begin(ctx_ptr, "", false)

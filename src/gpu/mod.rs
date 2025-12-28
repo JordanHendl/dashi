@@ -15,6 +15,11 @@ pub trait Backend {
     type Context;
 }
 
+#[cfg(feature = "vulkan")]
+pub mod context;
+#[cfg(feature = "vulkan")]
+pub use context::Context;
+
 pub mod execution;
 pub mod driver;
 pub mod cmd;

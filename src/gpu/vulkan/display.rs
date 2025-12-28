@@ -4,7 +4,7 @@ use ash::vk;
 #[cfg(feature = "dashi-openxr")]
 use super::XrSwapchainImage;
 use super::{
-    Context, DisplayInfo, Fence, GPUError, Image, ImageView, SampleCount, Semaphore,
+    DisplayInfo, Fence, GPUError, Image, ImageView, SampleCount, Semaphore, VulkanContext,
     WindowBuffering, WindowInfo,
 };
 
@@ -132,7 +132,7 @@ impl Display {
     }
 }
 
-impl Context {
+impl VulkanContext {
     #[cfg(not(feature = "dashi-openxr"))]
     /// Destroys a windowing display and its swapchain.
     ///

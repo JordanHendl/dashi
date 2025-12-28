@@ -3,7 +3,7 @@ use std::{cell::UnsafeCell, marker::PhantomData, thread::ThreadId};
 
 use crate::{utils::Handle, Result};
 
-use super::{CommandQueue, Context, Fence, QueueType};
+use super::{CommandQueue, Fence, QueueType, VulkanContext};
 
 /// Thin wrapper around a Vulkan command pool.
 ///
@@ -81,7 +81,7 @@ impl CommandPool {
     /// Begin recording a command queue from this pool.
     pub fn begin(
         &mut self,
-        ctx: *mut Context,
+        ctx: *mut VulkanContext,
         debug_name: &str,
         is_secondary: bool,
     ) -> Result<CommandQueue> {

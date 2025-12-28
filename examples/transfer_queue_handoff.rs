@@ -37,7 +37,7 @@ fn main() -> Result<(), GPUError> {
         initial_data: None,
     })?;
 
-    let ctx_ptr = &mut ctx as *mut _;
+    let ctx_ptr = ctx.vulkan_mut_ptr();
 
     // Upload data on the transfer queue.
     let mut transfer_list =
