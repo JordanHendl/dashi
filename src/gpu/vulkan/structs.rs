@@ -401,10 +401,32 @@ impl Hash for FRect2D {
     }
 }
 
+#[cfg(feature = "webgpu")]
+#[derive(Clone)]
+pub enum WebSurfaceInfo {
+    #[cfg(all(feature = "webgpu", target_arch = "wasm32"))]
+    CanvasId(String),
+    #[cfg(all(feature = "webgpu", target_arch = "wasm32"))]
+    Canvas(web_sys::HtmlCanvasElement),
+    #[cfg(not(target_arch = "wasm32"))]
+    Unsupported,
+}
+
 #[repr(C)]
-#[derive(Default)]
 pub struct ContextInfo {
     pub device: SelectedDevice,
+    #[cfg(feature = "webgpu")]
+    pub web_surface: Option<WebSurfaceInfo>,
+}
+
+impl Default for ContextInfo {
+    fn default() -> Self {
+        Self {
+            device: SelectedDevice::default(),
+            #[cfg(feature = "webgpu")]
+            web_surface: None,
+        }
+    }
 }
 
 /// A snapshot of hardware limits exposed through the [`Context`].

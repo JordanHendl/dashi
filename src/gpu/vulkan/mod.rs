@@ -703,6 +703,12 @@ impl VulkanContext {
     /// (device selection, fence lifetimes, and queue limitations) see
     /// [`Self::new`].
     pub fn headless(info: &ContextInfo) -> Result<Self> {
+        #[cfg(feature = "webgpu")]
+        if info.web_surface.is_some() {
+            return Err(GPUError::SwapchainConfigError(
+                "Web surface data is only supported by the WebGPU backend",
+            ));
+        }
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
@@ -834,6 +840,12 @@ impl VulkanContext {
     /// - Vulkan queues require command lists to be finished before submission;
     ///   [`Self::submit`] will end a still-recording list automatically.
     pub fn new(info: &ContextInfo) -> Result<Self> {
+        #[cfg(feature = "webgpu")]
+        if info.web_surface.is_some() {
+            return Err(GPUError::SwapchainConfigError(
+                "Web surface data is only supported by the WebGPU backend",
+            ));
+        }
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
