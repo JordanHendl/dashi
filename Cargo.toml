@@ -15,6 +15,7 @@ copy_texture_compat = []
 debug_offset_alloc = []
 use_16_bit_node_indices = []
 vulkan = ["dep:ash", "dep:vk-mem", "dep:ash-window"]
+webgpu = ["vulkan"]
 
 [dependencies]
 ash = { version = "0.37", optional = true }
@@ -50,4 +51,3 @@ image = "0.24"
 shaderc = "0.8"
 
 [lib]
-

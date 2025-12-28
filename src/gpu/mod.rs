@@ -15,9 +15,9 @@ pub trait Backend {
     type Context;
 }
 
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 pub mod context;
-#[cfg(feature = "vulkan")]
+#[cfg(any(feature = "vulkan", feature = "webgpu"))]
 pub use context::Context;
 
 pub mod execution;
@@ -31,3 +31,6 @@ pub mod vulkan;
 
 #[cfg(feature = "vulkan")]
 pub use vulkan::*;
+
+#[cfg(feature = "webgpu")]
+pub mod webgpu;
