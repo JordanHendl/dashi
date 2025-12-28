@@ -1,5 +1,3 @@
-#[cfg(feature = "vulkan")]
-use crate::gpu::vulkan::{ContextInfo, Result, VulkanContext};
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
 use crate::gpu::vulkan::{ContextInfo, VulkanContext};
@@ -107,19 +105,28 @@ impl Context {
         info: &SubmitInfo,
     ) -> Result<crate::Handle<Fence>> {
         match &mut self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.submit(queue, info),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.submit(queue, info),
         }
     }
 
     pub fn wait_fence(&mut self, fence: crate::Handle<Fence>) -> Result<()> {
         match &mut self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.wait(fence),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.wait(fence),
         }
     }
 
     pub fn destroy_command_queue(&mut self, queue: CommandQueue) {
         match &mut self.backend {
+            #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.destroy_cmd_queue(queue),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_cmd_queue(queue),
         }
     }
 
