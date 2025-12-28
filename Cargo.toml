@@ -17,6 +17,7 @@ use_16_bit_node_indices = []
 vulkan = ["dep:ash", "dep:vk-mem", "dep:ash-window"]
 webgpu = [
   "dep:wgpu",
+  "dep:pollster",
   "dep:wasm-bindgen",
   "dep:js-sys",
   "dep:web-sys",
@@ -43,6 +44,7 @@ bytemuck = { version = "1.16", features = ["derive"] }
 smallvec = "1.13"
 rayon = { version = "1.10" }
 wgpu = { version = "0.20", optional = true }
+pollster = { version = "0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
