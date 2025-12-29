@@ -94,9 +94,8 @@ impl Context {
         debug_name: &str,
         is_secondary: bool,
     ) -> Result<CommandQueue> {
-        let ctx_ptr = self.backend_mut_ptr();
         self.pool_mut(queue_type)
-            .begin_raw(ctx_ptr, debug_name, is_secondary)
+            .begin(debug_name, is_secondary)
     }
 
     pub fn submit_command_queue(

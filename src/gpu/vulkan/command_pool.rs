@@ -1,7 +1,11 @@
 use ash::{vk, Device};
-use std::{cell::UnsafeCell, marker::PhantomData, thread::ThreadId};
+use std::{
+    cell::{Cell, UnsafeCell},
+    marker::PhantomData,
+    thread::ThreadId,
+};
 
-use crate::{utils::Handle, Result};
+use crate::{utils::Handle, GPUError, Result};
 
 use super::{CommandQueue, Fence, QueueType, VulkanContext};
 use crate::Context;
@@ -18,6 +22,7 @@ pub struct CommandPool {
     free_primary: Vec<vk::CommandBuffer>,
     free_secondary: Vec<vk::CommandBuffer>,
     owner: ThreadId,
+    ctx: Cell<*mut VulkanContext>,
     // make !Sync
     _not_sync: PhantomData<UnsafeCell<()>>,
 }
@@ -40,6 +45,7 @@ impl CommandPool {
             free_primary: Vec::new(),
             free_secondary: Vec::new(),
             owner: std::thread::current().id(),
+            ctx: Cell::new(std::ptr::null_mut()),
             _not_sync: PhantomData,
         })
     }
@@ -79,6 +85,20 @@ impl CommandPool {
         }
     }
 
+    pub(crate) fn bind_context(&self, ctx: *mut VulkanContext) {
+        self.ctx.set(ctx);
+    }
+
+    fn context_ptr(&self) -> Result<*mut VulkanContext> {
+        let ctx = self.ctx.get();
+        if ctx.is_null() {
+            return Err(GPUError::Unimplemented(
+                "CommandPool context not initialized",
+            ));
+        }
+        Ok(ctx)
+    }
+
     /// Begin recording a command queue from this pool.
     pub(crate) fn begin_raw(
         &mut self,
@@ -86,6 +106,7 @@ impl CommandPool {
         debug_name: &str,
         is_secondary: bool,
     ) -> Result<CommandQueue> {
+        self.bind_context(ctx);
         let level = if is_secondary {
             vk::CommandBufferLevel::SECONDARY
         } else {
@@ -121,8 +142,14 @@ impl CommandPool {
         }
     }
 
+    /// Begin recording a command queue from this pool using its bound context.
+    pub fn begin(&mut self, debug_name: &str, is_secondary: bool) -> Result<CommandQueue> {
+        let ctx_ptr = self.context_ptr()?;
+        self.begin_raw(ctx_ptr, debug_name, is_secondary)
+    }
+
     /// Begin recording a command queue from this pool using the public context facade.
-    pub fn begin(
+    pub fn begin_with_context(
         &mut self,
         ctx: &mut Context,
         debug_name: &str,
