@@ -42,6 +42,14 @@ fn queue_family_index(ctx: &VulkanContext, ty: QueueType) -> u32 {
         }
     }
 }
+
+fn image_aspect_for_format(format: crate::gpu::Format) -> vk::ImageAspectFlags {
+    if format == crate::gpu::Format::D24S8 {
+        vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
+    } else {
+        vk::ImageAspectFlags::COLOR
+    }
+}
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     match cv {
         ClearValue::Color(cols) => vk::ClearValue {
@@ -392,12 +400,13 @@ impl CommandQueue {
             .get_ref(cmd.image)
             .ok_or(GPUError::SlotError())
             .unwrap();
+        let img_info = ctx.image_info(cmd.image);
 
         let aspect = if cmd
             .new_usage
             .intersects(UsageBits::DEPTH_READ | UsageBits::DEPTH_WRITE)
         {
-            if img_data.format == crate::gpu::Format::D24S8 {
+            if img_info.format == crate::gpu::Format::D24S8 {
                 vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
             } else {
                 vk::ImageAspectFlags::DEPTH
@@ -557,34 +566,30 @@ impl CommandQueue {
 
         for (attachment_idx, attachment) in color_attachments.iter().enumerate() {
             if let Some(view) = attachment {
-                let image = self
-                    .ctx_ref()
-                    .images
-                    .get_ref(view.img)
-                    .ok_or(GPUError::SlotError())?;
+                let image_info = self.ctx_ref().image_info(view.img);
 
                 if let Some(expected) = subpass_info.color_samples.get(attachment_idx) {
-                    if image.samples != *expected {
+                    if image_info.samples != *expected {
                         return Err(GPUError::MismatchedSampleCount {
                             context: format!(
                                 "image for render pass subpass {} color attachment {}",
                                 subpass_index, attachment_idx
                             ),
                             expected: *expected,
-                            actual: image.samples,
+                            actual: image_info.samples,
                         });
                     }
                 }
 
                 if let Some(pipeline_samples) = pipeline_samples {
-                    if image.samples != pipeline_samples {
+                    if image_info.samples != pipeline_samples {
                         return Err(GPUError::MismatchedSampleCount {
                             context: format!(
                                 "graphics pipeline vs image for color attachment {}",
                                 attachment_idx
                             ),
                             expected: pipeline_samples,
-                            actual: image.samples,
+                            actual: image_info.samples,
                         });
                     }
                 }
@@ -592,30 +597,26 @@ impl CommandQueue {
         }
 
         if let Some(view) = depth_attachment {
-            let image = self
-                .ctx_ref()
-                .images
-                .get_ref(view.img)
-                .ok_or(GPUError::SlotError())?;
+            let image_info = self.ctx_ref().image_info(view.img);
 
             if let Some(expected) = subpass_info.depth_sample {
-                if image.samples != expected {
+                if image_info.samples != expected {
                     return Err(GPUError::MismatchedSampleCount {
                         context: format!(
                             "image for render pass subpass {} depth attachment",
                             subpass_index
                         ),
                         expected,
-                        actual: image.samples,
+                        actual: image_info.samples,
                     });
                 }
 
                 if let Some(pipeline_samples) = pipeline_samples {
-                    if image.samples != pipeline_samples {
+                    if image_info.samples != pipeline_samples {
                         return Err(GPUError::MismatchedSampleCount {
                             context: "graphics pipeline vs image for depth attachment".to_string(),
                             expected: pipeline_samples,
-                            actual: image.samples,
+                            actual: image_info.samples,
                         });
                     }
                 }
@@ -731,9 +732,9 @@ impl CommandSink for CommandQueue {
             let ctx = self.ctx_ref();
             for (view_handle, _) in &self.curr_attachments {
                 let v = ctx.image_views.get_ref(*view_handle).unwrap();
-                let img = ctx.images.get_ref(v.img).unwrap();
-                attachment_min_width = attachment_min_width.min(img.dim[0]);
-                attachment_min_height = attachment_min_height.min(img.dim[1]);
+                let info = ctx.image_info(v.img);
+                attachment_min_width = attachment_min_width.min(info.dim[0]);
+                attachment_min_height = attachment_min_height.min(info.dim[1]);
             }
         }
 
@@ -981,9 +982,9 @@ impl CommandSink for CommandQueue {
             let ctx = self.ctx_ref();
             for (view_handle, _) in &self.curr_attachments {
                 let v = ctx.image_views.get_ref(*view_handle).unwrap();
-                let img = ctx.images.get_ref(v.img).unwrap();
-                attachment_min_width = attachment_min_width.min(img.dim[0]);
-                attachment_min_height = attachment_min_height.min(img.dim[1]);
+                let info = ctx.image_info(v.img);
+                attachment_min_width = attachment_min_width.min(info.dim[0]);
+                attachment_min_height = attachment_min_height.min(info.dim[1]);
             }
         }
 
@@ -1168,11 +1169,11 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.dst)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
-            let src_dim = crate::gpu::mip_dimensions(src_data.dim, cmd.src_range.base_mip);
-            let dst_dim = crate::gpu::mip_dimensions(dst_data.dim, cmd.dst_range.base_mip);
+            let src_info = self.ctx_ref().image_info(cmd.src);
+            let dst_info = self.ctx_ref().image_info(cmd.dst);
             let regions = [vk::ImageBlit {
                 src_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    aspect_mask: image_aspect_for_format(src_info.format),
                     mip_level: cmd.src_range.base_mip,
                     base_array_layer: cmd.src_range.base_layer,
                     layer_count: cmd.src_range.layer_count,
@@ -1184,13 +1185,13 @@ impl CommandSink for CommandQueue {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.src_region.w.max(src_data.dim[0])) as i32,
-                        y: (cmd.src_region.h.max(src_data.dim[1])) as i32,
+                        x: (cmd.src_region.w.max(src_info.dim[0])) as i32,
+                        y: (cmd.src_region.h.max(src_info.dim[1])) as i32,
                         z: 1,
                     },
                 ],
                 dst_subresource: vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    aspect_mask: image_aspect_for_format(dst_info.format),
                     mip_level: cmd.dst_range.base_mip,
                     base_array_layer: cmd.dst_range.base_layer,
                     layer_count: cmd.dst_range.layer_count,
@@ -1202,8 +1203,8 @@ impl CommandSink for CommandQueue {
                         z: 0,
                     },
                     vk::Offset3D {
-                        x: (cmd.dst_region.w.max(dst_data.dim[0])) as i32,
-                        y: (cmd.dst_region.h.max(dst_data.dim[1])) as i32,
+                        x: (cmd.dst_region.w.max(dst_info.dim[0])) as i32,
+                        y: (cmd.dst_region.h.max(dst_info.dim[1])) as i32,
                         z: 1,
                     },
                 ],
@@ -1255,16 +1256,18 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.dst)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
+            let src_info = self.ctx_ref().image_info(cmd.src);
+            let dst_info = self.ctx_ref().image_info(cmd.dst);
 
             let width = match (cmd.src_region.w, cmd.dst_region.w) {
-                (0, 0) => src_data.dim[0].min(dst_data.dim[0]),
+                (0, 0) => src_info.dim[0].min(dst_info.dim[0]),
                 (s, 0) => s,
                 (0, d) => d,
                 (s, d) => s.min(d),
             }
             .max(1);
             let height = match (cmd.src_region.h, cmd.dst_region.h) {
-                (0, 0) => src_data.dim[1].min(dst_data.dim[1]),
+                (0, 0) => src_info.dim[1].min(dst_info.dim[1]),
                 (s, 0) => s,
                 (0, d) => d,
                 (s, d) => s.min(d),
@@ -1274,10 +1277,10 @@ impl CommandSink for CommandQueue {
             let src_mip = cmd.src_range.base_mip as usize;
             let dst_mip = cmd.dst_range.base_mip as usize;
 
-            if src_data.samples == SampleCount::S1 {
+            if src_info.samples == SampleCount::S1 {
                 let regions = [vk::ImageBlit {
                     src_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        aspect_mask: image_aspect_for_format(src_info.format),
                         mip_level: cmd.src_range.base_mip,
                         base_array_layer: cmd.src_range.base_layer,
                         layer_count: cmd.src_range.layer_count,
@@ -1295,7 +1298,7 @@ impl CommandSink for CommandQueue {
                         },
                     ],
                     dst_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        aspect_mask: image_aspect_for_format(dst_info.format),
                         mip_level: cmd.dst_range.base_mip,
                         base_array_layer: cmd.dst_range.base_layer,
                         layer_count: cmd.dst_range.layer_count,
@@ -1581,8 +1584,9 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.dst)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
+            let img_info = self.ctx_ref().image_info(cmd.dst);
             let mip = cmd.range.base_mip as usize;
-            let dims = crate::gpu::mip_dimensions(img_data.dim, cmd.range.base_mip);
+            let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);
             self.ctx_ref().device.cmd_copy_buffer_to_image(
                 self.cmd_buf,
                 self.ctx_ref()
@@ -1596,7 +1600,7 @@ impl CommandSink for CommandQueue {
                 &[vk::BufferImageCopy {
                     buffer_offset: cmd.src_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: img_data.sub_layers.aspect_mask,
+                        aspect_mask: image_aspect_for_format(img_info.format),
                         mip_level: cmd.range.base_mip,
                         base_array_layer: cmd.range.base_layer,
                         layer_count: cmd.range.layer_count,
@@ -1627,23 +1631,24 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.src)
                 .ok_or(GPUError::SlotError())
                 .unwrap();
+            let img_info = self.ctx_ref().image_info(cmd.src);
             let mip = cmd.range.base_mip as usize;
 
-            let dims = crate::gpu::mip_dimensions(img_data.dim, cmd.range.base_mip);
+            let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);
             self.ctx_ref().device.cmd_copy_image_to_buffer(
                 self.cmd_buf,
                 img_data.img,
                 img_data.layouts[mip],
                 self.ctx_ref()
                     .buffers
-                    .get_ref(cmd.dst)
-                    .ok_or(GPUError::SlotError())
-                    .unwrap()
-                    .buf,
+                .get_ref(cmd.dst)
+                .ok_or(GPUError::SlotError())
+                .unwrap()
+                .buf,
                 &[vk::BufferImageCopy {
                     buffer_offset: cmd.dst_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: img_data.sub_layers.aspect_mask,
+                        aspect_mask: image_aspect_for_format(img_info.format),
                         mip_level: cmd.range.base_mip,
                         base_array_layer: cmd.range.base_layer,
                         layer_count: cmd.range.layer_count,

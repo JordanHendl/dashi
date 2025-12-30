@@ -4,8 +4,8 @@ use ash::vk;
 #[cfg(feature = "dashi-openxr")]
 use super::XrSwapchainImage;
 use super::{
-    DisplayInfo, Fence, GPUError, Image, ImageView, SampleCount, Semaphore, VulkanContext,
-    WindowBuffering, WindowInfo,
+    DisplayInfo, Fence, GPUError, Image, ImageInfo, ImageInfoRecord, ImageView, SampleCount,
+    Semaphore, VulkanContext, WindowBuffering, WindowInfo,
 };
 
 #[cfg(feature = "dashi-openxr")]
@@ -142,6 +142,9 @@ impl VulkanContext {
     /// - The context must still be alive.
     pub fn destroy_display(&mut self, dsp: Display) {
         for img in &dsp.images {
+            if let Some(image) = self.images.get_ref(*img) {
+                self.image_infos.release(image.info_handle);
+            }
             self.images.release(*img);
         }
 
@@ -331,19 +334,24 @@ impl VulkanContext {
         let mut view_handles: Vec<vk::ImageView> = Vec::with_capacity(images.len() as usize);
         for img in images {
             let raw_img = img;
+            let image_info = ImageInfo {
+                debug_name: "Swapchain Image",
+                dim: [chosen_extent.width, chosen_extent.height, 1],
+                layers: 1,
+                format: super::vk_to_lib_image_format(surface_format.format)?,
+                mip_levels: 1,
+                samples: SampleCount::S1,
+                initial_data: None,
+            };
+            let info_handle = self
+                .image_infos
+                .insert(ImageInfoRecord::new(&image_info))
+                .ok_or(GPUError::SlotError())?;
             match self.images.insert(Image {
                 img: raw_img,
                 alloc: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
                 layouts: vec![vk::ImageLayout::UNDEFINED],
-                sub_layers: vk::ImageSubresourceLayers::builder()
-                    .layer_count(1)
-                    .mip_level(0)
-                    .base_array_layer(0)
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .build(),
-                dim: [chosen_extent.width, chosen_extent.height, 1],
-                format: super::vk_to_lib_image_format(surface_format.format)?,
-                samples: SampleCount::S1,
+                info_handle,
             }) {
                 Some(handle) => {
                     self.oneshot_transition_image_noview(handle, vk::ImageLayout::PRESENT_SRC_KHR);
@@ -369,7 +377,10 @@ impl VulkanContext {
                     view_handles.push(h);
                     handles.push(handle)
                 }
-                None => return Err(GPUError::SlotError()),
+                None => {
+                    self.image_infos.release(info_handle);
+                    return Err(GPUError::SlotError());
+                }
             };
         }
 

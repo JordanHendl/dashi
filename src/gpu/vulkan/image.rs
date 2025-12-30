@@ -2,17 +2,40 @@ use crate::utils::Handle;
 use ash::vk;
 use vk_mem;
 
-use super::{Format, SampleCount};
+use super::ImageInfo;
 
 #[derive(Debug)]
 pub struct Image {
     pub(crate) img: vk::Image,
     pub(crate) alloc: vk_mem::Allocation,
-    pub(crate) dim: [u32; 3],
-    pub(crate) format: Format,
     pub(crate) layouts: Vec<vk::ImageLayout>,
-    pub(crate) sub_layers: vk::ImageSubresourceLayers,
-    pub(crate) samples: SampleCount,
+    pub(crate) info_handle: Handle<ImageInfoRecord>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ImageInfoRecord {
+    pub(crate) info: ImageInfo<'static>,
+    debug_name: String,
+}
+
+impl ImageInfoRecord {
+    pub(crate) fn new(info: &ImageInfo) -> Self {
+        let debug_name = info.debug_name.to_string();
+        // SAFETY: `debug_name` owns the backing string data for the lifetime of this record.
+        let debug_name_ref: &'static str =
+            unsafe { std::mem::transmute::<&str, &'static str>(debug_name.as_str()) };
+        let info = ImageInfo {
+            debug_name: debug_name_ref,
+            dim: info.dim,
+            layers: info.layers,
+            format: info.format,
+            mip_levels: info.mip_levels,
+            samples: info.samples,
+            initial_data: None,
+        };
+
+        Self { info, debug_name }
+    }
 }
 
 #[derive(Debug)]
