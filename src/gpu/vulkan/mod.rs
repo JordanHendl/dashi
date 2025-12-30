@@ -295,6 +295,7 @@ pub struct VulkanContext {
     pub(super) compute_queue: Option<Queue>,
     pub(super) transfer_queue: Option<Queue>,
     pub(super) buffers: Pool<Buffer>,
+    pub(super) buffer_infos: Pool<BufferInfoRecord>,
     pub(super) render_passes: Pool<RenderPass>,
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
@@ -800,6 +801,7 @@ impl VulkanContext {
             transfer_queue,
 
             buffers: Default::default(),
+            buffer_infos: Default::default(),
             render_passes: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
@@ -943,6 +945,7 @@ impl VulkanContext {
             transfer_queue,
 
             buffers: Default::default(),
+            buffer_infos: Default::default(),
             render_passes: Default::default(),
             semaphores: Default::default(),
             fences: Default::default(),
@@ -1746,11 +1749,28 @@ impl VulkanContext {
         cpy.size = size;
         cpy.offset += offset;
         cpy.suballocated = true;
+        let parent_info = self.buffer_info(parent);
+        let info_handle = match self
+            .buffer_infos
+            .insert(BufferInfoRecord::new(&BufferInfo {
+                debug_name: parent_info.debug_name,
+                byte_size: size,
+                visibility: parent_info.visibility,
+                usage: parent_info.usage,
+                initial_data: None,
+            })) {
+            Some(handle) => handle,
+            None => return None,
+        };
+        cpy.info_handle = info_handle;
         match self.buffers.insert(cpy) {
             Some(handle) => {
                 return Some(handle);
             }
-            None => return None,
+            None => {
+                self.buffer_infos.release(info_handle);
+                return None;
+            }
         }
     }
 
@@ -1787,20 +1807,40 @@ impl VulkanContext {
             )?;
 
             self.set_name(buffer, info.debug_name, vk::ObjectType::BUFFER);
+            let info_handle = self
+                .buffer_infos
+                .insert(BufferInfoRecord::new(info))
+                .ok_or(GPUError::SlotError())?;
             match self.buffers.insert(Buffer {
                 buf: buffer,
                 alloc: allocation,
                 size: info.byte_size,
                 offset: 0,
                 suballocated: false,
+                info_handle,
             }) {
                 Some(handle) => {
                     self.init_buffer(handle, info)?;
                     return Ok(handle);
                 }
-                None => return Err(GPUError::SlotError()),
+                None => {
+                    self.buffer_infos.release(info_handle);
+                    return Err(GPUError::SlotError());
+                }
             }
         }
+    }
+
+    pub fn buffer_info(&self, buffer: Handle<Buffer>) -> &BufferInfo<'static> {
+        let buf = self
+            .buffers
+            .get_ref(buffer)
+            .expect("Invalid buffer handle");
+        let info = self
+            .buffer_infos
+            .get_ref(buf.info_handle)
+            .expect("Invalid buffer info handle");
+        &info.info
     }
 
     /// Completes any outstanding resource cleanup on the context.
@@ -1915,6 +1955,7 @@ impl VulkanContext {
                 unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
             }
         });
+        self.buffer_infos.clear();
 
         // Render passes
         self.render_passes.for_each_occupied_mut(|rp| {
@@ -1997,6 +2038,7 @@ impl VulkanContext {
         if !buf.suballocated {
             unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
         }
+        self.buffer_infos.release(buf.info_handle);
         self.buffers.release(handle);
     }
 

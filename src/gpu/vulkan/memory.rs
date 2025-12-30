@@ -4,6 +4,8 @@ use offset_allocator;
 use std::hash::{Hash, Hasher};
 use vk_mem;
 
+use super::BufferInfo;
+
 #[derive(Debug)]
 pub struct Buffer {
     pub(crate) buf: vk::Buffer,
@@ -11,6 +13,7 @@ pub struct Buffer {
     pub(crate) offset: u32,
     pub(crate) size: u32,
     pub(crate) suballocated: bool,
+    pub(crate) info_handle: Handle<BufferInfoRecord>,
 }
 
 impl Clone for Buffer {
@@ -21,7 +24,32 @@ impl Clone for Buffer {
             offset: self.offset.clone(),
             size: self.size.clone(),
             suballocated: self.suballocated.clone(),
+            info_handle: self.info_handle,
         }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BufferInfoRecord {
+    pub(crate) info: BufferInfo<'static>,
+    debug_name: String,
+}
+
+impl BufferInfoRecord {
+    pub(crate) fn new(info: &BufferInfo) -> Self {
+        let debug_name = info.debug_name.to_string();
+        // SAFETY: `debug_name` owns the backing string data for the lifetime of this record.
+        let debug_name_ref: &'static str =
+            unsafe { std::mem::transmute::<&str, &'static str>(debug_name.as_str()) };
+        let info = BufferInfo {
+            debug_name: debug_name_ref,
+            byte_size: info.byte_size,
+            visibility: info.visibility,
+            usage: info.usage,
+            initial_data: None,
+        };
+
+        Self { info, debug_name }
     }
 }
 
