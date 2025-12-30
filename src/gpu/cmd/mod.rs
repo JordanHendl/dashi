@@ -9,7 +9,7 @@ use crate::gpu::driver::command::{
 };
 use crate::gpu::driver::types::Handle;
 use crate::{
-    Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, SubmitInfo2, UsageBits,
+    Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, Result, SubmitInfo2, UsageBits,
     Viewport,
 };
 
@@ -328,15 +328,15 @@ impl CommandStream<Executable> {
         self,
         sink: &mut S,
         submit: &SubmitInfo2,
-    ) -> (CommandStream<Pending>, Option<Handle<Fence>>) {
-        let f = self.enc.submit(sink, submit);
-        (
+    ) -> Result<(CommandStream<Pending>, Option<Handle<Fence>>)> {
+        let f = self.enc.submit(sink, submit)?;
+        Ok((
             CommandStream {
                 enc: self.enc,
                 _state: PhantomData,
             },
             f,
-        )
+        ))
     }
 
     pub fn debug_print_commands(&self) {
@@ -345,11 +345,11 @@ impl CommandStream<Executable> {
         }
     }
     /// Submit the recorded commands to a sink and transition to pending.
-    pub fn append<S: CommandSink>(self, sink: &mut S) -> CommandStream<Pending> {
-        self.enc.append(sink);
-        CommandStream {
+    pub fn append<S: CommandSink>(self, sink: &mut S) -> Result<CommandStream<Pending>> {
+        self.enc.append(sink)?;
+        Ok(CommandStream {
             enc: self.enc,
             _state: PhantomData,
-        }
+        })
     }
 }
