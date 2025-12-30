@@ -12,6 +12,8 @@ pub struct DynamicGPUPool {
     buffer: Handle<Buffer>,
     staging: Handle<Buffer>,
     pool: DynamicPool,
+    dirty: Vec<bool>,
+    item_size: usize,
     _ctx: *mut Context,
 }
 
@@ -21,6 +23,8 @@ impl Default for DynamicGPUPool {
             buffer: Default::default(),
             staging: Default::default(),
             pool: Default::default(),
+            dirty: Vec::new(),
+            item_size: 0,
             _ctx: std::ptr::null_mut(),
         }
     }
@@ -30,6 +34,7 @@ pub struct GPUPool<T> {
     buffer: Handle<Buffer>,
     staging: Handle<Buffer>,
     pool: Pool<T>,
+    dirty: Vec<bool>,
     _ctx: *mut Context,
 }
 
@@ -39,6 +44,7 @@ impl<T> Default for GPUPool<T> {
             buffer: Default::default(),
             staging: Default::default(),
             pool: Default::default(),
+            dirty: Vec::new(),
             _ctx: std::ptr::null_mut(),
         }
     }
@@ -68,6 +74,7 @@ impl<T> GPUPool<T> {
             buffer,
             staging,
             pool,
+            dirty: vec![false; len],
             _ctx: ctx,
         })
     }
@@ -97,6 +104,36 @@ impl<T> GPUPool<T> {
             dst: self.buffer,
             ..Default::default()
         });
+        self.clear_dirty();
+
+        Ok(list)
+    }
+
+    pub fn sync_up_dirty(&mut self) -> Result<CommandStream<Recording>> {
+        let mut list = CommandStream::new().begin();
+        let item_size = std::mem::size_of::<T>();
+        let mut idx = 0usize;
+        while idx < self.dirty.len() {
+            if !self.dirty[idx] {
+                idx += 1;
+                continue;
+            }
+            let start = idx;
+            while idx < self.dirty.len() && self.dirty[idx] {
+                idx += 1;
+            }
+            let count = idx - start;
+            let byte_offset = (start * item_size) as u32;
+            let byte_amount = (count * item_size) as u32;
+            list = list.copy_buffers(&CopyBuffer {
+                src: self.staging,
+                dst: self.buffer,
+                src_offset: byte_offset,
+                dst_offset: byte_offset,
+                amount: byte_amount,
+            });
+        }
+        self.clear_dirty();
 
         Ok(list)
     }
@@ -106,7 +143,11 @@ impl<T> GPUPool<T> {
     }
 
     pub fn insert(&mut self, item: T) -> Option<Handle<T>> {
-        return self.pool.insert(item);
+        let handle = self.pool.insert(item);
+        if let Some(handle) = handle {
+            self.mark_dirty(handle.slot);
+        }
+        handle
     }
 
     pub fn for_each_occupied<F>(&self, func: F)
@@ -124,11 +165,15 @@ impl<T> GPUPool<T> {
     where
         F: FnMut(&mut T),
     {
+        if !self.dirty.is_empty() {
+            self.dirty.fill(true);
+        }
         self.pool.for_each_occupied_mut(func);
     }
 
     pub fn release(&mut self, item: Handle<T>) {
         self.pool.release(item);
+        self.clear_dirty_slot(item.slot);
     }
 
     pub fn get_ref(&self, item: Handle<T>) -> Option<&T> {
@@ -136,11 +181,33 @@ impl<T> GPUPool<T> {
     }
 
     pub fn get_mut_ref(&mut self, item: Handle<T>) -> Option<&mut T> {
+        self.mark_dirty(item.slot);
         self.pool.get_mut_ref(item)
     }
 
     pub fn clear(&mut self) {
         self.pool.clear();
+        self.clear_dirty();
+    }
+
+    fn mark_dirty(&mut self, slot: u16) {
+        let idx = slot as usize;
+        if let Some(entry) = self.dirty.get_mut(idx) {
+            *entry = true;
+        }
+    }
+
+    fn clear_dirty_slot(&mut self, slot: u16) {
+        let idx = slot as usize;
+        if let Some(entry) = self.dirty.get_mut(idx) {
+            *entry = false;
+        }
+    }
+
+    fn clear_dirty(&mut self) {
+        if !self.dirty.is_empty() {
+            self.dirty.fill(false);
+        }
     }
 }
 
@@ -178,6 +245,8 @@ impl DynamicGPUPool {
             buffer,
             staging,
             pool,
+            dirty: vec![false; len],
+            item_size,
             _ctx: ctx,
         })
     }
@@ -207,6 +276,35 @@ impl DynamicGPUPool {
             dst: self.buffer,
             ..Default::default()
         });
+        self.clear_dirty();
+
+        Ok(list)
+    }
+
+    pub fn sync_up_dirty(&mut self) -> Result<CommandStream<Recording>> {
+        let mut list = CommandStream::new().begin();
+        let mut idx = 0usize;
+        while idx < self.dirty.len() {
+            if !self.dirty[idx] {
+                idx += 1;
+                continue;
+            }
+            let start = idx;
+            while idx < self.dirty.len() && self.dirty[idx] {
+                idx += 1;
+            }
+            let count = idx - start;
+            let byte_offset = (start * self.item_size) as u32;
+            let byte_amount = (count * self.item_size) as u32;
+            list = list.copy_buffers(&CopyBuffer {
+                src: self.staging,
+                dst: self.buffer,
+                src_offset: byte_offset,
+                dst_offset: byte_offset,
+                amount: byte_amount,
+            });
+        }
+        self.clear_dirty();
 
         Ok(list)
     }
@@ -216,7 +314,11 @@ impl DynamicGPUPool {
     }
 
     pub fn insert<T>(&mut self, item: T) -> Option<Handle<T>> {
-        return self.pool.insert(item);
+        let handle = self.pool.insert(item);
+        if let Some(handle) = handle {
+            self.mark_dirty(handle.slot);
+        }
+        handle
     }
 
     //    pub fn for_each_occupied<F>(&self, func: F)
@@ -239,6 +341,7 @@ impl DynamicGPUPool {
 
     pub fn release<T>(&mut self, item: Handle<T>) {
         self.pool.release(item);
+        self.clear_dirty_slot(item.slot);
     }
 
     pub fn get_ref<T>(&self, item: Handle<T>) -> Option<&T> {
@@ -246,11 +349,33 @@ impl DynamicGPUPool {
     }
 
     pub fn get_mut_ref<T>(&mut self, item: Handle<T>) -> Option<&mut T> {
+        self.mark_dirty(item.slot);
         self.pool.get_mut_ref(item)
     }
 
     pub fn clear(&mut self) {
         self.pool.clear();
+        self.clear_dirty();
+    }
+
+    fn mark_dirty(&mut self, slot: u16) {
+        let idx = slot as usize;
+        if let Some(entry) = self.dirty.get_mut(idx) {
+            *entry = true;
+        }
+    }
+
+    fn clear_dirty_slot(&mut self, slot: u16) {
+        let idx = slot as usize;
+        if let Some(entry) = self.dirty.get_mut(idx) {
+            *entry = false;
+        }
+    }
+
+    fn clear_dirty(&mut self) {
+        if !self.dirty.is_empty() {
+            self.dirty.fill(false);
+        }
     }
 }
 
