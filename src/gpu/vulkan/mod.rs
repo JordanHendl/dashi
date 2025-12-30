@@ -1587,7 +1587,7 @@ impl VulkanContext {
                     amount: unsafe { info.initial_data.unwrap_unchecked().len() } as u32,
                 });
 
-                stream.end().append(&mut list);
+                stream.end().append(&mut list)?;
 
                 let fence = self.submit(&mut list, &Default::default())?;
                 self.wait(fence.clone())?;
@@ -1652,7 +1652,7 @@ impl VulkanContext {
             }
         }
 
-        cmd.end().append(&mut list);
+        cmd.end().append(&mut list)?;
         let fence = self.submit(&mut list, &Default::default())?;
         self.wait(fence)?;
         self.destroy_cmd_queue(list);

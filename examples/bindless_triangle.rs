@@ -451,7 +451,7 @@ void main() {
             // Transition the display image for presentation
             let stream = stream.prepare_for_presentation(img.img);
 
-            stream.end().append(list);
+            stream.end().append(list).unwrap();
         })
         .expect("Unable to record drawing commands!");
 

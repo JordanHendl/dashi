@@ -365,7 +365,7 @@ void main() {
                 // Transition display image for presentation
                 let stream = stream.prepare_for_presentation(img.img);
 
-                stream.end().append(list);
+                stream.end().append(list).unwrap();
             }).unwrap();
 
         // Submit our recorded commands

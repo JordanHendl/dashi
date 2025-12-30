@@ -48,7 +48,7 @@ fn main() -> Result<(), GPUError> {
             dst_offset: 0,
             amount: byte_size,
         });
-    upload_stream.end().append(&mut transfer_list);
+    upload_stream.end().append(&mut transfer_list)?;
     let upload_fence = ctx.submit(&mut transfer_list, &Default::default())?;
     ctx.wait(upload_fence)?;
 
@@ -125,7 +125,7 @@ fn main() -> Result<(), GPUError> {
             dst_offset: 0,
             amount: byte_size,
         });
-    compute_stream.end().append(&mut compute_list);
+    compute_stream.end().append(&mut compute_list)?;
 
     let compute_fence = ctx.submit(&mut compute_list, &Default::default())?;
     ctx.wait(compute_fence)?;

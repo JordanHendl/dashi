@@ -1,11 +1,6 @@
 use crate::{
     cmd::{CommandStream, Executable},
-    CommandQueue,
-    Context,
-    Fence,
-    GPUError,
-    Result,
-    SubmitInfo2,
+    CommandQueue, Context, Fence, GPUError, Result, SubmitInfo2,
 };
 use std::{
     ptr::NonNull,
@@ -66,7 +61,7 @@ impl CommandDispatchBackend {
                 "CommandDispatch received invalid semaphore handle",
             ));
         }
-        let (_pending, fence) = stream.submit(&mut queue, submit);
+        let (_pending, fence) = stream.submit(&mut queue, submit)?;
         if let Some(fence) = fence {
             self.pending.push(PendingDispatch {
                 queue,
@@ -130,19 +125,23 @@ impl CommandDispatch {
 
     /// Dispatch a command stream using the global backend.
     pub fn dispatch(stream: CommandStream<Executable>, submit: &SubmitInfo2) -> Result<()> {
-        let backend = COMMAND_DISPATCH
-            .get()
-            .ok_or(GPUError::Unimplemented("CommandDispatch backend not initialized"))?;
-        let mut backend = backend.lock().expect("CommandDispatch backend lock poisoned");
+        let backend = COMMAND_DISPATCH.get().ok_or(GPUError::Unimplemented(
+            "CommandDispatch backend not initialized",
+        ))?;
+        let mut backend = backend
+            .lock()
+            .expect("CommandDispatch backend lock poisoned");
         backend.dispatch(stream, submit)
     }
 
     /// Process completed submissions and release command queues.
     pub fn tick() -> Result<usize> {
-        let backend = COMMAND_DISPATCH
-            .get()
-            .ok_or(GPUError::Unimplemented("CommandDispatch backend not initialized"))?;
-        let mut backend = backend.lock().expect("CommandDispatch backend lock poisoned");
+        let backend = COMMAND_DISPATCH.get().ok_or(GPUError::Unimplemented(
+            "CommandDispatch backend not initialized",
+        ))?;
+        let mut backend = backend
+            .lock()
+            .expect("CommandDispatch backend lock poisoned");
         backend.tick()
     }
 }
