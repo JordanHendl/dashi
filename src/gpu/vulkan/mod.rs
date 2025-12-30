@@ -299,6 +299,7 @@ pub struct VulkanContext {
     pub(super) semaphores: Pool<Semaphore>,
     pub(super) fences: Pool<Fence>,
     pub(super) images: Pool<Image>,
+    pub(super) image_infos: Pool<ImageInfoRecord>,
     pub(super) image_views: Pool<VkImageView>,
     pub(super) image_view_cache: HashMap<ImageView, Handle<VkImageView>>,
     pub(super) samplers: Pool<Sampler>,
@@ -803,6 +804,7 @@ impl VulkanContext {
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
+            image_infos: Default::default(),
             image_views: Default::default(),
             image_view_cache: HashMap::new(),
             samplers: Default::default(),
@@ -945,6 +947,7 @@ impl VulkanContext {
             semaphores: Default::default(),
             fences: Default::default(),
             images: Default::default(),
+            image_infos: Default::default(),
             image_views: Default::default(),
             image_view_cache: HashMap::new(),
             samplers: Default::default(),
@@ -1376,6 +1379,10 @@ impl VulkanContext {
         }
 
         let img = self.images.get_ref(info.img).unwrap();
+        let img_info = self
+            .image_infos
+            .get_ref(img.info_handle)
+            .ok_or(GPUError::SlotError())?;
         let aspect: vk::ImageAspectFlags = info.aspect.into();
         let sub_range = vk::ImageSubresourceRange::builder()
             .base_array_layer(info.range.base_layer)
@@ -1389,7 +1396,7 @@ impl VulkanContext {
             self.device.create_image_view(
                 &vk::ImageViewCreateInfo::builder()
                     .image(img.img)
-                    .format(lib_to_vk_image_format(&img.format))
+                    .format(lib_to_vk_image_format(&img_info.info.format))
                     .subresource_range(sub_range)
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .build(),
@@ -1415,9 +1422,7 @@ impl VulkanContext {
             | vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::SAMPLED;
 
-        let mut aspect = vk::ImageAspectFlags::COLOR;
         if info.format == Format::D24S8 {
-            aspect = vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL;
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
         } else {
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::COLOR_ATTACHMENT;
@@ -1452,26 +1457,38 @@ impl VulkanContext {
 
         self.set_name(image, info.debug_name, vk::ObjectType::IMAGE);
 
+        let info_handle = self
+            .image_infos
+            .insert(ImageInfoRecord::new(info))
+            .ok_or(GPUError::SlotError())?;
+
         match self.images.insert(Image {
             img: image,
             alloc: allocation,
             layouts: vec![vk::ImageLayout::UNDEFINED; info.mip_levels as usize],
-            sub_layers: vk::ImageSubresourceLayers::builder()
-                .layer_count(info.dim[2] as u32)
-                .mip_level(0)
-                .base_array_layer(0)
-                .aspect_mask(aspect)
-                .build(),
-            dim: info.dim,
-            format: info.format,
-            samples: info.samples,
+            info_handle,
         }) {
             Some(h) => {
                 self.init_image(h, &info)?;
                 return Ok(h);
             }
-            None => Err(GPUError::SlotError()),
+            None => {
+                self.image_infos.release(info_handle);
+                Err(GPUError::SlotError())
+            }
         }
+    }
+
+    pub fn image_info(&self, image: Handle<Image>) -> &ImageInfo<'static> {
+        let img = self
+            .images
+            .get_ref(image)
+            .expect("Invalid image handle");
+        let info = self
+            .image_infos
+            .get_ref(img.info_handle)
+            .expect("Invalid image info handle");
+        &info.info
     }
 
     pub fn flush_buffer(&mut self, buffer: BufferView) -> Result<()> {
@@ -1890,6 +1907,7 @@ impl VulkanContext {
         self.images.for_each_occupied_mut(|img| {
             unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
         });
+        self.image_infos.clear();
 
         // Buffers
         self.buffers.for_each_occupied_mut(|buf| {
@@ -2048,6 +2066,7 @@ impl VulkanContext {
 
         let img = self.images.get_mut_ref(handle).unwrap();
         unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+        self.image_infos.release(img.info_handle);
         self.images.release(handle);
     }
 
