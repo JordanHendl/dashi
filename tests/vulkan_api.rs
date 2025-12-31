@@ -245,7 +245,7 @@ void main() {
         })
         .unbind_pipeline()
         .end();
-    stream.append(&mut list);
+    stream.append(&mut list).unwrap();
 
     let fence = ctx.submit(&mut list, &Default::default()).unwrap();
     ctx.wait(fence).unwrap();

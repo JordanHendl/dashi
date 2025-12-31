@@ -3,7 +3,7 @@ use core::convert::TryInto;
 
 use crate::{
     BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter, GraphicsPipeline,
-    Image, ImageView, QueueType, Rect2D, RenderPass, SubmitInfo2, Viewport,
+    Image, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -557,37 +557,37 @@ impl CommandEncoder {
         }
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
-    pub fn append<S: CommandSink>(&self, sink: &mut S) -> usize {
+    pub fn append<S: CommandSink>(&self, sink: &mut S) -> Result<usize> {
         let mut cnt = 0;
         for cmd in self.iter() {
             cnt += 1;
             match cmd.op {
-                Op::BeginDrawing => sink.begin_drawing(cmd.payload()),
-                Op::EndDrawing => sink.end_drawing(cmd.payload()),
-                Op::BindGraphicsPipeline => sink.bind_graphics_pipeline(cmd.payload()),
+                Op::BeginDrawing => sink.begin_drawing(cmd.payload())?,
+                Op::EndDrawing => sink.end_drawing(cmd.payload())?,
+                Op::BindGraphicsPipeline => sink.bind_graphics_pipeline(cmd.payload())?,
                 Op::UpdateGraphicsPipelineState => {
-                    sink.update_graphics_pipeline_state(cmd.payload())
+                    sink.update_graphics_pipeline_state(cmd.payload())?
                 }
-                Op::Draw => sink.draw(cmd.payload()),
-                Op::Dispatch => sink.dispatch(cmd.payload()),
-                Op::CopyBuffer => sink.copy_buffer(cmd.payload()),
-                Op::CopyBufferToImage => sink.copy_buffer_to_image(cmd.payload()),
-                Op::CopyImage => sink.copy_image(cmd.payload()),
-                Op::ResolveImage => sink.resolve_image(cmd.payload()),
-                Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload()),
-                Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload()),
-                Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload()),
-                Op::BlitImage => sink.blit_image(cmd.payload()),
-                Op::DrawIndexed => sink.draw_indexed(cmd.payload()),
+                Op::Draw => sink.draw(cmd.payload())?,
+                Op::Dispatch => sink.dispatch(cmd.payload())?,
+                Op::CopyBuffer => sink.copy_buffer(cmd.payload())?,
+                Op::CopyBufferToImage => sink.copy_buffer_to_image(cmd.payload())?,
+                Op::CopyImage => sink.copy_image(cmd.payload())?,
+                Op::ResolveImage => sink.resolve_image(cmd.payload())?,
+                Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload())?,
+                Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload())?,
+                Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload())?,
+                Op::BlitImage => sink.blit_image(cmd.payload())?,
+                Op::DrawIndexed => sink.draw_indexed(cmd.payload())?,
                 Op::DrawIndirect => todo!(),
                 Op::DispatchIndirect => todo!(),
-                Op::PrepareBuffer => sink.prepare_buffer(cmd.payload()),
-                Op::TransitionImage => sink.transition_image(cmd.payload()),
-                Op::BeginRenderPass => sink.begin_render_pass(cmd.payload()),
-                Op::NextSubpass => sink.next_subpass(cmd.payload()),
+                Op::PrepareBuffer => sink.prepare_buffer(cmd.payload())?,
+                Op::TransitionImage => sink.transition_image(cmd.payload())?,
+                Op::BeginRenderPass => sink.begin_render_pass(cmd.payload())?,
+                Op::NextSubpass => sink.next_subpass(cmd.payload())?,
             }
         }
-        cnt
+        Ok(cnt)
     }
 
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
@@ -595,12 +595,12 @@ impl CommandEncoder {
         &self,
         sink: &mut S,
         submit: &SubmitInfo2,
-    ) -> Option<Handle<Fence>> {
-        if self.append(sink) != 0 {
-            return Some(sink.submit(submit));
+    ) -> Result<Option<Handle<Fence>>> {
+        if self.append(sink)? != 0 {
+            return Ok(Some(sink.submit(submit)?));
         }
 
-        None
+        Ok(None)
     }
 
     /// Iterate over recorded commands.
@@ -757,26 +757,26 @@ impl Op {
 }
 
 pub trait CommandSink {
-    fn begin_render_pass(&mut self, pass: &BeginRenderPass);
-    fn begin_drawing(&mut self, pass: &BeginDrawing);
-    fn end_drawing(&mut self, pass: &EndDrawing);
-    fn bind_graphics_pipeline(&mut self, cmd: &BindGraphicsPipeline);
-    fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate);
-    fn blit_image(&mut self, cmd: &BlitImage);
-    fn draw(&mut self, cmd: &Draw);
-    fn draw_indexed(&mut self, cmd: &DrawIndexed);
-    fn dispatch(&mut self, cmd: &Dispatch);
-    fn copy_buffer(&mut self, cmd: &CopyBuffer);
-    fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage);
-    fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer);
-    fn copy_image(&mut self, cmd: &CopyImage);
-    fn resolve_image(&mut self, cmd: &MSImageResolve);
-    fn transition_image(&mut self, cmd: &TransitionImage);
-    fn prepare_buffer(&mut self, cmd: &PrepareBuffer);
-    fn next_subpass(&mut self, cmd: &NextSubpass);
-    fn submit(&mut self, cmd: &SubmitInfo2) -> Handle<Fence>;
-    fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin);
-    fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd);
+    fn begin_render_pass(&mut self, pass: &BeginRenderPass) -> Result<()>;
+    fn begin_drawing(&mut self, pass: &BeginDrawing) -> Result<()>;
+    fn end_drawing(&mut self, pass: &EndDrawing) -> Result<()>;
+    fn bind_graphics_pipeline(&mut self, cmd: &BindGraphicsPipeline) -> Result<()>;
+    fn update_graphics_pipeline_state(&mut self, cmd: &GraphicsPipelineStateUpdate) -> Result<()>;
+    fn blit_image(&mut self, cmd: &BlitImage) -> Result<()>;
+    fn draw(&mut self, cmd: &Draw) -> Result<()>;
+    fn draw_indexed(&mut self, cmd: &DrawIndexed) -> Result<()>;
+    fn dispatch(&mut self, cmd: &Dispatch) -> Result<()>;
+    fn copy_buffer(&mut self, cmd: &CopyBuffer) -> Result<()>;
+    fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) -> Result<()>;
+    fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) -> Result<()>;
+    fn copy_image(&mut self, cmd: &CopyImage) -> Result<()>;
+    fn resolve_image(&mut self, cmd: &MSImageResolve) -> Result<()>;
+    fn transition_image(&mut self, cmd: &TransitionImage) -> Result<()>;
+    fn prepare_buffer(&mut self, cmd: &PrepareBuffer) -> Result<()>;
+    fn next_subpass(&mut self, cmd: &NextSubpass) -> Result<()>;
+    fn submit(&mut self, cmd: &SubmitInfo2) -> Result<Handle<Fence>>;
+    fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin) -> Result<()>;
+    fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd) -> Result<()>;
 }
 
 #[cfg(feature = "copy_texture_compat")]

@@ -2,6 +2,7 @@
 
 use ash::vk;
 
+use super::VulkanContext;
 use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
 use crate::gpu::driver::command::CommandSink;
 use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
@@ -10,7 +11,6 @@ use crate::{
     BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Fence, GPUError,
     GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
 };
-use super::VulkanContext;
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
 #[inline]
@@ -224,13 +224,25 @@ impl CommandQueue {
 
             let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
                 .into_iter()
-                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
-                .collect();
+                .map(|a| {
+                    (*self.ctx)
+                        .semaphores
+                        .get_ref(a.clone())
+                        .ok_or(GPUError::SlotError())
+                        .map(|sem| sem.raw)
+                })
+                .collect::<Result<_, _>>()?;
 
             let raw_signal_sems: Vec<vk::Semaphore> = signal_sems
                 .into_iter()
-                .map(|a| (*self.ctx).semaphores.get_ref(a.clone()).unwrap().raw)
-                .collect();
+                .map(|a| {
+                    (*self.ctx)
+                        .semaphores
+                        .get_ref(a.clone())
+                        .ok_or(GPUError::SlotError())
+                        .map(|sem| sem.raw)
+                })
+                .collect::<Result<_, _>>()?;
 
             let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
 
@@ -243,7 +255,12 @@ impl CommandQueue {
                     .wait_dst_stage_mask(&stage_masks)
                     .wait_semaphores(&raw_wait_sems)
                     .build()],
-                (*self.ctx).fences.get_ref(self.fence).unwrap().raw.clone(),
+                (*self.ctx)
+                    .fences
+                    .get_ref(self.fence)
+                    .ok_or(GPUError::SlotError())?
+                    .raw
+                    .clone(),
             )?;
 
             return Ok(self.fence.clone());
@@ -349,18 +366,19 @@ impl CommandQueue {
         range: crate::structs::SubresourceRange,
         usage: UsageBits,
         layout: Layout,
-    ) {
+    ) -> Result<()> {
         if let Some(transition) = {
             let ctx = self.ctx_ref();
             ctx.resource_states
                 .request_image_state(image, range, usage, layout, self.queue_type)
         } {
-            self.apply_image_barrier(&transition);
+            self.apply_image_barrier(&transition)?;
         }
+        Ok(())
     }
 
-    fn ensure_buffer_state(&mut self, buffer: Handle<Buffer>, usage: UsageBits) {
-        self.ensure_buffer_state_on_queue(buffer, usage, self.queue_type);
+    fn ensure_buffer_state(&mut self, buffer: Handle<Buffer>, usage: UsageBits) -> Result<()> {
+        self.ensure_buffer_state_on_queue(buffer, usage, self.queue_type)
     }
 
     fn ensure_buffer_state_on_queue(
@@ -368,38 +386,44 @@ impl CommandQueue {
         buffer: Handle<Buffer>,
         usage: UsageBits,
         queue: QueueType,
-    ) {
+    ) -> Result<()> {
         if let Some(barrier) = {
             let ctx = self.ctx_ref();
             ctx.resource_states
                 .request_buffer_state(buffer, usage, queue)
         } {
-            self.apply_buffer_barrier(&barrier);
+            self.apply_buffer_barrier(&barrier)?;
         }
+        Ok(())
     }
 
-    fn ensure_bind_table_state(&mut self, table: Handle<BindTable>, queue: QueueType) {
+    fn ensure_bind_table_state(
+        &mut self,
+        table: Handle<BindTable>,
+        queue: QueueType,
+    ) -> Result<()> {
         if let Some(bt) = self.ctx_ref().bind_tables.get_ref(table) {
             for (buffer, usage) in &bt.buffer_states {
-                self.ensure_buffer_state_on_queue(*buffer, *usage, queue);
+                self.ensure_buffer_state_on_queue(*buffer, *usage, queue)?;
             }
         }
+        Ok(())
     }
 
-    fn ensure_binding_states(&mut self, bind_tables: &[Option<Handle<BindTable>>; 4]) {
+    fn ensure_binding_states(
+        &mut self,
+        bind_tables: &[Option<Handle<BindTable>>; 4],
+    ) -> Result<()> {
         let queue = self.queue_type;
         for table in bind_tables.iter().flatten() {
-            self.ensure_bind_table_state(*table, queue);
+            self.ensure_bind_table_state(*table, queue)?;
         }
+        Ok(())
     }
 
-    fn apply_image_barrier(&mut self, cmd: &LayoutTransition) {
+    fn apply_image_barrier(&mut self, cmd: &LayoutTransition) -> Result<()> {
         let ctx = self.ctx_ref();
-        let img_data = ctx
-            .images
-            .get_ref(cmd.image)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
+        let img_data = ctx.images.get_ref(cmd.image).ok_or(GPUError::SlotError())?;
         let img_info = ctx.image_info(cmd.image);
 
         let aspect = if cmd
@@ -475,22 +499,25 @@ impl CommandQueue {
             )
         };
         self.update_last_access(dst_stage, dst_access);
-        let img = ctx.images.get_mut_ref(cmd.image).unwrap();
+        let img = ctx
+            .images
+            .get_mut_ref(cmd.image)
+            .ok_or(GPUError::SlotError())?;
         for level in 0..cmd.range.level_count {
             let mip = (cmd.range.base_mip + level) as usize;
             if let Some(l) = img.layouts.get_mut(mip) {
                 *l = layout_to_vk(cmd.new_layout);
             }
         }
+        Ok(())
     }
 
-    fn apply_buffer_barrier(&mut self, cmd: &BufferBarrier) {
+    fn apply_buffer_barrier(&mut self, cmd: &BufferBarrier) -> Result<()> {
         let ctx = self.ctx_ref();
         let buffer = ctx
             .buffers
             .get_ref(cmd.buffer)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
+            .ok_or(GPUError::SlotError())?;
 
         let src_stage = cmd.old_stage;
         let src_access = cmd.old_access;
@@ -543,6 +570,7 @@ impl CommandQueue {
             )
         };
         self.update_last_access(dst_stage, dst_access);
+        Ok(())
     }
     pub(crate) fn ctx_ref(&self) -> &'static mut VulkanContext {
         unsafe { &mut *self.ctx }
@@ -628,14 +656,17 @@ impl CommandQueue {
 }
 
 impl CommandSink for CommandQueue {
-    fn begin_render_pass(&mut self, cmd: &crate::gpu::driver::command::BeginRenderPass) {
+    fn begin_render_pass(
+        &mut self,
+        cmd: &crate::gpu::driver::command::BeginRenderPass,
+    ) -> Result<()> {
         for view in cmd.color_attachments.iter().flatten() {
             self.ensure_image_state(
                 view.img,
                 view.range,
                 UsageBits::RT_WRITE,
                 Layout::ColorAttachment,
-            );
+            )?;
         }
         if let Some(depth) = cmd.depth_attachment {
             self.ensure_image_state(
@@ -643,7 +674,7 @@ impl CommandSink for CommandQueue {
                 depth.range,
                 UsageBits::DEPTH_WRITE,
                 Layout::DepthStencilAttachment,
-            );
+            )?;
         }
         // end previous pass
         if self.curr_rp.is_some() {
@@ -654,8 +685,8 @@ impl CommandSink for CommandQueue {
             let attachments_prev = std::mem::take(&mut self.curr_attachments);
             for (view, layout) in attachments_prev {
                 let ctx = self.ctx_ref();
-                let v = ctx.image_views.get_ref(view).unwrap();
-                let img = ctx.images.get_mut_ref(v.img).unwrap();
+                let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
+                let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
                 let base = v.range.base_mip_level as usize;
                 let count = v.range.level_count as usize;
                 for i in base..base + count {
@@ -674,8 +705,7 @@ impl CommandSink for CommandQueue {
                 .ctx_ref()
                 .render_passes
                 .get_ref(cmd.render_pass)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             (
                 rp_obj.raw,
                 rp_obj.fb,
@@ -705,9 +735,13 @@ impl CommandSink for CommandQueue {
         self.curr_attachments.clear();
 
         for view in cmd.color_attachments.iter().flatten() {
-            let handle = self.ctx_ref().get_or_create_image_view(view).unwrap();
+            let handle = self.ctx_ref().get_or_create_image_view(view)?;
             let vk_view = {
-                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                let v = self
+                    .ctx_ref()
+                    .image_views
+                    .get_ref(handle)
+                    .ok_or(GPUError::SlotError())?;
                 v.view
             };
             attachments_vk.push(vk_view);
@@ -716,9 +750,13 @@ impl CommandSink for CommandQueue {
         }
 
         if let Some(depth) = cmd.depth_attachment {
-            let handle = self.ctx_ref().get_or_create_image_view(&depth).unwrap();
+            let handle = self.ctx_ref().get_or_create_image_view(&depth)?;
             let vk_view = {
-                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                let v = self
+                    .ctx_ref()
+                    .image_views
+                    .get_ref(handle)
+                    .ok_or(GPUError::SlotError())?;
                 v.view
             };
             attachments_vk.push(vk_view);
@@ -731,7 +769,10 @@ impl CommandSink for CommandQueue {
         {
             let ctx = self.ctx_ref();
             for (view_handle, _) in &self.curr_attachments {
-                let v = ctx.image_views.get_ref(*view_handle).unwrap();
+                let v = ctx
+                    .image_views
+                    .get_ref(*view_handle)
+                    .ok_or(GPUError::SlotError())?;
                 let info = ctx.image_info(v.img);
                 attachment_min_width = attachment_min_width.min(info.dim[0]);
                 attachment_min_height = attachment_min_height.min(info.dim[1]);
@@ -745,16 +786,17 @@ impl CommandSink for CommandQueue {
 
         if target_width != rp_width || target_height != rp_height {
             let ctx = self.ctx_ref();
-            let new_fb = ctx
-                .create_imageless_framebuffer(
-                    rp_raw,
-                    &attachment_formats,
-                    target_width,
-                    target_height,
-                )
-                .unwrap();
+            let new_fb = ctx.create_imageless_framebuffer(
+                rp_raw,
+                &attachment_formats,
+                target_width,
+                target_height,
+            )?;
             {
-                let rp_mut = ctx.render_passes.get_mut_ref(cmd.render_pass).unwrap();
+                let rp_mut = ctx
+                    .render_passes
+                    .get_mut_ref(cmd.render_pass)
+                    .ok_or(GPUError::SlotError())?;
                 unsafe {
                     ctx.device.destroy_framebuffer(rp_mut.fb, None);
                 }
@@ -769,8 +811,11 @@ impl CommandSink for CommandQueue {
 
         for (view_handle, layout) in &self.curr_attachments {
             let ctx = self.ctx_ref();
-            let v = ctx.image_views.get_ref(*view_handle).unwrap();
-            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let v = ctx
+                .image_views
+                .get_ref(*view_handle)
+                .ok_or(GPUError::SlotError())?;
+            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
             let base = v.range.base_mip_level as usize;
             let count = v.range.level_count as usize;
             for i in base..base + count {
@@ -814,16 +859,18 @@ impl CommandSink for CommandQueue {
 
             self.update_last_access(vk::PipelineStageFlags::NONE, vk::AccessFlags::empty());
         }
+
+        Ok(())
     }
 
-    fn begin_drawing(&mut self, cmd: &crate::gpu::driver::command::BeginDrawing) {
+    fn begin_drawing(&mut self, cmd: &crate::gpu::driver::command::BeginDrawing) -> Result<()> {
         for view in cmd.color_attachments.iter().flatten() {
             self.ensure_image_state(
                 view.img,
                 view.range,
                 UsageBits::RT_WRITE,
                 Layout::ColorAttachment,
-            );
+            )?;
         }
         if let Some(depth) = cmd.depth_attachment {
             self.ensure_image_state(
@@ -831,20 +878,19 @@ impl CommandSink for CommandQueue {
                 depth.range,
                 UsageBits::DEPTH_WRITE,
                 Layout::DepthStencilAttachment,
-            );
+            )?;
         }
         let (pipeline_rp_layout, pipeline_subpass, layout_handle) = {
             let gfx = self
                 .ctx_ref()
                 .gfx_pipelines
                 .get_ref(cmd.pipeline)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             (gfx.render_pass, gfx.subpass as usize, gfx.layout)
         };
 
         if self.curr_rp.map_or(false, |rp| rp == cmd.render_pass) {
-            return;
+            return Ok(());
         }
 
         // end previous pass
@@ -856,8 +902,8 @@ impl CommandSink for CommandQueue {
             let attachments_prev = std::mem::take(&mut self.curr_attachments);
             for (view, layout) in attachments_prev {
                 let ctx = self.ctx_ref();
-                let v = ctx.image_views.get_ref(view).unwrap();
-                let img = ctx.images.get_mut_ref(v.img).unwrap();
+                let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
+                let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
                 let base = v.range.base_mip_level as usize;
                 let count = v.range.level_count as usize;
                 for i in base..base + count {
@@ -884,8 +930,7 @@ impl CommandSink for CommandQueue {
                 .ctx_ref()
                 .render_passes
                 .get_ref(cmd.render_pass)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             (
                 rp.raw,
                 rp.fb,
@@ -906,8 +951,7 @@ impl CommandSink for CommandQueue {
                     .ctx_ref()
                     .gfx_pipeline_layouts
                     .get_ref(layout_handle)
-                    .ok_or(GPUError::SlotError())
-                    .unwrap();
+                    .ok_or(GPUError::SlotError())?;
                 layout.sample_count
             };
 
@@ -925,8 +969,7 @@ impl CommandSink for CommandQueue {
                 .ctx_ref()
                 .render_passes
                 .get_ref(pipeline_rp_layout)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
 
             let pipeline_subpass_samples = pipeline_rp
                 .subpass_samples
@@ -959,9 +1002,13 @@ impl CommandSink for CommandQueue {
         self.curr_attachments.clear();
 
         for view in cmd.color_attachments.iter().flatten() {
-            let handle = self.ctx_ref().get_or_create_image_view(view).unwrap();
+            let handle = self.ctx_ref().get_or_create_image_view(view)?;
             let vk_view = {
-                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                let v = self
+                    .ctx_ref()
+                    .image_views
+                    .get_ref(handle)
+                    .ok_or(GPUError::SlotError())?;
                 v.view
             };
             attachments_vk.push(vk_view);
@@ -970,9 +1017,13 @@ impl CommandSink for CommandQueue {
         }
 
         if let Some(depth) = cmd.depth_attachment {
-            let handle = self.ctx_ref().get_or_create_image_view(&depth).unwrap();
+            let handle = self.ctx_ref().get_or_create_image_view(&depth)?;
             let vk_view = {
-                let v = self.ctx_ref().image_views.get_ref(handle).unwrap();
+                let v = self
+                    .ctx_ref()
+                    .image_views
+                    .get_ref(handle)
+                    .ok_or(GPUError::SlotError())?;
                 v.view
             };
             attachments_vk.push(vk_view);
@@ -985,7 +1036,10 @@ impl CommandSink for CommandQueue {
         {
             let ctx = self.ctx_ref();
             for (view_handle, _) in &self.curr_attachments {
-                let v = ctx.image_views.get_ref(*view_handle).unwrap();
+                let v = ctx
+                    .image_views
+                    .get_ref(*view_handle)
+                    .ok_or(GPUError::SlotError())?;
                 let info = ctx.image_info(v.img);
                 attachment_min_width = attachment_min_width.min(info.dim[0]);
                 attachment_min_height = attachment_min_height.min(info.dim[1]);
@@ -999,16 +1053,17 @@ impl CommandSink for CommandQueue {
 
         if target_width != rp_width || target_height != rp_height {
             let ctx = self.ctx_ref();
-            let new_fb = ctx
-                .create_imageless_framebuffer(
-                    rp_raw,
-                    &attachment_formats,
-                    target_width,
-                    target_height,
-                )
-                .unwrap();
+            let new_fb = ctx.create_imageless_framebuffer(
+                rp_raw,
+                &attachment_formats,
+                target_width,
+                target_height,
+            )?;
             {
-                let rp_mut = ctx.render_passes.get_mut_ref(cmd.render_pass).unwrap();
+                let rp_mut = ctx
+                    .render_passes
+                    .get_mut_ref(cmd.render_pass)
+                    .ok_or(GPUError::SlotError())?;
                 unsafe {
                     ctx.device.destroy_framebuffer(rp_mut.fb, None);
                 }
@@ -1023,8 +1078,11 @@ impl CommandSink for CommandQueue {
 
         for (view_handle, layout) in &self.curr_attachments {
             let ctx = self.ctx_ref();
-            let v = ctx.image_views.get_ref(*view_handle).unwrap();
-            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let v = ctx
+                .image_views
+                .get_ref(*view_handle)
+                .ok_or(GPUError::SlotError())?;
+            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
             let base = v.range.base_mip_level as usize;
             let count = v.range.level_count as usize;
             for i in base..base + count {
@@ -1066,12 +1124,14 @@ impl CommandSink for CommandQueue {
                 vk::SubpassContents::INLINE,
             );
 
-            let _ = self.bind_graphics_pipeline(cmd.pipeline);
+            self.bind_graphics_pipeline(cmd.pipeline)?;
             self.update_last_access(vk::PipelineStageFlags::NONE, vk::AccessFlags::empty());
         }
+
+        Ok(())
     }
 
-    fn end_drawing(&mut self, _pass: &crate::gpu::driver::command::EndDrawing) {
+    fn end_drawing(&mut self, _pass: &crate::gpu::driver::command::EndDrawing) -> Result<()> {
         unsafe { (*self.ctx).device.cmd_end_render_pass(self.cmd_buf) };
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
@@ -1079,8 +1139,8 @@ impl CommandSink for CommandQueue {
         let attachments = std::mem::take(&mut self.curr_attachments);
         for (view, layout) in attachments {
             let ctx = self.ctx_ref();
-            let v = ctx.image_views.get_ref(view).unwrap();
-            let img = ctx.images.get_mut_ref(v.img).unwrap();
+            let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
+            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
             let base = v.range.base_mip_level as usize;
             let count = v.range.level_count as usize;
             for i in base..base + count {
@@ -1093,35 +1153,30 @@ impl CommandSink for CommandQueue {
         self.curr_rp = None;
         self.curr_subpass = None;
         self.curr_pipeline = None;
+
+        Ok(())
     }
 
-    fn next_subpass(&mut self, _cmd: &crate::gpu::driver::command::NextSubpass) {
+    fn next_subpass(&mut self, _cmd: &crate::gpu::driver::command::NextSubpass) -> Result<()> {
         let curr = self.curr_subpass.unwrap_or(0);
-        let rp = self
-            .curr_rp
-            .ok_or_else(|| GPUError::InvalidSubpass {
-                subpass: curr as u32,
-                available: 0,
-            })
-            .unwrap();
+        let rp = self.curr_rp.ok_or_else(|| GPUError::InvalidSubpass {
+            subpass: curr as u32,
+            available: 0,
+        })?;
 
         let rp_obj = self
             .ctx_ref()
             .render_passes
             .get_ref(rp)
-            .ok_or(GPUError::SlotError())
-            .unwrap();
+            .ok_or(GPUError::SlotError())?;
 
         let next = curr + 1;
         let available = rp_obj.subpass_samples.len();
         if next >= available {
-            panic!(
-                "{}",
-                GPUError::InvalidSubpass {
-                    subpass: next as u32,
-                    available: available as u32,
-                }
-            );
+            return Err(GPUError::InvalidSubpass {
+                subpass: next as u32,
+                available: available as u32,
+            });
         }
 
         unsafe {
@@ -1134,45 +1189,49 @@ impl CommandSink for CommandQueue {
         self.curr_pipeline = None;
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+
+        Ok(())
     }
 
-    fn bind_graphics_pipeline(&mut self, cmd: &crate::gpu::driver::command::BindGraphicsPipeline) {
-        let _ = self.bind_graphics_pipeline(cmd.pipeline);
+    fn bind_graphics_pipeline(
+        &mut self,
+        cmd: &crate::gpu::driver::command::BindGraphicsPipeline,
+    ) -> Result<()> {
+        self.bind_graphics_pipeline(cmd.pipeline)
     }
 
     fn update_graphics_pipeline_state(
         &mut self,
         cmd: &crate::gpu::driver::command::GraphicsPipelineStateUpdate,
-    ) {
+    ) -> Result<()> {
         self.apply_graphics_pipeline_state_update(cmd);
+        Ok(())
     }
 
-    fn blit_image(&mut self, cmd: &crate::gpu::driver::command::BlitImage) {
+    fn blit_image(&mut self, cmd: &crate::gpu::driver::command::BlitImage) -> Result<()> {
         self.ensure_image_state(
             cmd.src,
             cmd.src_range,
             UsageBits::COPY_SRC,
             Layout::TransferSrc,
-        );
+        )?;
         self.ensure_image_state(
             cmd.dst,
             cmd.dst_range,
             UsageBits::COPY_DST,
             Layout::TransferDst,
-        );
+        )?;
         unsafe {
             let src_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.src)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let dst_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.dst)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let src_info = self.ctx_ref().image_info(cmd.src);
             let dst_info = self.ctx_ref().image_info(cmd.dst);
             let regions = [vk::ImageBlit {
@@ -1231,35 +1290,34 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::TRANSFER_WRITE,
             );
         }
+        Ok(())
     }
 
-    fn resolve_image(&mut self, cmd: &crate::gpu::driver::command::MSImageResolve) {
+    fn resolve_image(&mut self, cmd: &crate::gpu::driver::command::MSImageResolve) -> Result<()> {
         self.ensure_image_state(
             cmd.src,
             cmd.src_range,
             UsageBits::COPY_SRC,
             Layout::TransferSrc,
-        );
+        )?;
         self.ensure_image_state(
             cmd.dst,
             cmd.dst_range,
             UsageBits::COPY_DST,
             Layout::TransferDst,
-        );
+        )?;
 
         unsafe {
             let src_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.src)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let dst_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.dst)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let src_info = self.ctx_ref().image_info(cmd.src);
             let dst_info = self.ctx_ref().image_info(cmd.dst);
 
@@ -1376,12 +1434,17 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::TRANSFER_WRITE,
             );
         }
+        Ok(())
     }
 
-    fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) {
+    fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) -> Result<()> {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
-        let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
+        let v = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.vertices)
+            .ok_or(GPUError::SlotError())?;
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
                 self.cmd_buf,
@@ -1391,17 +1454,25 @@ impl CommandSink for CommandQueue {
             );
         }
         if let Some(pipe) = self.curr_pipeline {
-            let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
+            let p = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(pipe)
+                .ok_or(GPUError::SlotError())?;
             let l = self
                 .ctx_ref()
                 .gfx_pipeline_layouts
                 .get_ref(p.layout)
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
 
             unsafe {
                 for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
-                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let bt_data = self
+                            .ctx_ref()
+                            .bind_tables
+                            .get_ref(bt)
+                            .ok_or(GPUError::SlotError())?;
                         let offsets = cmd
                             .dynamic_buffers
                             .get(index)
@@ -1430,14 +1501,23 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
-    fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) {
+    fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) -> Result<()> {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
-        let v = self.ctx_ref().buffers.get_ref(cmd.vertices).unwrap();
-        let i = self.ctx_ref().buffers.get_ref(cmd.indices).unwrap();
+        let v = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.vertices)
+            .ok_or(GPUError::SlotError())?;
+        let i = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.indices)
+            .ok_or(GPUError::SlotError())?;
         unsafe {
             self.ctx_ref().device.cmd_bind_vertex_buffers(
                 self.cmd_buf,
@@ -1454,17 +1534,25 @@ impl CommandSink for CommandQueue {
             );
         }
         if let Some(pipe) = self.curr_pipeline {
-            let p = self.ctx_ref().gfx_pipelines.get_ref(pipe).unwrap();
+            let p = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(pipe)
+                .ok_or(GPUError::SlotError())?;
             let l = self
                 .ctx_ref()
                 .gfx_pipeline_layouts
                 .get_ref(p.layout)
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
 
             unsafe {
                 for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
-                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let bt_data = self
+                            .ctx_ref()
+                            .bind_tables
+                            .get_ref(bt)
+                            .ok_or(GPUError::SlotError())?;
                         let offsets = cmd
                             .dynamic_buffers
                             .get(index)
@@ -1498,31 +1586,34 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
             );
         }
+        Ok(())
     }
 
-    fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) {
-        self.ensure_binding_states(&cmd.bind_tables);
+    fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) -> Result<()> {
+        self.ensure_binding_states(&cmd.bind_tables)?;
         unsafe {
-            self.bind_compute_pipeline(cmd.pipeline).unwrap();
+            self.bind_compute_pipeline(cmd.pipeline)?;
             let layout_handle = self
                 .ctx_ref()
                 .compute_pipelines
                 .get_ref(cmd.pipeline)
-                .ok_or(GPUError::SlotError())
-                .unwrap()
+                .ok_or(GPUError::SlotError())?
                 .layout;
 
             let layout = self
                 .ctx_ref()
                 .compute_pipeline_layouts
                 .get_ref(layout_handle)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
 
             unsafe {
                 for (index, table) in cmd.bind_tables.iter().enumerate() {
                     if let Some(bt) = *table {
-                        let bt_data = self.ctx_ref().bind_tables.get_ref(bt).unwrap();
+                        let bt_data = self
+                            .ctx_ref()
+                            .bind_tables
+                            .get_ref(bt)
+                            .ok_or(GPUError::SlotError())?;
                         let offsets = cmd
                             .dynamic_buffers
                             .get(index)
@@ -1549,14 +1640,23 @@ impl CommandSink for CommandQueue {
                 );
             }
         }
+        Ok(())
     }
 
-    fn copy_buffer(&mut self, cmd: &crate::gpu::driver::command::CopyBuffer) {
-        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
-        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
+    fn copy_buffer(&mut self, cmd: &crate::gpu::driver::command::CopyBuffer) -> Result<()> {
+        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC)?;
+        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST)?;
         unsafe {
-            let src = self.ctx_ref().buffers.get_ref(cmd.src).unwrap();
-            let dst = self.ctx_ref().buffers.get_ref(cmd.dst).unwrap();
+            let src = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.src)
+                .ok_or(GPUError::SlotError())?;
+            let dst = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.dst)
+                .ok_or(GPUError::SlotError())?;
             self.ctx_ref().device.cmd_copy_buffer(
                 self.cmd_buf,
                 src.buf,
@@ -1576,18 +1676,21 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
-    fn copy_buffer_to_image(&mut self, cmd: &crate::gpu::driver::command::CopyBufferImage) {
-        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC);
-        self.ensure_image_state(cmd.dst, cmd.range, UsageBits::COPY_DST, Layout::TransferDst);
+    fn copy_buffer_to_image(
+        &mut self,
+        cmd: &crate::gpu::driver::command::CopyBufferImage,
+    ) -> Result<()> {
+        self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC)?;
+        self.ensure_image_state(cmd.dst, cmd.range, UsageBits::COPY_DST, Layout::TransferDst)?;
         unsafe {
             let img_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.dst)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let img_info = self.ctx_ref().image_info(cmd.dst);
             let mip = cmd.range.base_mip as usize;
             let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);
@@ -1596,8 +1699,7 @@ impl CommandSink for CommandQueue {
                 self.ctx_ref()
                     .buffers
                     .get_ref(cmd.src)
-                    .ok_or(GPUError::SlotError())
-                    .unwrap()
+                    .ok_or(GPUError::SlotError())?
                     .buf,
                 img_data.img,
                 img_data.layouts[mip],
@@ -1623,18 +1725,21 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
-    fn copy_image_to_buffer(&mut self, cmd: &crate::gpu::driver::command::CopyImageBuffer) {
-        self.ensure_image_state(cmd.src, cmd.range, UsageBits::COPY_SRC, Layout::TransferSrc);
-        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST);
+    fn copy_image_to_buffer(
+        &mut self,
+        cmd: &crate::gpu::driver::command::CopyImageBuffer,
+    ) -> Result<()> {
+        self.ensure_image_state(cmd.src, cmd.range, UsageBits::COPY_SRC, Layout::TransferSrc)?;
+        self.ensure_buffer_state(cmd.dst, UsageBits::COPY_DST)?;
         unsafe {
             let img_data = self
                 .ctx_ref()
                 .images
                 .get_ref(cmd.src)
-                .ok_or(GPUError::SlotError())
-                .unwrap();
+                .ok_or(GPUError::SlotError())?;
             let img_info = self.ctx_ref().image_info(cmd.src);
             let mip = cmd.range.base_mip as usize;
 
@@ -1645,10 +1750,9 @@ impl CommandSink for CommandQueue {
                 img_data.layouts[mip],
                 self.ctx_ref()
                     .buffers
-                .get_ref(cmd.dst)
-                .ok_or(GPUError::SlotError())
-                .unwrap()
-                .buf,
+                    .get_ref(cmd.dst)
+                    .ok_or(GPUError::SlotError())?
+                    .buf,
                 &[vk::BufferImageCopy {
                     buffer_offset: cmd.dst_offset as u64,
                     image_subresource: vk::ImageSubresourceLayers {
@@ -1671,25 +1775,34 @@ impl CommandSink for CommandQueue {
                 vk::AccessFlags::MEMORY_WRITE,
             );
         }
+        Ok(())
     }
 
-    fn copy_image(&mut self, _cmd: &crate::gpu::driver::command::CopyImage) {
+    fn copy_image(&mut self, _cmd: &crate::gpu::driver::command::CopyImage) -> Result<()> {
         todo!()
     }
 
-    fn transition_image(&mut self, cmd: &crate::gpu::driver::command::TransitionImage) {
-        self.ensure_image_state(cmd.image, cmd.range, cmd.usage, cmd.layout);
+    fn transition_image(
+        &mut self,
+        cmd: &crate::gpu::driver::command::TransitionImage,
+    ) -> Result<()> {
+        self.ensure_image_state(cmd.image, cmd.range, cmd.usage, cmd.layout)?;
+        Ok(())
     }
 
-    fn prepare_buffer(&mut self, cmd: &crate::gpu::driver::command::PrepareBuffer) {
-        self.ensure_buffer_state_on_queue(cmd.buffer, cmd.usage, cmd.queue);
+    fn prepare_buffer(&mut self, cmd: &crate::gpu::driver::command::PrepareBuffer) -> Result<()> {
+        self.ensure_buffer_state_on_queue(cmd.buffer, cmd.usage, cmd.queue)?;
+        Ok(())
     }
 
-    fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Handle<Fence> {
-        self.submit(cmd).unwrap()
+    fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Result<Handle<Fence>> {
+        self.submit(cmd)
     }
 
-    fn debug_marker_begin(&mut self, _cmd: &crate::gpu::driver::command::DebugMarkerBegin) {
+    fn debug_marker_begin(
+        &mut self,
+        _cmd: &crate::gpu::driver::command::DebugMarkerBegin,
+    ) -> Result<()> {
         // Debug markers are not directly supported in Vulkan, so we need to use a memory barrier
         unsafe {
             self.ctx_ref().device.cmd_pipeline_barrier(
@@ -1702,9 +1815,13 @@ impl CommandSink for CommandQueue {
                 &[],
             )
         };
+        Ok(())
     }
 
-    fn debug_marker_end(&mut self, _cmd: &crate::gpu::driver::command::DebugMarkerEnd) {
+    fn debug_marker_end(
+        &mut self,
+        _cmd: &crate::gpu::driver::command::DebugMarkerEnd,
+    ) -> Result<()> {
         unsafe {
             self.ctx_ref().device.cmd_pipeline_barrier(
                 self.cmd_buf,
@@ -1716,5 +1833,6 @@ impl CommandSink for CommandQueue {
                 &[],
             )
         };
+        Ok(())
     }
 }
