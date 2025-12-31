@@ -131,7 +131,7 @@ pub struct Draw {
 }
 
 #[repr(C)]
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct DrawIndexed {
     /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
