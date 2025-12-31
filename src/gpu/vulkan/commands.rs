@@ -157,7 +157,9 @@ fn validate_render_pass_compatibility(
             });
         }
         (None, Some(_)) | (Some(_), None) => {
-            return Err(GPUError::LibraryError(format!("Pipeline/subpass depth format mismatch.")));
+            return Err(GPUError::LibraryError(format!(
+                "Pipeline/subpass depth format mismatch."
+            )));
         }
         _ => {}
     }
@@ -174,7 +176,9 @@ fn validate_render_pass_compatibility(
             });
         }
         (None, Some(_)) | (Some(_), None) => {
-            return Err(GPUError::LibraryError(format!("Pipeline/subpass depth sample mismatch.")));
+            return Err(GPUError::LibraryError(format!(
+                "Pipeline/subpass depth sample mismatch."
+            )));
         }
         _ => {}
     }
@@ -289,7 +293,9 @@ impl CommandQueue {
 
     /// Bind a graphics pipeline for subsequent draw calls.
     fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
-        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError(format!("Trying to bind graphics pipeline without active bound render pass.")))?;
+        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError(format!(
+            "Trying to bind graphics pipeline without active bound render pass."
+        )))?;
         if self.curr_pipeline == Some(pipeline) {
             return Ok(());
         }
@@ -1444,18 +1450,21 @@ impl CommandSink for CommandQueue {
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) -> Result<()> {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
-        let v = self
-            .ctx_ref()
-            .buffers
-            .get_ref(cmd.vertices)
-            .ok_or(GPUError::SlotError())?;
-        unsafe {
-            self.ctx_ref().device.cmd_bind_vertex_buffers(
-                self.cmd_buf,
-                0,
-                &[v.buf],
-                &[v.offset as u64],
-            );
+
+        if cmd.vertices.valid() {
+            let v = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
+            unsafe {
+                self.ctx_ref().device.cmd_bind_vertex_buffers(
+                    self.cmd_buf,
+                    0,
+                    &[v.buf],
+                    &[v.offset as u64],
+                );
+            }
         }
         if let Some(pipe) = self.curr_pipeline {
             let p = self
@@ -1512,30 +1521,34 @@ impl CommandSink for CommandQueue {
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
-        let v = self
-            .ctx_ref()
-            .buffers
-            .get_ref(cmd.vertices)
-            .ok_or(GPUError::SlotError())?;
-        let i = self
-            .ctx_ref()
-            .buffers
-            .get_ref(cmd.indices)
-            .ok_or(GPUError::SlotError())?;
-        unsafe {
-            self.ctx_ref().device.cmd_bind_vertex_buffers(
-                self.cmd_buf,
-                0,
-                &[v.buf],
-                &[v.offset as u64],
-            );
+        //
 
-            self.ctx_ref().device.cmd_bind_index_buffer(
-                self.cmd_buf,
-                i.buf,
-                i.offset as u64,
-                vk::IndexType::UINT32,
-            );
+        if cmd.vertices.valid() && cmd.indices.valid() {
+            let v = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
+            let i = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.indices)
+                .ok_or(GPUError::SlotError())?;
+            unsafe {
+                self.ctx_ref().device.cmd_bind_vertex_buffers(
+                    self.cmd_buf,
+                    0,
+                    &[v.buf],
+                    &[v.offset as u64],
+                );
+
+                self.ctx_ref().device.cmd_bind_index_buffer(
+                    self.cmd_buf,
+                    i.buf,
+                    i.offset as u64,
+                    vk::IndexType::UINT32,
+                );
+            }
         }
         if let Some(pipe) = self.curr_pipeline {
             let p = self
