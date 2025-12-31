@@ -717,6 +717,8 @@ pub enum BindTableVariableType {
     DynamicStorage,
     Storage,
     SampledImage,
+    Image,
+    Sampler,
     StorageImage,
 }
 
@@ -858,6 +860,8 @@ pub(crate) fn resource_var_type(resource: &ShaderResource) -> BindTableVariableT
         ShaderResource::DynamicStorage(_) => BindTableVariableType::DynamicStorage,
         ShaderResource::StorageBuffer(_) => BindTableVariableType::Storage,
         ShaderResource::SampledImage(_, _) => BindTableVariableType::SampledImage,
+        ShaderResource::Image(_) => BindTableVariableType::Image,
+        ShaderResource::Sampler(_) => BindTableVariableType::Sampler,
     }
 }
 
@@ -1008,6 +1012,54 @@ mod layout_validation_tests {
             &invalid_bindings,
         ));
     }
+
+    #[test]
+    fn accepts_separate_image_and_sampler_bindings() {
+        let layout_vars = vec![
+            BindTableVariable {
+                var_type: BindTableVariableType::Image,
+                binding: 0,
+                count: 1,
+            },
+            BindTableVariable {
+                var_type: BindTableVariableType::Sampler,
+                binding: 1,
+                count: 2,
+            },
+        ];
+
+        let bindings = [
+            IndexedBindingInfo {
+                binding: 0,
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::Image(ImageView {
+                        img: Handle::new(2, 0),
+                        range: Default::default(),
+                        aspect: AspectMask::Color,
+                    }),
+                }],
+            },
+            IndexedBindingInfo {
+                binding: 1,
+                resources: &[
+                    IndexedResource {
+                        slot: 0,
+                        resource: ShaderResource::Sampler(Handle::new(3, 0)),
+                    },
+                    IndexedResource {
+                        slot: 1,
+                        resource: ShaderResource::Sampler(Handle::new(4, 0)),
+                    },
+                ],
+            },
+        ];
+
+        assert!(indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &bindings
+        ));
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -1041,6 +1093,8 @@ pub enum ShaderResource {
     Dynamic(DynamicAllocatorState),
     DynamicStorage(DynamicAllocatorState),
     SampledImage(ImageView, Handle<Sampler>),
+    Image(ImageView),
+    Sampler(Handle<Sampler>),
 }
 
 #[derive(Debug, Clone, Hash)]
