@@ -2183,6 +2183,8 @@ impl VulkanContext {
                     BindTableVariableType::SampledImage => {
                         vk::DescriptorType::COMBINED_IMAGE_SAMPLER
                     }
+                    BindTableVariableType::Image => vk::DescriptorType::SAMPLED_IMAGE,
+                    BindTableVariableType::Sampler => vk::DescriptorType::SAMPLER,
                     BindTableVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
                     BindTableVariableType::DynamicStorage => {
                         vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
@@ -2207,7 +2209,10 @@ impl VulkanContext {
                     BindTableVariableType::DynamicStorage | BindTableVariableType::Storage => {
                         supports_storage_uab
                     }
-                    BindTableVariableType::SampledImage => supports_sampled_uab,
+                    BindTableVariableType::SampledImage | BindTableVariableType::Image => {
+                        supports_sampled_uab
+                    }
+                    BindTableVariableType::Sampler => false,
                     BindTableVariableType::StorageImage => supports_storage_image_uab,
                 };
                 let binding_supports_uab = false && binding_supports_uab;
@@ -2484,6 +2489,46 @@ impl VulkanContext {
                             .dst_set(descriptor_set)
                             .dst_binding(binding_info.binding)
                             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                            .dst_array_element(res.slot)
+                            .image_info(&image_infos[image_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::Image(image_view) => {
+                        let handle = self.get_or_create_image_view(image_view)?;
+                        let image = self.image_views.get_ref(handle).unwrap();
+
+                        let image_info = vk::DescriptorImageInfo::builder()
+                            .image_view(image.view)
+                            .image_layout(vk::ImageLayout::GENERAL)
+                            .build();
+
+                        image_infos.push(image_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                            .dst_array_element(res.slot)
+                            .image_info(&image_infos[image_infos.len() - 1..])
+                            .build();
+
+                        write_descriptor_sets.push(write_descriptor_set);
+                    }
+                    ShaderResource::Sampler(sampler_handle) => {
+                        let sampler = self.samplers.get_ref(*sampler_handle).unwrap();
+
+                        let image_info = vk::DescriptorImageInfo::builder()
+                            .sampler(sampler.sampler)
+                            .build();
+
+                        image_infos.push(image_info);
+
+                        let write_descriptor_set = vk::WriteDescriptorSet::builder()
+                            .dst_set(descriptor_set)
+                            .dst_binding(binding_info.binding)
+                            .descriptor_type(vk::DescriptorType::SAMPLER)
                             .dst_array_element(res.slot)
                             .image_info(&image_infos[image_infos.len() - 1..])
                             .build();
