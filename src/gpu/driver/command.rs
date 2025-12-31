@@ -69,13 +69,14 @@ unsafe impl Zeroable for StoreOp {}
 unsafe impl Pod for StoreOp {}
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct BeginRenderPass {
     pub viewport: Viewport,
     pub render_pass: Handle<RenderPass>,
     pub color_attachments: [Option<ImageView>; 4],
     pub depth_attachment: Option<ImageView>,
     pub clear_values: [Option<ClearValue>; 4],
+    pub depth_clear: Option<ClearValue>,
 }
 
 #[repr(C)]

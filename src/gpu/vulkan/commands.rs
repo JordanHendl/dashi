@@ -783,12 +783,16 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let clears: Vec<vk::ClearValue> = cmd
+        let mut clears: Vec<vk::ClearValue> = cmd
             .clear_values
             .iter()
             .flatten()
             .map(clear_value_to_vk)
             .collect();
+        
+        if let Some(dc) = cmd.depth_clear {
+            clears.push(clear_value_to_vk(&dc));
+        }
 
         unsafe {
             self.ctx_ref().device.cmd_begin_render_pass(
