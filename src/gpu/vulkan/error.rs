@@ -25,7 +25,7 @@ impl fmt::Display for VulkanError {
 pub enum GPUError {
     VulkanError(VulkanError),
     LoadingError(ash::LoadingError),
-    LibraryError(),
+    LibraryError(String),
     SlotError(),
     HeadlessDisplayNotSupported,
     UnsupportedFormat(vk::Format),
@@ -81,7 +81,7 @@ impl fmt::Display for GPUError {
         match self {
             GPUError::VulkanError(e) => write!(f, "{}", e),
             GPUError::LoadingError(e) => write!(f, "{}", e),
-            GPUError::LibraryError() => write!(f, "Library could not be loaded"),
+            GPUError::LibraryError(msg) => write!(f, "Library failed to initialize. Error: {}", msg),
             GPUError::SlotError() => write!(f, "Slot Error"),
             GPUError::HeadlessDisplayNotSupported => write!(f, "Headless Display not supported"),
             GPUError::UnsupportedFormat(format) => write!(f, "Format {:?} not supported", format),

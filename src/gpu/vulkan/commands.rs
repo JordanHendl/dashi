@@ -100,7 +100,11 @@ fn validate_render_pass_compatibility(
     }
 
     if pipeline.subpass_formats.color_formats.len() != subpass_formats.color_formats.len() {
-        return Err(GPUError::LibraryError());
+        return Err(GPUError::LibraryError(format!(
+            "Pipeline subpass formats do not match actual subpass formats ({} -> {})",
+            pipeline.subpass_formats.color_formats.len(),
+            subpass_formats.color_formats.len()
+        )));
     }
 
     for (attachment_idx, (expected, actual)) in pipeline
@@ -153,7 +157,7 @@ fn validate_render_pass_compatibility(
             });
         }
         (None, Some(_)) | (Some(_), None) => {
-            return Err(GPUError::LibraryError());
+            return Err(GPUError::LibraryError(format!("Pipeline/subpass depth format mismatch.")));
         }
         _ => {}
     }
@@ -170,7 +174,7 @@ fn validate_render_pass_compatibility(
             });
         }
         (None, Some(_)) | (Some(_), None) => {
-            return Err(GPUError::LibraryError());
+            return Err(GPUError::LibraryError(format!("Pipeline/subpass depth sample mismatch.")));
         }
         _ => {}
     }
@@ -285,7 +289,7 @@ impl CommandQueue {
 
     /// Bind a graphics pipeline for subsequent draw calls.
     fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
-        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError())?;
+        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError(format!("Trying to bind graphics pipeline without active bound render pass.")))?;
         if self.curr_pipeline == Some(pipeline) {
             return Ok(());
         }
@@ -834,7 +838,7 @@ impl CommandSink for CommandQueue {
             .flatten()
             .map(clear_value_to_vk)
             .collect();
-        
+
         if let Some(dc) = cmd.depth_clear {
             clears.push(clear_value_to_vk(&dc));
         }

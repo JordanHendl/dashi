@@ -1483,10 +1483,7 @@ impl VulkanContext {
     }
 
     pub fn image_info(&self, image: Handle<Image>) -> &ImageInfo<'static> {
-        let img = self
-            .images
-            .get_ref(image)
-            .expect("Invalid image handle");
+        let img = self.images.get_ref(image).expect("Invalid image handle");
         let info = self
             .image_infos
             .get_ref(img.info_handle)
@@ -1503,7 +1500,8 @@ impl VulkanContext {
         let buffer_size = buf.size as u64;
 
         let info = self.allocator.get_allocation_info(&buf.alloc);
-        self.allocator.flush_allocation(&buf.alloc, info.offset as usize, info.size as usize)?;
+        self.allocator
+            .flush_allocation(&buf.alloc, info.offset as usize, info.size as usize)?;
         Ok(())
     }
 
@@ -1624,17 +1622,19 @@ impl VulkanContext {
         let ctx_ptr = self as *mut _;
         self.gfx_pool.bind_context(ctx_ptr);
         let mut list = self.gfx_pool.begin("", false)?;
-        let mut cmd = CommandStream::new().begin().copy_buffer_to_image(&CopyBufferImage {
-            src: staging,
-            dst: image,
-            range: SubresourceRange {
-                base_mip: 0,
-                level_count: 1,
-                base_layer: 0,
-                layer_count: 1,
-            },
-            ..Default::default()
-        });
+        let mut cmd = CommandStream::new()
+            .begin()
+            .copy_buffer_to_image(&CopyBufferImage {
+                src: staging,
+                dst: image,
+                range: SubresourceRange {
+                    base_mip: 0,
+                    level_count: 1,
+                    base_layer: 0,
+                    layer_count: 1,
+                },
+                ..Default::default()
+            });
 
         if info.mip_levels > 1 {
             for i in 0..info.mip_levels - 1 {
@@ -1750,15 +1750,13 @@ impl VulkanContext {
         cpy.offset += offset;
         cpy.suballocated = true;
         let parent_info = self.buffer_info(parent);
-        let info_handle = match self
-            .buffer_infos
-            .insert(BufferInfoRecord::new(&BufferInfo {
-                debug_name: parent_info.debug_name,
-                byte_size: size,
-                visibility: parent_info.visibility,
-                usage: parent_info.usage,
-                initial_data: None,
-            })) {
+        let info_handle = match self.buffer_infos.insert(BufferInfoRecord::new(&BufferInfo {
+            debug_name: parent_info.debug_name,
+            byte_size: size,
+            visibility: parent_info.visibility,
+            usage: parent_info.usage,
+            initial_data: None,
+        })) {
             Some(handle) => handle,
             None => return None,
         };
@@ -1832,10 +1830,7 @@ impl VulkanContext {
     }
 
     pub fn buffer_info(&self, buffer: Handle<Buffer>) -> &BufferInfo<'static> {
-        let buf = self
-            .buffers
-            .get_ref(buffer)
-            .expect("Invalid buffer handle");
+        let buf = self.buffers.get_ref(buffer).expect("Invalid buffer handle");
         let info = self
             .buffer_infos
             .get_ref(buf.info_handle)
@@ -3364,11 +3359,19 @@ impl VulkanContext {
         }
 
         if info.attachment_formats.len() != info.subpass_samples.color_samples.len() {
-            return Err(GPUError::LibraryError());
+            return Err(GPUError::LibraryError(format!(
+                "attachment formats differ between info and subpass_samples. ({} vs {})",
+                info.attachment_formats.len(),
+                info.subpass_samples.color_samples.len()
+            )));
         }
 
         if info.depth_format.is_some() != info.subpass_samples.depth_sample.is_some() {
-            return Err(GPUError::LibraryError());
+            return Err(GPUError::LibraryError(format!(
+                "depth format mismatch between pipeline and subpass ({} vs {})",
+                info.depth_format.is_some(),
+                info.subpass_samples.depth_sample.is_some()
+            )));
         }
 
         let mut attachments = Vec::with_capacity(info.attachment_formats.len() + 1);
@@ -3408,7 +3411,7 @@ impl VulkanContext {
             let depth_samples = info
                 .subpass_samples
                 .depth_sample
-                .ok_or(GPUError::LibraryError())?;
+                .ok_or(GPUError::LibraryError(format!("Depth format active, but did not provide any depth sample!")))?;
             let depth_attachment = vk::AttachmentDescription {
                 format: lib_to_vk_image_format(&depth_format),
                 samples: convert_sample_count(depth_samples),

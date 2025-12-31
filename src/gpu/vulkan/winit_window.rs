@@ -17,7 +17,7 @@ pub(super) fn create_window(
         .with_inner_size(PhysicalSize::new(info.size[0], info.size[1]))
         .with_resizable(info.resizable)
         .build(&event_loop)
-        .map_err(|_| GPUError::LibraryError())?;
+        .map_err(|_| GPUError::LibraryError(format!("failed to initialize winit window! Params: {:?}", info)))?;
 
     let surface = unsafe { ash_window::create_surface(entry, instance, &window, None)? };
 
