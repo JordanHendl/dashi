@@ -1,4 +1,4 @@
-use crate::gpu::vulkan::{ContextInfo, ContextLimits, GPUError, Result};
+use crate::gpu::{ContextInfo, ContextLimits, GPUError, Result};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::vulkan::VulkanContext;

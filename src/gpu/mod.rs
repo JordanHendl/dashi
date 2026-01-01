@@ -23,9 +23,13 @@ pub use context::Context;
 pub mod execution;
 pub mod driver;
 pub mod cmd;
+pub mod structs;
+pub mod builders;
+pub mod device_selector;
 pub use cmd::{
     CommandStream,
 };
+pub use builders::*;
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 

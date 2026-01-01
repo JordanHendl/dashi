@@ -19,7 +19,7 @@ use std::{
 use vk_mem::Alloc;
 
 pub mod device_selector;
-pub use device_selector::*;
+pub use crate::gpu::device_selector::*;
 pub mod structs;
 pub use structs::*;
 pub mod builders;
@@ -181,24 +181,6 @@ unsafe extern "system" fn user_debug_trampoline(
     } else {
         vk::FALSE
     }
-}
-
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
-pub struct SubpassSampleInfo {
-    pub color_samples: Vec<SampleCount>,
-    pub depth_sample: Option<SampleCount>,
-}
-
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
-pub struct SubpassAttachmentFormats {
-    pub color_formats: Vec<Format>,
-    pub depth_format: Option<Format>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct DescriptorBindingFlagsInfo {
-    pub update_after_bind: bool,
-    pub partially_bound: bool,
 }
 
 #[derive(Clone, Default)]

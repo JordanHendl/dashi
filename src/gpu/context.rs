@@ -1,6 +1,6 @@
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
-use crate::gpu::vulkan::{ContextInfo, VulkanContext};
+use crate::gpu::{ContextInfo, VulkanContext};
 use crate::{CommandQueue, Fence, QueueType, Result, SubmitInfo};
 use super::execution::CommandRing;
 

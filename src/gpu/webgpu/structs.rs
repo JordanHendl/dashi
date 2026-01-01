@@ -1,4 +1,4 @@
-use crate::gpu::vulkan::ContextLimits;
+use crate::gpu::ContextLimits;
 
 #[derive(Debug, Clone, Copy)]
 pub struct WebGpuLimits {
