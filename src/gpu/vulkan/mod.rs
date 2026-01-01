@@ -1116,6 +1116,7 @@ impl VulkanContext {
             img,
             range: Default::default(),
             aspect: Default::default(),
+            view_type: ImageViewType::Type2D,
         };
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
@@ -1368,6 +1369,23 @@ impl VulkanContext {
             .image_infos
             .get_ref(img.info_handle)
             .ok_or(GPUError::SlotError())?;
+        if info.view_type == ImageViewType::Cube {
+            if !img_info.info.cube_compatible {
+                return Err(GPUError::LibraryError(
+                    "Cube image views require cube_compatible ImageInfo".to_string(),
+                ));
+            }
+            if img_info.info.dim[0] != img_info.info.dim[1] || img_info.info.dim[2] != 1 {
+                return Err(GPUError::LibraryError(
+                    "Cube image views require square 2D images".to_string(),
+                ));
+            }
+            if info.range.layer_count % 6 != 0 {
+                return Err(GPUError::LibraryError(
+                    "Cube image views require layer_count to be a multiple of 6".to_string(),
+                ));
+            }
+        }
         let aspect: vk::ImageAspectFlags = info.aspect.into();
         let sub_range = vk::ImageSubresourceRange::builder()
             .base_array_layer(info.range.base_layer)
@@ -1383,7 +1401,7 @@ impl VulkanContext {
                     .image(img.img)
                     .format(lib_to_vk_image_format(&img_info.info.format))
                     .subresource_range(sub_range)
-                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .view_type(info.view_type.into())
                     .build(),
                 Default::default(),
             )?
@@ -1413,6 +1431,25 @@ impl VulkanContext {
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::COLOR_ATTACHMENT;
         }
 
+        if info.cube_compatible {
+            if info.dim[0] != info.dim[1] || info.dim[2] != 1 {
+                return Err(GPUError::LibraryError(
+                    "Cube compatible images must be square 2D textures".to_string(),
+                ));
+            }
+            if info.layers % 6 != 0 {
+                return Err(GPUError::LibraryError(
+                    "Cube compatible images must have layer counts in multiples of 6".to_string(),
+                ));
+            }
+        }
+
+        let image_flags = if info.cube_compatible {
+            vk::ImageCreateFlags::CUBE_COMPATIBLE
+        } else {
+            vk::ImageCreateFlags::empty()
+        };
+
         let (image, allocation) = unsafe {
             self.allocator.create_image(
                 &vk::ImageCreateInfo::builder()
@@ -1429,7 +1466,7 @@ impl VulkanContext {
                     .image_type(vk::ImageType::TYPE_2D)
                     .samples(info.samples.into())
                     .tiling(vk::ImageTiling::OPTIMAL)
-                    .flags(vk::ImageCreateFlags::empty())
+                    .flags(image_flags)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .queue_family_indices(&[0])
                     .build(),
@@ -2811,6 +2848,7 @@ impl VulkanContext {
                     layers: 1,
                     format: attachment_cfg.description.format,
                     mip_levels: 1,
+                    cube_compatible: false,
                     initial_data: None,
                     samples: attachment_cfg.description.samples,
                 };
@@ -2828,6 +2866,7 @@ impl VulkanContext {
                         img: image,
                         range: Default::default(),
                         aspect,
+                        view_type: ImageViewType::Type2D,
                     },
                     clear_value: attachment_cfg.clear_value,
                     description: attachment_cfg.description,
@@ -2845,6 +2884,7 @@ impl VulkanContext {
                     layers: 1,
                     format: depth_cfg.description.format,
                     mip_levels: 1,
+                    cube_compatible: false,
                     initial_data: None,
                     samples: depth_cfg.description.samples,
                 };
@@ -2856,6 +2896,7 @@ impl VulkanContext {
                         img: image,
                         range: Default::default(),
                         aspect: AspectMask::DepthStencil,
+                        view_type: ImageViewType::Type2D,
                     },
                     clear_value: depth_cfg.clear_value,
                     description: depth_cfg.description,
