@@ -115,6 +115,7 @@ fn yaml_render_pass_allows_overriding_attachment_views() {
         img: override_img,
         range: Default::default(),
         aspect: AspectMask::Color,
+        view_type: ImageViewType::Type2D,
     };
 
     {

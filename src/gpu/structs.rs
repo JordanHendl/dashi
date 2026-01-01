@@ -510,6 +510,7 @@ pub struct ImageInfo<'a> {
     pub format: Format,
     pub mip_levels: u32,
     pub samples: SampleCount,
+    pub cube_compatible: bool,
     pub initial_data: Option<&'a [u8]>,
 }
 
@@ -520,6 +521,7 @@ impl Hash for ImageInfo<'_> {
         self.format.hash(state);
         self.mip_levels.hash(state);
         self.samples.hash(state);
+        self.cube_compatible.hash(state);
     }
 }
 
@@ -532,6 +534,7 @@ impl<'a> Default for ImageInfo<'a> {
             format: Format::RGBA8,
             mip_levels: 1,
             samples: SampleCount::S1,
+            cube_compatible: false,
             initial_data: None,
         }
     }
@@ -551,11 +554,22 @@ pub enum AspectMask {
 unsafe impl Pod for AspectMask {}
 
 #[repr(C)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Zeroable)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum ImageViewType {
+    Type2D,
+    Cube,
+}
+
+unsafe impl Pod for ImageViewType {}
+
+#[repr(C)]
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct ImageView {
     pub img: Handle<Image>,
     pub range: SubresourceRange,
     pub aspect: AspectMask,
+    pub view_type: ImageViewType,
 }
 
 impl Default for ImageView {
@@ -564,6 +578,7 @@ impl Default for ImageView {
             img: Default::default(),
             range: Default::default(),
             aspect: Default::default(),
+            view_type: ImageViewType::Type2D,
         }
     }
 }
@@ -998,6 +1013,7 @@ mod layout_validation_tests {
                         img: Handle::new(0, 0),
                         range: Default::default(),
                         aspect: AspectMask::Color,
+                        view_type: ImageViewType::Type2D,
                     },
                     Handle::new(1, 0),
                 ),
@@ -1018,6 +1034,7 @@ mod layout_validation_tests {
                         img: Handle::new(0, 0),
                         range: Default::default(),
                         aspect: AspectMask::Color,
+                        view_type: ImageViewType::Type2D,
                     },
                     Handle::new(1, 0),
                 ),
@@ -1056,6 +1073,7 @@ mod layout_validation_tests {
                         img: Handle::new(2, 0),
                         range: Default::default(),
                         aspect: AspectMask::Color,
+                        view_type: ImageViewType::Type2D,
                     }),
                 }],
             },

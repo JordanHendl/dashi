@@ -1,8 +1,8 @@
 use ash::vk;
 use crate::{
     AspectMask, BarrierPoint, BlendFactor, BlendOp, BorderColor, ColorBlendState, DynamicState,
-    Filter, Format, GPUError, LoadOp, Rect2D, SampleCount, SamplerAddressMode, SamplerInfo,
-    SamplerMipmapMode, StoreOp, WriteMask,
+    Filter, Format, GPUError, ImageViewType, LoadOp, Rect2D, SampleCount, SamplerAddressMode,
+    SamplerInfo, SamplerMipmapMode, StoreOp, WriteMask,
 };
 
 impl From<Filter> for vk::Filter {
@@ -105,6 +105,15 @@ impl From<SamplerMipmapMode> for vk::SamplerMipmapMode {
         match mipmap_mode {
             SamplerMipmapMode::Nearest => vk::SamplerMipmapMode::NEAREST,
             SamplerMipmapMode::Linear => vk::SamplerMipmapMode::LINEAR,
+        }
+    }
+}
+
+impl From<ImageViewType> for vk::ImageViewType {
+    fn from(view_type: ImageViewType) -> Self {
+        match view_type {
+            ImageViewType::Type2D => vk::ImageViewType::TYPE_2D,
+            ImageViewType::Cube => vk::ImageViewType::CUBE,
         }
     }
 }

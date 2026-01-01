@@ -4,8 +4,8 @@ use ash::vk;
 #[cfg(feature = "dashi-openxr")]
 use super::XrSwapchainImage;
 use super::{
-    DisplayInfo, Fence, GPUError, Image, ImageInfo, ImageInfoRecord, ImageView, SampleCount,
-    Semaphore, VulkanContext, WindowBuffering, WindowInfo,
+    DisplayInfo, Fence, GPUError, Image, ImageInfo, ImageInfoRecord, ImageView, ImageViewType,
+    SampleCount, Semaphore, VulkanContext, WindowBuffering, WindowInfo,
 };
 
 #[cfg(feature = "dashi-openxr")]
@@ -341,6 +341,7 @@ impl VulkanContext {
                 format: super::vk_to_lib_image_format(surface_format.format)?,
                 mip_levels: 1,
                 samples: SampleCount::S1,
+                cube_compatible: false,
                 initial_data: None,
             };
             let info_handle = self
@@ -481,6 +482,7 @@ impl VulkanContext {
             img: dsp.images[res.0 as usize],
             range: Default::default(),
             aspect: Default::default(),
+            view_type: ImageViewType::Type2D,
         };
         Ok((view, signal_sem_handle, res.0, res.1))
     }
