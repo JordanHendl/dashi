@@ -670,40 +670,21 @@ impl CommandSink for CommandQueue {
         &mut self,
         cmd: &crate::gpu::driver::command::BeginRenderPass,
     ) -> Result<()> {
-        let rp_initial_layouts = {
-            let rp_obj = self
-                .ctx_ref()
-                .render_passes
-                .get_ref(cmd.render_pass)
-                .ok_or(GPUError::SlotError())?;
-            rp_obj.attachment_initial_layouts.clone()
-        };
-        for (index, view) in cmd.color_attachments.iter().flatten().enumerate() {
-            if rp_initial_layouts
-                .get(index)
-                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
-            {
-                self.ensure_image_state(
-                    view.img,
-                    view.range,
-                    UsageBits::RT_WRITE,
-                    Layout::General,
-                )?;
-            }
+        for view in cmd.color_attachments.iter().flatten() {
+            self.ensure_image_state(
+                view.img,
+                view.range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+            )?;
         }
         if let Some(depth) = cmd.depth_attachment {
-            let index = cmd.color_attachments.iter().flatten().count();
-            if rp_initial_layouts
-                .get(index)
-                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
-            {
-                self.ensure_image_state(
-                    depth.img,
-                    depth.range,
-                    UsageBits::DEPTH_WRITE,
-                    Layout::General,
-                )?;
-            }
+            self.ensure_image_state(
+                depth.img,
+                depth.range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            )?;
         }
         // end previous pass
         if self.curr_rp.is_some() {
@@ -906,40 +887,21 @@ impl CommandSink for CommandQueue {
     }
 
     fn begin_drawing(&mut self, cmd: &crate::gpu::driver::command::BeginDrawing) -> Result<()> {
-        let rp_initial_layouts = {
-            let rp_obj = self
-                .ctx_ref()
-                .render_passes
-                .get_ref(cmd.render_pass)
-                .ok_or(GPUError::SlotError())?;
-            rp_obj.attachment_initial_layouts.clone()
-        };
-        for (index, view) in cmd.color_attachments.iter().flatten().enumerate() {
-            if rp_initial_layouts
-                .get(index)
-                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
-            {
-                self.ensure_image_state(
-                    view.img,
-                    view.range,
-                    UsageBits::RT_WRITE,
-                    Layout::General,
-                )?;
-            }
+        for view in cmd.color_attachments.iter().flatten() {
+            self.ensure_image_state(
+                view.img,
+                view.range,
+                UsageBits::RT_WRITE,
+                Layout::ColorAttachment,
+            )?;
         }
         if let Some(depth) = cmd.depth_attachment {
-            let index = cmd.color_attachments.iter().flatten().count();
-            if rp_initial_layouts
-                .get(index)
-                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
-            {
-                self.ensure_image_state(
-                    depth.img,
-                    depth.range,
-                    UsageBits::DEPTH_WRITE,
-                    Layout::General,
-                )?;
-            }
+            self.ensure_image_state(
+                depth.img,
+                depth.range,
+                UsageBits::DEPTH_WRITE,
+                Layout::DepthStencilAttachment,
+            )?;
         }
         let (pipeline_rp_layout, pipeline_subpass, layout_handle) = {
             let gfx = self
