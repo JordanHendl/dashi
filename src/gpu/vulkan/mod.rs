@@ -190,6 +190,7 @@ pub struct RenderPass {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) attachment_formats: Vec<Format>,
+    pub(super) attachment_initial_layouts: Vec<vk::ImageLayout>,
     pub(super) subpass_samples: Vec<SubpassSampleInfo>,
     pub(super) subpass_formats: Vec<SubpassAttachmentFormats>,
 }
@@ -3045,6 +3046,7 @@ impl VulkanContext {
         let mut subpasses = Vec::with_capacity(256);
         let mut deps = Vec::with_capacity(256);
         let mut attachment_formats = Vec::with_capacity(256);
+        let mut attachment_initial_layouts = Vec::with_capacity(256);
         let mut subpass_samples = Vec::with_capacity(info.subpasses.len());
         let mut subpass_formats = Vec::with_capacity(info.subpasses.len());
         for subpass in info.subpasses {
@@ -3055,6 +3057,11 @@ impl VulkanContext {
             let mut subpass_format_info = SubpassAttachmentFormats::default();
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
+                let initial_layout = if matches!(color_attachment.load_op, LoadOp::Load) {
+                    vk::ImageLayout::GENERAL
+                } else {
+                    vk::ImageLayout::UNDEFINED
+                };
                 let attachment_desc = vk::AttachmentDescription {
                     format: lib_to_vk_image_format(&color_attachment.format),
                     samples: convert_sample_count(color_attachment.samples),
@@ -3062,7 +3069,7 @@ impl VulkanContext {
                     store_op: convert_store_op(color_attachment.store_op),
                     stencil_load_op: convert_load_op(color_attachment.stencil_load_op),
                     stencil_store_op: convert_store_op(color_attachment.stencil_store_op),
-                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    initial_layout,
                     final_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                     ..Default::default()
                 };
@@ -3075,6 +3082,7 @@ impl VulkanContext {
                 attachments.push(attachment_desc);
                 color_attachment_refs.push(attachment_ref);
                 attachment_formats.push(color_attachment.format);
+                attachment_initial_layouts.push(initial_layout);
                 subpass_sample_info
                     .color_samples
                     .push(color_attachment.samples);
@@ -3085,6 +3093,13 @@ impl VulkanContext {
 
             // Process depth-stencil attachment
             if let Some(depth_stencil_attachment) = subpass.depth_stencil_attachment {
+                let initial_layout = if matches!(depth_stencil_attachment.load_op, LoadOp::Load)
+                    || matches!(depth_stencil_attachment.stencil_load_op, LoadOp::Load)
+                {
+                    vk::ImageLayout::GENERAL
+                } else {
+                    vk::ImageLayout::UNDEFINED
+                };
                 let depth_attachment_desc = vk::AttachmentDescription {
                     format: lib_to_vk_image_format(&depth_stencil_attachment.format),
                     samples: convert_sample_count(depth_stencil_attachment.samples),
@@ -3092,7 +3107,7 @@ impl VulkanContext {
                     store_op: convert_store_op(depth_stencil_attachment.store_op),
                     stencil_load_op: convert_load_op(depth_stencil_attachment.stencil_load_op),
                     stencil_store_op: convert_store_op(depth_stencil_attachment.stencil_store_op),
-                    initial_layout: vk::ImageLayout::UNDEFINED,
+                    initial_layout,
                     final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                     ..Default::default()
                 };
@@ -3102,6 +3117,7 @@ impl VulkanContext {
                     layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 });
                 attachment_formats.push(depth_stencil_attachment.format);
+                attachment_initial_layouts.push(initial_layout);
                 subpass_sample_info.depth_sample = Some(depth_stencil_attachment.samples);
                 subpass_format_info.depth_format = Some(depth_stencil_attachment.format);
             }
@@ -3167,6 +3183,7 @@ impl VulkanContext {
                 width,
                 height,
                 attachment_formats,
+                attachment_initial_layouts,
                 subpass_samples,
                 subpass_formats,
             })
@@ -3645,6 +3662,8 @@ impl VulkanContext {
             depth_format: info.depth_format,
         };
 
+        let attachment_initial_layouts =
+            vec![vk::ImageLayout::UNDEFINED; attachment_formats.len()];
         let render_pass_handle = self
             .render_passes
             .insert(RenderPass {
@@ -3653,6 +3672,7 @@ impl VulkanContext {
                 width,
                 height,
                 attachment_formats,
+                attachment_initial_layouts,
                 subpass_samples,
                 subpass_formats,
             })
