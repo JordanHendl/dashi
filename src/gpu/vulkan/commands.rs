@@ -670,21 +670,40 @@ impl CommandSink for CommandQueue {
         &mut self,
         cmd: &crate::gpu::driver::command::BeginRenderPass,
     ) -> Result<()> {
-        for view in cmd.color_attachments.iter().flatten() {
-            self.ensure_image_state(
-                view.img,
-                view.range,
-                UsageBits::RT_WRITE,
-                Layout::ColorAttachment,
-            )?;
+        let rp_initial_layouts = {
+            let rp_obj = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(cmd.render_pass)
+                .ok_or(GPUError::SlotError())?;
+            rp_obj.attachment_initial_layouts.clone()
+        };
+        for (index, view) in cmd.color_attachments.iter().flatten().enumerate() {
+            if rp_initial_layouts
+                .get(index)
+                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
+            {
+                self.ensure_image_state(
+                    view.img,
+                    view.range,
+                    UsageBits::RT_WRITE,
+                    Layout::General,
+                )?;
+            }
         }
         if let Some(depth) = cmd.depth_attachment {
-            self.ensure_image_state(
-                depth.img,
-                depth.range,
-                UsageBits::DEPTH_WRITE,
-                Layout::DepthStencilAttachment,
-            )?;
+            let index = cmd.color_attachments.iter().flatten().count();
+            if rp_initial_layouts
+                .get(index)
+                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
+            {
+                self.ensure_image_state(
+                    depth.img,
+                    depth.range,
+                    UsageBits::DEPTH_WRITE,
+                    Layout::General,
+                )?;
+            }
         }
         // end previous pass
         if self.curr_rp.is_some() {
@@ -710,7 +729,15 @@ impl CommandSink for CommandQueue {
         self.curr_rp = Some(cmd.render_pass);
         self.curr_subpass = Some(0);
 
-        let (rp_raw, mut fb, attachment_formats, rp_subpass_samples, mut rp_width, mut rp_height) = {
+        let (
+            rp_raw,
+            mut fb,
+            attachment_formats,
+            rp_subpass_samples,
+            rp_initial_layouts,
+            mut rp_width,
+            mut rp_height,
+        ) = {
             let rp_obj = self
                 .ctx_ref()
                 .render_passes
@@ -721,6 +748,7 @@ impl CommandSink for CommandQueue {
                 rp_obj.fb,
                 rp_obj.attachment_formats.clone(),
                 rp_obj.subpass_samples.clone(),
+                rp_obj.attachment_initial_layouts.clone(),
                 rp_obj.width,
                 rp_obj.height,
             )
@@ -819,7 +847,11 @@ impl CommandSink for CommandQueue {
             rp_height = target_height;
         }
 
-        for (view_handle, layout) in &self.curr_attachments {
+        for (index, (view_handle, _)) in self.curr_attachments.iter().enumerate() {
+            let initial_layout = rp_initial_layouts
+                .get(index)
+                .copied()
+                .unwrap_or(vk::ImageLayout::UNDEFINED);
             let ctx = self.ctx_ref();
             let v = ctx
                 .image_views
@@ -830,7 +862,7 @@ impl CommandSink for CommandQueue {
             let count = v.range.level_count as usize;
             for i in base..base + count {
                 if let Some(l) = img.layouts.get_mut(i) {
-                    *l = *layout;
+                    *l = initial_layout;
                 }
             }
         }
@@ -874,21 +906,40 @@ impl CommandSink for CommandQueue {
     }
 
     fn begin_drawing(&mut self, cmd: &crate::gpu::driver::command::BeginDrawing) -> Result<()> {
-        for view in cmd.color_attachments.iter().flatten() {
-            self.ensure_image_state(
-                view.img,
-                view.range,
-                UsageBits::RT_WRITE,
-                Layout::ColorAttachment,
-            )?;
+        let rp_initial_layouts = {
+            let rp_obj = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(cmd.render_pass)
+                .ok_or(GPUError::SlotError())?;
+            rp_obj.attachment_initial_layouts.clone()
+        };
+        for (index, view) in cmd.color_attachments.iter().flatten().enumerate() {
+            if rp_initial_layouts
+                .get(index)
+                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
+            {
+                self.ensure_image_state(
+                    view.img,
+                    view.range,
+                    UsageBits::RT_WRITE,
+                    Layout::General,
+                )?;
+            }
         }
         if let Some(depth) = cmd.depth_attachment {
-            self.ensure_image_state(
-                depth.img,
-                depth.range,
-                UsageBits::DEPTH_WRITE,
-                Layout::DepthStencilAttachment,
-            )?;
+            let index = cmd.color_attachments.iter().flatten().count();
+            if rp_initial_layouts
+                .get(index)
+                .map_or(false, |layout| *layout == vk::ImageLayout::GENERAL)
+            {
+                self.ensure_image_state(
+                    depth.img,
+                    depth.range,
+                    UsageBits::DEPTH_WRITE,
+                    Layout::General,
+                )?;
+            }
         }
         let (pipeline_rp_layout, pipeline_subpass, layout_handle) = {
             let gfx = self
@@ -933,6 +984,7 @@ impl CommandSink for CommandQueue {
             rp_subpass_samples,
             rp_subpass_formats,
             attachment_formats,
+            rp_initial_layouts,
             mut rp_width,
             mut rp_height,
         ) = {
@@ -947,6 +999,7 @@ impl CommandSink for CommandQueue {
                 rp.subpass_samples.clone(),
                 rp.subpass_formats.clone(),
                 rp.attachment_formats.clone(),
+                rp.attachment_initial_layouts.clone(),
                 rp.width,
                 rp.height,
             )
@@ -1086,7 +1139,11 @@ impl CommandSink for CommandQueue {
             rp_height = target_height;
         }
 
-        for (view_handle, layout) in &self.curr_attachments {
+        for (index, (view_handle, _)) in self.curr_attachments.iter().enumerate() {
+            let initial_layout = rp_initial_layouts
+                .get(index)
+                .copied()
+                .unwrap_or(vk::ImageLayout::UNDEFINED);
             let ctx = self.ctx_ref();
             let v = ctx
                 .image_views
@@ -1097,7 +1154,7 @@ impl CommandSink for CommandQueue {
             let count = v.range.level_count as usize;
             for i in base..base + count {
                 if let Some(l) = img.layouts.get_mut(i) {
-                    *l = *layout;
+                    *l = initial_layout;
                 }
             }
         }
