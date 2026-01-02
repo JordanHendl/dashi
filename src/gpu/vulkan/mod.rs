@@ -2,7 +2,7 @@ mod error;
 use crate::{
     cmd::{CommandStream, Executable},
     driver::{
-        command::{CopyBuffer, CopyBufferImage},
+        command::{BlitImage, CopyBuffer, CopyBufferImage},
         state::StateTracker,
     },
     utils::{Handle, Pool},
@@ -1626,13 +1626,14 @@ impl VulkanContext {
             return Ok(());
         }
 
+        let layer_byte_size = info.dim[0]
+            * info.dim[1]
+            * info.dim[2]
+            * channel_count(&info.format)
+            * bytes_per_channel(&info.format);
         let staging = self.make_buffer(&BufferInfo {
             debug_name: "",
-            byte_size: (info.dim[0]
-                * info.dim[1]
-                * info.dim[2]
-                * channel_count(&info.format)
-                * bytes_per_channel(&info.format)) as u32,
+            byte_size: (layer_byte_size * info.layers) as u32,
             visibility: MemoryVisibility::CpuAndGpu,
             initial_data: info.initial_data,
             ..Default::default()
@@ -1650,23 +1651,43 @@ impl VulkanContext {
                     base_mip: 0,
                     level_count: 1,
                     base_layer: 0,
-                    layer_count: 1,
+                    layer_count: info.layers,
                 },
                 ..Default::default()
             });
 
-        if info.mip_levels > 1 {
-            for i in 0..info.mip_levels - 1 {
-                cmd = cmd.copy_buffer_to_image(&CopyBufferImage {
-                    src: staging,
+        if info.mip_levels > 1 && info.samples == SampleCount::S1 {
+            for i in 0..(info.mip_levels - 1) {
+                let src_dims = mip_dimensions(info.dim, i);
+                let dst_dims = mip_dimensions(info.dim, i + 1);
+                cmd = cmd.blit_images(&BlitImage {
+                    src: image,
                     dst: image,
-                    range: SubresourceRange {
+                    src_range: SubresourceRange {
                         base_mip: i,
                         level_count: 1,
                         base_layer: 0,
-                        layer_count: 1,
+                        layer_count: info.layers,
                     },
-                    ..Default::default()
+                    dst_range: SubresourceRange {
+                        base_mip: i + 1,
+                        level_count: 1,
+                        base_layer: 0,
+                        layer_count: info.layers,
+                    },
+                    filter: Filter::Linear,
+                    src_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: src_dims[0],
+                        h: src_dims[1],
+                    },
+                    dst_region: Rect2D {
+                        x: 0,
+                        y: 0,
+                        w: dst_dims[0],
+                        h: dst_dims[1],
+                    },
                 });
             }
         }
