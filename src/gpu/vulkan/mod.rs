@@ -3058,7 +3058,7 @@ impl VulkanContext {
 
             for (index, color_attachment) in subpass.color_attachments.iter().enumerate() {
                 let initial_layout = if matches!(color_attachment.load_op, LoadOp::Load) {
-                    vk::ImageLayout::GENERAL
+                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                 } else {
                     vk::ImageLayout::UNDEFINED
                 };
@@ -3096,7 +3096,7 @@ impl VulkanContext {
                 let initial_layout = if matches!(depth_stencil_attachment.load_op, LoadOp::Load)
                     || matches!(depth_stencil_attachment.stencil_load_op, LoadOp::Load)
                 {
-                    vk::ImageLayout::GENERAL
+                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                 } else {
                     vk::ImageLayout::UNDEFINED
                 };
