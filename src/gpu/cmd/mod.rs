@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use crate::gpu::driver::command::{
-    BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed,
-    GraphicsPipelineStateUpdate, MSImageResolve,
+    BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
+    DrawIndirect, GraphicsPipelineStateUpdate, MSImageResolve,
 };
 use crate::gpu::driver::command::{
     CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
@@ -332,6 +332,16 @@ impl CommandStream<Graphics> {
 
     pub fn draw_indexed(mut self, cmd: &DrawIndexed) -> Self {
         self.enc.draw_indexed(cmd);
+        self
+    }
+
+    pub fn draw_indirect(mut self, cmd: &DrawIndirect) -> Self {
+        self.enc.draw_indirect(cmd);
+        self
+    }
+
+    pub fn draw_indexed_indirect(mut self, cmd: &DrawIndexedIndirect) -> Self {
+        self.enc.draw_indexed_indirect(cmd);
         self
     }
 

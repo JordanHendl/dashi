@@ -10,7 +10,7 @@ use super::{
     state::{resource_use_to_buffer_usage, resource_use_to_image_usage_layout, Layout},
     types::{Handle, ResourceUse, UsageBits},
 };
-use crate::structs::SubresourceRange;
+use crate::structs::{IndirectCommand, IndexedIndirectCommand, SubresourceRange};
 
 //===----------------------------------------------------------------------===//
 // Command definitions
@@ -26,6 +26,7 @@ pub enum Op {
     Draw = 4,
     DrawIndexed = 5,
     DrawIndirect = 6,
+    DrawIndexedIndirect = 23,
     Dispatch = 7,
     DispatchIndirect = 8,
     CopyBuffer = 9,
@@ -146,6 +147,72 @@ pub struct DrawIndexed {
     pub first_instance: u32,
     /// Number of indices to draw.
     pub index_count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct DrawIndirect {
+    /// Vertex buffer handle.
+    pub vertices: Handle<Buffer>,
+    /// Indirect argument buffer handle.
+    pub indirect: Handle<Buffer>,
+    /// Resources to bind before drawing.
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    /// Number of indirect draws to execute.
+    pub draw_count: u32,
+    /// Offset in bytes into the indirect buffer.
+    pub offset: u32,
+    /// Stride in bytes between indirect commands.
+    pub stride: u32,
+}
+
+impl Default for DrawIndirect {
+    fn default() -> Self {
+        Self {
+            vertices: Default::default(),
+            indirect: Default::default(),
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+            draw_count: 1,
+            offset: 0,
+            stride: size_of::<IndirectCommand>() as u32,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct DrawIndexedIndirect {
+    /// Vertex buffer handle.
+    pub vertices: Handle<Buffer>,
+    pub indices: Handle<Buffer>,
+    /// Indirect argument buffer handle.
+    pub indirect: Handle<Buffer>,
+    /// Resources to bind before drawing.
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    /// Number of indirect draws to execute.
+    pub draw_count: u32,
+    /// Offset in bytes into the indirect buffer.
+    pub offset: u32,
+    /// Stride in bytes between indirect commands.
+    pub stride: u32,
+}
+
+impl Default for DrawIndexedIndirect {
+    fn default() -> Self {
+        Self {
+            vertices: Default::default(),
+            indices: Default::default(),
+            indirect: Default::default(),
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+            draw_count: 1,
+            offset: 0,
+            stride: size_of::<IndexedIndirectCommand>() as u32,
+        }
+    }
 }
 
 impl Default for DrawIndexed {
@@ -434,6 +501,14 @@ impl CommandEncoder {
         self.push(Op::DrawIndexed, cmd);
     }
 
+    pub fn draw_indirect(&mut self, cmd: &DrawIndirect) {
+        self.push(Op::DrawIndirect, cmd);
+    }
+
+    pub fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) {
+        self.push(Op::DrawIndexedIndirect, cmd);
+    }
+
     /// Issue a dispatch call.
     pub fn dispatch(&mut self, cmd: &Dispatch) {
         self.push(Op::Dispatch, cmd);
@@ -566,7 +641,8 @@ impl CommandEncoder {
                 Op::CopyImageToBuffer => self.copy_image_to_buffer(cmd.payload()),
                 Op::BlitImage => self.blit_image(cmd.payload()),
                 Op::DrawIndexed => self.draw_indexed(cmd.payload()),
-                Op::DrawIndirect => todo!(),
+                Op::DrawIndirect => self.draw_indirect(cmd.payload()),
+                Op::DrawIndexedIndirect => self.draw_indexed_indirect(cmd.payload()),
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => {
                     let payload = cmd.payload::<PrepareBuffer>();
@@ -607,7 +683,8 @@ impl CommandEncoder {
                 Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload())?,
                 Op::BlitImage => sink.blit_image(cmd.payload())?,
                 Op::DrawIndexed => sink.draw_indexed(cmd.payload())?,
-                Op::DrawIndirect => todo!(),
+                Op::DrawIndirect => sink.draw_indirect(cmd.payload())?,
+                Op::DrawIndexedIndirect => sink.draw_indexed_indirect(cmd.payload())?,
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => sink.prepare_buffer(cmd.payload())?,
                 Op::TransitionImage => sink.transition_image(cmd.payload())?,
@@ -766,6 +843,7 @@ impl Op {
             x if x == Op::Draw as u16 => Some(Op::Draw),
             x if x == Op::DrawIndexed as u16 => Some(Op::DrawIndexed),
             x if x == Op::DrawIndirect as u16 => Some(Op::DrawIndirect),
+            x if x == Op::DrawIndexedIndirect as u16 => Some(Op::DrawIndexedIndirect),
             x if x == Op::Dispatch as u16 => Some(Op::Dispatch),
             x if x == Op::CopyBuffer as u16 => Some(Op::CopyBuffer),
             x if x == Op::CopyBufferToImage as u16 => Some(Op::CopyBufferToImage),
@@ -795,6 +873,8 @@ pub trait CommandSink {
     fn blit_image(&mut self, cmd: &BlitImage) -> Result<()>;
     fn draw(&mut self, cmd: &Draw) -> Result<()>;
     fn draw_indexed(&mut self, cmd: &DrawIndexed) -> Result<()>;
+    fn draw_indirect(&mut self, cmd: &DrawIndirect) -> Result<()>;
+    fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) -> Result<()>;
     fn dispatch(&mut self, cmd: &Dispatch) -> Result<()>;
     fn copy_buffer(&mut self, cmd: &CopyBuffer) -> Result<()>;
     fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) -> Result<()>;

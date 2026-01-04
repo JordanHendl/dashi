@@ -482,12 +482,23 @@ pub struct ContextLimits {
     pub max_bound_bind_tables: u32,
 }
 
+#[cfg(not(feature = "webgpu"))]
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IndirectCommand {
     pub vertex_count: u32,
     pub instance_count: u32,
     pub first_vertex: i32,
+    pub first_instance: u32,
+}
+
+#[cfg(feature = "webgpu")]
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct IndirectCommand {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: u32,
     pub first_instance: u32,
 }
 

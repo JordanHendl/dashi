@@ -1647,6 +1647,179 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 
+    fn draw_indirect(&mut self, cmd: &crate::gpu::driver::command::DrawIndirect) -> Result<()> {
+        if cmd.vertices.valid() {
+            let v = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
+            unsafe {
+                self.ctx_ref().device.cmd_bind_vertex_buffers(
+                    self.cmd_buf,
+                    0,
+                    &[v.buf],
+                    &[v.offset as u64],
+                );
+            }
+        }
+
+        if let Some(pipe) = self.curr_pipeline {
+            let p = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(pipe)
+                .ok_or(GPUError::SlotError())?;
+            let l = self
+                .ctx_ref()
+                .gfx_pipeline_layouts
+                .get_ref(p.layout)
+                .ok_or(GPUError::SlotError())?;
+
+            unsafe {
+                for (index, table) in cmd.bind_tables.iter().enumerate() {
+                    if let Some(bt) = *table {
+                        let bt_data = self
+                            .ctx_ref()
+                            .bind_tables
+                            .get_ref(bt)
+                            .ok_or(GPUError::SlotError())?;
+                        let offsets = cmd
+                            .dynamic_buffers
+                            .get(index)
+                            .and_then(|&d| d.map(|b| b.alloc.offset))
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bt_data.set_id,
+                            &[bt_data.set],
+                            &offsets,
+                        );
+                    }
+                }
+            }
+        }
+
+        let indirect = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.indirect)
+            .ok_or(GPUError::SlotError())?;
+
+        unsafe {
+            self.ctx_ref().device.cmd_draw_indirect(
+                self.cmd_buf,
+                indirect.buf,
+                indirect.offset as u64 + cmd.offset as u64,
+                cmd.draw_count,
+                cmd.stride,
+            );
+            self.update_last_access(
+                vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn draw_indexed_indirect(
+        &mut self,
+        cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
+    ) -> Result<()> {
+        if cmd.vertices.valid() && cmd.indices.valid() {
+            let v = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.vertices)
+                .ok_or(GPUError::SlotError())?;
+            let i = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.indices)
+                .ok_or(GPUError::SlotError())?;
+            unsafe {
+                self.ctx_ref().device.cmd_bind_vertex_buffers(
+                    self.cmd_buf,
+                    0,
+                    &[v.buf],
+                    &[v.offset as u64],
+                );
+
+                self.ctx_ref().device.cmd_bind_index_buffer(
+                    self.cmd_buf,
+                    i.buf,
+                    i.offset as u64,
+                    vk::IndexType::UINT32,
+                );
+            }
+        }
+
+        if let Some(pipe) = self.curr_pipeline {
+            let p = self
+                .ctx_ref()
+                .gfx_pipelines
+                .get_ref(pipe)
+                .ok_or(GPUError::SlotError())?;
+            let l = self
+                .ctx_ref()
+                .gfx_pipeline_layouts
+                .get_ref(p.layout)
+                .ok_or(GPUError::SlotError())?;
+
+            unsafe {
+                for (index, table) in cmd.bind_tables.iter().enumerate() {
+                    if let Some(bt) = *table {
+                        let bt_data = self
+                            .ctx_ref()
+                            .bind_tables
+                            .get_ref(bt)
+                            .ok_or(GPUError::SlotError())?;
+                        let offsets = cmd
+                            .dynamic_buffers
+                            .get(index)
+                            .and_then(|&d| d.map(|b| b.alloc.offset))
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                        self.ctx_ref().device.cmd_bind_descriptor_sets(
+                            self.cmd_buf,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            l.layout,
+                            bt_data.set_id,
+                            &[bt_data.set],
+                            &offsets,
+                        );
+                    }
+                }
+            }
+        }
+
+        let indirect = self
+            .ctx_ref()
+            .buffers
+            .get_ref(cmd.indirect)
+            .ok_or(GPUError::SlotError())?;
+
+        unsafe {
+            self.ctx_ref().device.cmd_draw_indexed_indirect(
+                self.cmd_buf,
+                indirect.buf,
+                indirect.offset as u64 + cmd.offset as u64,
+                cmd.draw_count,
+                cmd.stride,
+            );
+            self.update_last_access(
+                vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
+            );
+        }
+
+        Ok(())
+    }
+
     fn dispatch(&mut self, cmd: &crate::gpu::driver::command::Dispatch) -> Result<()> {
         self.ensure_binding_states(&cmd.bind_tables)?;
         unsafe {
