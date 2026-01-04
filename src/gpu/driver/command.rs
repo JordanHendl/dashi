@@ -40,6 +40,8 @@ pub enum Op {
     BeginRenderPass = 18,
     NextSubpass = 19,
     PrepareBuffer = 20,
+    GpuTimerBegin = 21,
+    GpuTimerEnd = 22,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -252,6 +254,18 @@ pub struct DebugMarkerBegin {}
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
 pub struct DebugMarkerEnd {}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct GpuTimerBegin {
+    pub frame: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct GpuTimerEnd {
+    pub frame: u32,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -506,6 +520,16 @@ impl CommandEncoder {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
 
+    /// Begin a GPU timer region for the specified frame index.
+    pub fn gpu_timer_begin(&mut self, frame: u32) {
+        self.push(Op::GpuTimerBegin, &GpuTimerBegin { frame });
+    }
+
+    /// End a GPU timer region for the specified frame index.
+    pub fn gpu_timer_end(&mut self, frame: u32) {
+        self.push(Op::GpuTimerEnd, &GpuTimerEnd { frame });
+    }
+
     pub fn combine(&mut self, other: &CommandEncoder) {
         assert_eq!(
             self.queue, other.queue,
@@ -537,6 +561,8 @@ impl CommandEncoder {
                 Op::ResolveImage => self.resolve_image(cmd.payload()),
                 Op::DebugMarkerBegin => self.begin_debug_marker(),
                 Op::DebugMarkerEnd => self.end_debug_marker(),
+                Op::GpuTimerBegin => self.gpu_timer_begin(cmd.payload::<GpuTimerBegin>().frame),
+                Op::GpuTimerEnd => self.gpu_timer_end(cmd.payload::<GpuTimerEnd>().frame),
                 Op::CopyImageToBuffer => self.copy_image_to_buffer(cmd.payload()),
                 Op::BlitImage => self.blit_image(cmd.payload()),
                 Op::DrawIndexed => self.draw_indexed(cmd.payload()),
@@ -576,6 +602,8 @@ impl CommandEncoder {
                 Op::ResolveImage => sink.resolve_image(cmd.payload())?,
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload())?,
                 Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload())?,
+                Op::GpuTimerBegin => sink.gpu_timer_begin(cmd.payload())?,
+                Op::GpuTimerEnd => sink.gpu_timer_end(cmd.payload())?,
                 Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload())?,
                 Op::BlitImage => sink.blit_image(cmd.payload())?,
                 Op::DrawIndexed => sink.draw_indexed(cmd.payload())?,
@@ -747,6 +775,8 @@ impl Op {
             x if x == Op::BlitImage as u16 => Some(Op::BlitImage),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
+            x if x == Op::GpuTimerBegin as u16 => Some(Op::GpuTimerBegin),
+            x if x == Op::GpuTimerEnd as u16 => Some(Op::GpuTimerEnd),
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
             x if x == Op::NextSubpass as u16 => Some(Op::NextSubpass),
             x if x == Op::TransitionImage as u16 => Some(Op::TransitionImage),
@@ -777,6 +807,8 @@ pub trait CommandSink {
     fn submit(&mut self, cmd: &SubmitInfo2) -> Result<Handle<Fence>>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin) -> Result<()>;
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd) -> Result<()>;
+    fn gpu_timer_begin(&mut self, cmd: &GpuTimerBegin) -> Result<()>;
+    fn gpu_timer_end(&mut self, cmd: &GpuTimerEnd) -> Result<()>;
 }
 
 #[cfg(feature = "copy_texture_compat")]

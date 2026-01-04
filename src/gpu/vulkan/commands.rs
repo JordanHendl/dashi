@@ -1893,4 +1893,26 @@ impl CommandSink for CommandQueue {
         };
         Ok(())
     }
+
+    fn gpu_timer_begin(
+        &mut self,
+        cmd: &crate::gpu::driver::command::GpuTimerBegin,
+    ) -> Result<()> {
+        let ctx = self.ctx;
+        if !ctx.is_null() {
+            unsafe { (*ctx).gpu_timer_begin(self, cmd.frame as usize) };
+        }
+        Ok(())
+    }
+
+    fn gpu_timer_end(
+        &mut self,
+        cmd: &crate::gpu::driver::command::GpuTimerEnd,
+    ) -> Result<()> {
+        let ctx = self.ctx;
+        if !ctx.is_null() {
+            unsafe { (*ctx).gpu_timer_end(self, cmd.frame as usize) };
+        }
+        Ok(())
+    }
 }

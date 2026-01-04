@@ -129,6 +129,41 @@ impl Context {
         }
     }
 
+    /// Allocate `count` GPU timers for the active backend.
+    pub fn init_gpu_timers(&mut self, count: usize) -> Result<()> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.init_gpu_timers(count),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => {
+                #[cfg(target_arch = "wasm32")]
+                return ctx.report_unimplemented("GPU timers");
+                #[cfg(not(target_arch = "wasm32"))]
+                return ctx.init_gpu_timers(count);
+            }
+        }
+    }
+
+    /// Return the elapsed GPU time for `frame` in milliseconds, if available.
+    pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.get_elapsed_gpu_time_ms(frame),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = ctx;
+                    None
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    ctx.get_elapsed_gpu_time_ms(frame)
+                }
+            }
+        }
+    }
+
     pub fn make_command_ring(&mut self, info: &crate::CommandQueueInfo2) -> Result<CommandRing> {
         CommandRing::new(self, info.debug_name, 3, info.queue_type)
     }

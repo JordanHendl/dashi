@@ -129,6 +129,18 @@ impl CommandStream<Recording> {
         self
     }
 
+    /// Begin a GPU timer region for the specified frame index.
+    pub fn gpu_timer_begin(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_begin(frame);
+        self
+    }
+
+    /// End a GPU timer region for the specified frame index.
+    pub fn gpu_timer_end(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_end(frame);
+        self
+    }
+
     pub fn begin_render_pass(mut self, cmd: &BeginRenderPass) -> CommandStream<PendingGraphics> {
         self.enc.begin_render_pass(cmd);
         CommandStream {
@@ -215,6 +227,18 @@ impl CommandStream<Compute> {
         self
     }
 
+    /// Begin a GPU timer region for the specified frame index.
+    pub fn gpu_timer_begin(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_begin(frame);
+        self
+    }
+
+    /// End a GPU timer region for the specified frame index.
+    pub fn gpu_timer_end(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_end(frame);
+        self
+    }
+
     pub fn unbind_pipeline(self) -> CommandStream<Recording> {
         CommandStream {
             enc: self.enc,
@@ -262,6 +286,18 @@ impl CommandStream<PendingGraphics> {
         self
     }
 
+    /// Begin a GPU timer region for the specified frame index.
+    pub fn gpu_timer_begin(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_begin(frame);
+        self
+    }
+
+    /// End a GPU timer region for the specified frame index.
+    pub fn gpu_timer_end(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_end(frame);
+        self
+    }
+
     pub fn stop_drawing(mut self) -> CommandStream<Recording> {
         self.enc.end_drawing();
         CommandStream {
@@ -296,6 +332,18 @@ impl CommandStream<Graphics> {
 
     pub fn draw_indexed(mut self, cmd: &DrawIndexed) -> Self {
         self.enc.draw_indexed(cmd);
+        self
+    }
+
+    /// Begin a GPU timer region for the specified frame index.
+    pub fn gpu_timer_begin(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_begin(frame);
+        self
+    }
+
+    /// End a GPU timer region for the specified frame index.
+    pub fn gpu_timer_end(mut self, frame: u32) -> Self {
+        self.enc.gpu_timer_end(frame);
         self
     }
 
