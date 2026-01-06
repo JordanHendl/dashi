@@ -153,6 +153,22 @@ fn debug_message_type_from_vk(flags: vk::DebugUtilsMessageTypeFlagsEXT) -> Debug
     message_type
 }
 
+fn debug_report_type_from_vk(obj_type: vk::ObjectType) -> Option<vk::DebugReportObjectTypeEXT> {
+    match obj_type {
+        vk::ObjectType::BUFFER => Some(vk::DebugReportObjectTypeEXT::BUFFER),
+        vk::ObjectType::IMAGE => Some(vk::DebugReportObjectTypeEXT::IMAGE),
+        vk::ObjectType::DESCRIPTOR_SET_LAYOUT => {
+            Some(vk::DebugReportObjectTypeEXT::DESCRIPTOR_SET_LAYOUT)
+        }
+        vk::ObjectType::DESCRIPTOR_POOL => Some(vk::DebugReportObjectTypeEXT::DESCRIPTOR_POOL),
+        vk::ObjectType::DESCRIPTOR_SET => Some(vk::DebugReportObjectTypeEXT::DESCRIPTOR_SET),
+        vk::ObjectType::RENDER_PASS => Some(vk::DebugReportObjectTypeEXT::RENDER_PASS),
+        vk::ObjectType::PIPELINE_LAYOUT => Some(vk::DebugReportObjectTypeEXT::PIPELINE_LAYOUT),
+        vk::ObjectType::PIPELINE => Some(vk::DebugReportObjectTypeEXT::PIPELINE),
+        _ => None,
+    }
+}
+
 unsafe extern "system" fn user_debug_trampoline(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -307,6 +323,7 @@ pub struct VulkanContext {
     #[cfg(feature = "dashi-sdl2")]
     pub(super) sdl_video: Option<sdl2::VideoSubsystem>,
     pub(super) debug_utils: Option<ash::extensions::ext::DebugUtils>,
+    pub(super) debug_marker: Option<ash::extensions::ext::DebugMarker>,
     pub(super) debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
@@ -393,6 +410,8 @@ impl VulkanContext {
             Queue,
             Option<Queue>,
             Option<Queue>,
+            bool,
+            bool,
         ),
         GPUError,
     > {
@@ -408,7 +427,12 @@ impl VulkanContext {
         // Create instance
         let entry = unsafe { Entry::load() }?;
         let mut inst_exts = Vec::new();
-        if enable_validation {
+        let available_exts = entry.enumerate_instance_extension_properties(None)?;
+        let debug_utils_supported = available_exts.iter().any(|ext| {
+            let name = unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) };
+            name == ash::extensions::ext::DebugUtils::name()
+        });
+        if debug_utils_supported {
             inst_exts.push(ash::extensions::ext::DebugUtils::name().as_ptr());
         }
 
@@ -604,6 +628,7 @@ impl VulkanContext {
                     std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
                 },
                 vk::GoogleHlslFunctionality1Fn::name().as_ptr(),
+                ash::extensions::ext::DebugMarker::name().as_ptr(),
                 #[cfg(any(target_os = "macos", target_os = "ios"))]
                 KhrPortabilitySubsetFn::name().as_ptr(),
             ]
@@ -614,6 +639,7 @@ impl VulkanContext {
                     std::ffi::CStr::from_bytes_with_nul_unchecked(b"VK_GOOGLE_user_type\0").as_ptr()
                 },
                 vk::GoogleHlslFunctionality1Fn::name().as_ptr(),
+                ash::extensions::ext::DebugMarker::name().as_ptr(),
             ]
         };
 
@@ -667,6 +693,11 @@ impl VulkanContext {
             &instance, &device, pdevice,
         ))?;
 
+        let debug_marker_enabled = extensions_to_enable.iter().any(|ext| {
+            let ext_name = unsafe { CStr::from_ptr(*ext) };
+            ext_name == ash::extensions::ext::DebugMarker::name()
+        });
+
         return Ok((
             entry,
             instance,
@@ -678,6 +709,8 @@ impl VulkanContext {
             gfx_queue,
             compute_queue,
             transfer_queue,
+            debug_utils_supported,
+            debug_marker_enabled,
         ));
     }
 
@@ -708,31 +741,45 @@ impl VulkanContext {
             gfx_queue,
             compute_queue,
             transfer_queue,
+            debug_utils_supported,
+            debug_marker_enabled,
         ) = Self::init_core(info, false, enable_validation)?;
 
-        let (debug_utils, debug_messenger) = if enable_validation {
+        let (debug_utils, debug_messenger) = if debug_utils_supported {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-            let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
-                )
-                .message_type(
-                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                )
-                .pfn_user_callback(Some(vulkan_debug_callback));
-            let debug_messenger = unsafe {
-                debug_utils
-                    .create_debug_utils_messenger(&messenger_ci, None)
-                    .unwrap()
+            let debug_messenger = if enable_validation {
+                let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                    .message_severity(
+                        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                    )
+                    .message_type(
+                        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                    )
+                    .pfn_user_callback(Some(vulkan_debug_callback));
+                Some(unsafe {
+                    debug_utils
+                        .create_debug_utils_messenger(&messenger_ci, None)
+                        .unwrap()
+                })
+            } else {
+                None
             };
-            (Some(debug_utils), Some(debug_messenger))
+            (Some(debug_utils), debug_messenger)
         } else {
             (None, None)
+        };
+        let debug_marker = if debug_marker_enabled {
+            Some(ash::extensions::ext::DebugMarker::new(
+                &instance,
+                &device,
+            ))
+        } else {
+            None
         };
 
         let gfx_pool = CommandPool::new(&device, gfx_queue.family, QueueType::Graphics)?;
@@ -810,6 +857,7 @@ impl VulkanContext {
             #[cfg(feature = "dashi-sdl2")]
             sdl_video: None,
             debug_utils,
+            debug_marker,
             debug_messenger,
         };
         ctx.init_gpu_timers(1)?;
@@ -847,31 +895,45 @@ impl VulkanContext {
             gfx_queue,
             compute_queue,
             transfer_queue,
+            debug_utils_supported,
+            debug_marker_enabled,
         ) = Self::init_core(info, true, enable_validation)?;
 
-        let (debug_utils, debug_messenger) = if enable_validation {
+        let (debug_utils, debug_messenger) = if debug_utils_supported {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
-            let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
-                )
-                .message_type(
-                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                )
-                .pfn_user_callback(Some(vulkan_debug_callback));
-            let debug_messenger = unsafe {
-                debug_utils
-                    .create_debug_utils_messenger(&messenger_ci, None)
-                    .unwrap()
+            let debug_messenger = if enable_validation {
+                let messenger_ci = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                    .message_severity(
+                        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
+                    )
+                    .message_type(
+                        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                    )
+                    .pfn_user_callback(Some(vulkan_debug_callback));
+                Some(unsafe {
+                    debug_utils
+                        .create_debug_utils_messenger(&messenger_ci, None)
+                        .unwrap()
+                })
+            } else {
+                None
             };
-            (Some(debug_utils), Some(debug_messenger))
+            (Some(debug_utils), debug_messenger)
         } else {
             (None, None)
+        };
+        let debug_marker = if debug_marker_enabled {
+            Some(ash::extensions::ext::DebugMarker::new(
+                &instance,
+                &device,
+            ))
+        } else {
+            None
         };
 
         #[cfg(feature = "dashi-sdl2")]
@@ -954,6 +1016,7 @@ impl VulkanContext {
             #[cfg(feature = "dashi-sdl2")]
             sdl_video: Some(sdl_video),
             debug_utils,
+            debug_marker,
             debug_messenger,
         };
         ctx.init_gpu_timers(1)?;
@@ -1002,6 +1065,22 @@ impl VulkanContext {
                             .object_name(&name)
                             .object_type(t)
                             .object_handle(ash::vk::Handle::as_raw(obj))
+                            .build(),
+                    )
+                    .expect("Error writing debug name");
+            }
+        } else if let Some(marker) = &self.debug_marker {
+            let Some(debug_report_type) = debug_report_type_from_vk(t) else {
+                return;
+            };
+            unsafe {
+                let name: CString = CString::new(name.to_string()).unwrap();
+                marker
+                    .debug_marker_set_object_name(
+                        &vk::DebugMarkerObjectNameInfoEXT::builder()
+                            .object_name(&name)
+                            .object_type(debug_report_type)
+                            .object(ash::vk::Handle::as_raw(obj))
                             .build(),
                     )
                     .expect("Error writing debug name");
