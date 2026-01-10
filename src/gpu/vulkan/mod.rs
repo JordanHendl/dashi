@@ -3663,8 +3663,14 @@ impl VulkanContext {
             height,
         )?;
 
+        let vinputs: &[vk::VertexInputBindingDescription] = if layout.vertex_attribs.is_empty() {
+            &[]
+        } else {
+            &[layout.vertex_input]
+        };
+
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
-            .vertex_binding_descriptions(&[layout.vertex_input])
+            .vertex_binding_descriptions(vinputs)
             .vertex_attribute_descriptions(&layout.vertex_attribs)
             .build();
 
