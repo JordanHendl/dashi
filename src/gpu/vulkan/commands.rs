@@ -1730,16 +1730,11 @@ impl CommandSink for CommandQueue {
         &mut self,
         cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
     ) -> Result<()> {
-        if cmd.vertices.valid() && cmd.indices.valid() {
+        if cmd.vertices.valid() {
             let v = self
                 .ctx_ref()
                 .buffers
                 .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            let i = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.indices)
                 .ok_or(GPUError::SlotError())?;
             unsafe {
                 self.ctx_ref().device.cmd_bind_vertex_buffers(
@@ -1748,7 +1743,17 @@ impl CommandSink for CommandQueue {
                     &[v.buf],
                     &[v.offset as u64],
                 );
+            }
+        }
 
+        if cmd.indices.valid() {
+            let i = self
+                .ctx_ref()
+                .buffers
+                .get_ref(cmd.indices)
+                .ok_or(GPUError::SlotError())?;
+
+            unsafe {
                 self.ctx_ref().device.cmd_bind_index_buffer(
                     self.cmd_buf,
                     i.buf,
@@ -2067,10 +2072,7 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 
-    fn gpu_timer_begin(
-        &mut self,
-        cmd: &crate::gpu::driver::command::GpuTimerBegin,
-    ) -> Result<()> {
+    fn gpu_timer_begin(&mut self, cmd: &crate::gpu::driver::command::GpuTimerBegin) -> Result<()> {
         let ctx = self.ctx;
         if !ctx.is_null() {
             unsafe { (*ctx).gpu_timer_begin(self, cmd.frame as usize) };
@@ -2078,10 +2080,7 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 
-    fn gpu_timer_end(
-        &mut self,
-        cmd: &crate::gpu::driver::command::GpuTimerEnd,
-    ) -> Result<()> {
+    fn gpu_timer_end(&mut self, cmd: &crate::gpu::driver::command::GpuTimerEnd) -> Result<()> {
         let ctx = self.ctx;
         if !ctx.is_null() {
             unsafe { (*ctx).gpu_timer_end(self, cmd.frame as usize) };
