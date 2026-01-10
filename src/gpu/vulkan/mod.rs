@@ -541,6 +541,7 @@ impl VulkanContext {
 
         let features = vk::PhysicalDeviceFeatures::builder()
             .shader_clip_distance(true)
+            .multi_draw_indirect(true)
             .build();
 
         let mut enabled_descriptor_indexing =
