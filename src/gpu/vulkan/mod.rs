@@ -774,10 +774,7 @@ impl VulkanContext {
             (None, None)
         };
         let debug_marker = if debug_marker_enabled {
-            Some(ash::extensions::ext::DebugMarker::new(
-                &instance,
-                &device,
-            ))
+            Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
         } else {
             None
         };
@@ -928,10 +925,7 @@ impl VulkanContext {
             (None, None)
         };
         let debug_marker = if debug_marker_enabled {
-            Some(ash::extensions::ext::DebugMarker::new(
-                &instance,
-                &device,
-            ))
+            Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
         } else {
             None
         };
@@ -3350,13 +3344,17 @@ impl VulkanContext {
         }
 
         // Step 2: Create Vertex Input State
-        let vertex_binding_description = vk::VertexInputBindingDescription::builder()
-            .binding(0) // Binding 0 for now
-            .stride(info.vertex_info.stride as u32)
-            .input_rate(match info.vertex_info.rate {
-                VertexRate::Vertex => vk::VertexInputRate::VERTEX,
-            })
-            .build();
+        let vertex_binding_description = if info.vertex_info.entries.is_empty() {
+            Default::default()
+        } else {
+            vk::VertexInputBindingDescription::builder()
+                .binding(0) // Binding 0 for now
+                .stride(info.vertex_info.stride as u32)
+                .input_rate(match info.vertex_info.rate {
+                    VertexRate::Vertex => vk::VertexInputRate::VERTEX,
+                })
+                .build()
+        };
 
         let vertex_attribute_descriptions: Vec<vk::VertexInputAttributeDescription> = info
             .vertex_info
@@ -3597,7 +3595,9 @@ impl VulkanContext {
             let depth_samples = info
                 .subpass_samples
                 .depth_sample
-                .ok_or(GPUError::LibraryError(format!("Depth format active, but did not provide any depth sample!")))?;
+                .ok_or(GPUError::LibraryError(format!(
+                    "Depth format active, but did not provide any depth sample!"
+                )))?;
             let depth_attachment = vk::AttachmentDescription {
                 format: lib_to_vk_image_format(&depth_format),
                 samples: convert_sample_count(depth_samples),
@@ -3742,8 +3742,7 @@ impl VulkanContext {
             depth_format: info.depth_format,
         };
 
-        let attachment_initial_layouts =
-            vec![vk::ImageLayout::UNDEFINED; attachment_formats.len()];
+        let attachment_initial_layouts = vec![vk::ImageLayout::UNDEFINED; attachment_formats.len()];
         let render_pass_handle = self
             .render_passes
             .insert(RenderPass {
