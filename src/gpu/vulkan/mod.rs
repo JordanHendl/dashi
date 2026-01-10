@@ -1898,6 +1898,7 @@ impl VulkanContext {
             | vk::BufferUsageFlags::STORAGE_BUFFER
             | vk::BufferUsageFlags::TRANSFER_SRC
             | vk::BufferUsageFlags::TRANSFER_DST
+            | vk::BufferUsageFlags::INDIRECT_BUFFER
             | vk::BufferUsageFlags::UNIFORM_BUFFER;
 
         let mappable = matches!(info.visibility, MemoryVisibility::CpuAndGpu);

@@ -100,6 +100,7 @@ pub enum BufferUsage {
     INDEX,
     UNIFORM,
     STORAGE,
+    INDIRECT,
 }
 
 #[repr(C)]
