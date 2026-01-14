@@ -1,4 +1,4 @@
-use crate::gpu::{ContextInfo, ContextLimits, GPUError, Result};
+use crate::gpu::{ContextFeatures, ContextInfo, ContextLimits, GPUError, Result};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::vulkan::VulkanContext;
@@ -72,6 +72,10 @@ impl Context {
 
     pub fn limits(&self) -> ContextLimits {
         self.limits
+    }
+
+    pub fn features(&self) -> ContextFeatures {
+        self.inner.features()
     }
 
     pub fn destroy(self) {
@@ -185,6 +189,10 @@ impl Context {
 
     pub fn limits(&self) -> ContextLimits {
         self.limits
+    }
+
+    pub fn features(&self) -> ContextFeatures {
+        ContextFeatures::default()
     }
 
     pub fn device(&self) -> &wgpu::Device {

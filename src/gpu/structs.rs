@@ -498,6 +498,16 @@ pub struct ContextLimits {
     pub max_bound_bind_tables: u32,
 }
 
+/// A snapshot of feature support exposed through the [`Context`].
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ContextFeatures {
+    /// Indicates support for update-after-bind descriptors.
+    pub update_after_bind: bool,
+    /// Indicates support for partially bound descriptor arrays.
+    pub partially_bound: bool,
+}
+
 #[cfg(not(feature = "webgpu"))]
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]

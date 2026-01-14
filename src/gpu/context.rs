@@ -1,6 +1,6 @@
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
-use crate::gpu::{ContextInfo, VulkanContext};
+use crate::gpu::{ContextFeatures, ContextInfo, VulkanContext};
 use crate::{CommandQueue, Fence, QueueType, Result, SubmitInfo};
 use super::execution::CommandRing;
 
@@ -166,6 +166,16 @@ impl Context {
 
     pub fn make_command_ring(&mut self, info: &crate::CommandQueueInfo2) -> Result<CommandRing> {
         CommandRing::new(self, info.debug_name, 3, info.queue_type)
+    }
+
+    /// Query hardware feature support in API-agnostic terms.
+    pub fn features(&self) -> ContextFeatures {
+        match &self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.features(),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.features(),
+        }
     }
 
     pub(crate) fn backend_mut_ptr(&mut self) -> *mut VulkanContext {

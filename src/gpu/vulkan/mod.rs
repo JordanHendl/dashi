@@ -1060,6 +1060,23 @@ impl VulkanContext {
         }
     }
 
+    /// Query hardware feature support in API-agnostic terms.
+    pub fn features(&self) -> ContextFeatures {
+        let descriptor_features = &self.descriptor_indexing_features;
+        let update_after_bind = descriptor_features.descriptor_binding_sampled_image_update_after_bind
+            == vk::TRUE
+            || descriptor_features.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE
+            || descriptor_features.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE
+            || descriptor_features.descriptor_binding_storage_image_update_after_bind == vk::TRUE;
+        let partially_bound =
+            descriptor_features.descriptor_binding_partially_bound == vk::TRUE;
+
+        ContextFeatures {
+            update_after_bind,
+            partially_bound,
+        }
+    }
+
     #[cfg(feature = "dashi-sdl2")]
     /// Access the underlying SDL context for window creation.
     ///

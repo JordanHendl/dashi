@@ -24,6 +24,7 @@ pub mod execution;
 pub mod driver;
 pub mod cmd;
 pub mod structs;
+pub use structs::*;
 pub mod builders;
 pub mod device_selector;
 pub use cmd::{
