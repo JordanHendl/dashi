@@ -69,7 +69,11 @@ fn main() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
 
-    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo {
+        device,
+        ..Default::default()
+    })
+    .unwrap();
     let mut display = ctx.make_xr_display(&XrDisplayInfo::default()).unwrap();
     let views = display.xr_view_configuration();
     let width = views[0].recommended_image_rect_width;

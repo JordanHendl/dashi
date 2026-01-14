@@ -286,6 +286,7 @@ pub struct VulkanContext {
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
     pub(super) descriptor_indexing_features: vk::PhysicalDeviceDescriptorIndexingFeatures,
+    pub(super) profiles: ContextProfiles,
     pub(super) gfx_pool: CommandPool,
     pub(super) compute_pool: Option<CommandPool>,
     pub(super) transfer_pool: Option<CommandPool>,
@@ -544,6 +545,7 @@ impl VulkanContext {
             .multi_draw_indirect(true)
             .build();
 
+        let enable_bindless_profile = info.profiles.contains(ContextProfiles::BINDLESS);
         let mut enabled_descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
@@ -556,36 +558,49 @@ impl VulkanContext {
 
             unsafe { instance.get_physical_device_features2(pdevice, &mut feature_query) };
 
-            if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
-                enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
-            }
-            if descriptor_indexing.descriptor_binding_sampled_image_update_after_bind == vk::TRUE {
-                enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE {
-                enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE {
-                enabled_descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.descriptor_binding_storage_image_update_after_bind == vk::TRUE {
-                enabled_descriptor_indexing.descriptor_binding_storage_image_update_after_bind =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing == vk::TRUE {
-                enabled_descriptor_indexing.shader_sampled_image_array_non_uniform_indexing =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE {
-                enabled_descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing =
-                    vk::TRUE;
-            }
-            if descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE {
-                enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing =
-                    vk::TRUE;
+            if enable_bindless_profile {
+                if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
+                    enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
+                }
+                if descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
+                    == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .descriptor_binding_sampled_image_update_after_bind = vk::TRUE;
+                }
+                if descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
+                    == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .descriptor_binding_uniform_buffer_update_after_bind = vk::TRUE;
+                }
+                if descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind
+                    == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .descriptor_binding_storage_buffer_update_after_bind = vk::TRUE;
+                }
+                if descriptor_indexing.descriptor_binding_storage_image_update_after_bind
+                    == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .descriptor_binding_storage_image_update_after_bind = vk::TRUE;
+                }
+                if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .shader_sampled_image_array_non_uniform_indexing = vk::TRUE;
+                }
+                if descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .shader_uniform_buffer_array_non_uniform_indexing = vk::TRUE;
+                }
+                if descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE
+                {
+                    enabled_descriptor_indexing
+                        .shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
+                }
             }
 
             let descriptor_features_enabled = enabled_descriptor_indexing
@@ -800,15 +815,18 @@ impl VulkanContext {
             None
         };
 
-        let supports_update_after_bind_layouts = descriptor_indexing_features
-            .descriptor_binding_sampled_image_update_after_bind
-            == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind
+        let supports_update_after_bind_layouts = info.profiles.contains(ContextProfiles::BINDLESS)
+            && (descriptor_indexing_features.descriptor_binding_sampled_image_update_after_bind
                 == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind
-                == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
-                == vk::TRUE;
+                || descriptor_indexing_features
+                    .descriptor_binding_uniform_buffer_update_after_bind
+                    == vk::TRUE
+                || descriptor_indexing_features
+                    .descriptor_binding_storage_buffer_update_after_bind
+                    == vk::TRUE
+                || descriptor_indexing_features
+                    .descriptor_binding_storage_image_update_after_bind
+                    == vk::TRUE);
 
         let empty_set_layout =
             Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
@@ -820,6 +838,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            profiles: info.profiles,
             gfx_pool,
             compute_pool,
             transfer_pool,
@@ -956,15 +975,18 @@ impl VulkanContext {
             None
         };
 
-        let supports_update_after_bind_layouts = descriptor_indexing_features
-            .descriptor_binding_sampled_image_update_after_bind
-            == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind
+        let supports_update_after_bind_layouts = info.profiles.contains(ContextProfiles::BINDLESS)
+            && (descriptor_indexing_features.descriptor_binding_sampled_image_update_after_bind
                 == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind
-                == vk::TRUE
-            || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
-                == vk::TRUE;
+                || descriptor_indexing_features
+                    .descriptor_binding_uniform_buffer_update_after_bind
+                    == vk::TRUE
+                || descriptor_indexing_features
+                    .descriptor_binding_storage_buffer_update_after_bind
+                    == vk::TRUE
+                || descriptor_indexing_features
+                    .descriptor_binding_storage_image_update_after_bind
+                    == vk::TRUE);
 
         let empty_set_layout =
             Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
@@ -976,6 +998,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            profiles: info.profiles,
             gfx_pool,
             compute_pool,
             transfer_pool,
@@ -1888,13 +1911,19 @@ impl VulkanContext {
     }
 
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
-        let usage = vk::BufferUsageFlags::INDEX_BUFFER
-            | vk::BufferUsageFlags::VERTEX_BUFFER
-            | vk::BufferUsageFlags::STORAGE_BUFFER
-            | vk::BufferUsageFlags::TRANSFER_SRC
-            | vk::BufferUsageFlags::TRANSFER_DST
-            | vk::BufferUsageFlags::INDIRECT_BUFFER
-            | vk::BufferUsageFlags::UNIFORM_BUFFER;
+        let usage = match info.usage {
+            BufferUsage::ALL => vk::BufferUsageFlags::INDEX_BUFFER
+                | vk::BufferUsageFlags::VERTEX_BUFFER
+                | vk::BufferUsageFlags::STORAGE_BUFFER
+                | vk::BufferUsageFlags::INDIRECT_BUFFER
+                | vk::BufferUsageFlags::UNIFORM_BUFFER,
+            BufferUsage::VERTEX => vk::BufferUsageFlags::VERTEX_BUFFER,
+            BufferUsage::INDEX => vk::BufferUsageFlags::INDEX_BUFFER,
+            BufferUsage::UNIFORM => vk::BufferUsageFlags::UNIFORM_BUFFER,
+            BufferUsage::STORAGE => vk::BufferUsageFlags::STORAGE_BUFFER,
+            BufferUsage::INDIRECT => vk::BufferUsageFlags::INDIRECT_BUFFER,
+        } | vk::BufferUsageFlags::TRANSFER_SRC
+            | vk::BufferUsageFlags::TRANSFER_DST;
 
         let mappable = matches!(info.visibility, MemoryVisibility::CpuAndGpu);
         let create_info = vk_mem::AllocationCreateInfo {
@@ -2285,9 +2314,19 @@ impl VulkanContext {
             .descriptor_binding_storage_image_update_after_bind
             == vk::TRUE;
 
+        let allow_update_after_bind = self.profiles.contains(ContextProfiles::BINDLESS);
         let mut flags = Vec::new();
         let mut bindings = Vec::new();
         let mut uses_update_after_bind = false;
+        let has_dynamic_bindings = info.shaders.iter().any(|shader_info| {
+            shader_info.variables.iter().any(|variable| {
+                matches!(
+                    variable.var_type,
+                    BindTableVariableType::DynamicUniform | BindTableVariableType::DynamicStorage
+                )
+            })
+        });
+        let allow_update_after_bind = allow_update_after_bind && !has_dynamic_bindings;
         for shader_info in info.shaders.iter() {
             for variable in shader_info.variables.iter() {
                 let descriptor_type = match variable.var_type {
@@ -2319,19 +2358,17 @@ impl VulkanContext {
                     binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
                 }
                 let binding_supports_uab = match variable.var_type {
-                    BindTableVariableType::Uniform | BindTableVariableType::DynamicUniform => {
-                        supports_uab
-                    }
-                    BindTableVariableType::DynamicStorage | BindTableVariableType::Storage => {
-                        supports_storage_uab
-                    }
+                    BindTableVariableType::Uniform => supports_uab,
+                    BindTableVariableType::Storage => supports_storage_uab,
                     BindTableVariableType::SampledImage | BindTableVariableType::Image => {
                         supports_sampled_uab
                     }
-                    BindTableVariableType::Sampler => false,
                     BindTableVariableType::StorageImage => supports_storage_image_uab,
+                    BindTableVariableType::Sampler
+                    | BindTableVariableType::DynamicUniform
+                    | BindTableVariableType::DynamicStorage => false,
                 };
-                let binding_supports_uab = false && binding_supports_uab;
+                let binding_supports_uab = allow_update_after_bind && binding_supports_uab;
                 if binding_supports_uab {
                     binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
                     uses_update_after_bind = true;

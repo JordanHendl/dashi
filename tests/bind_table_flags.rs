@@ -15,7 +15,7 @@ fn bind_table_layout_exposes_descriptor_flags() {
             shaders: &[ShaderInfo {
                 shader_type: ShaderType::Compute,
                 variables: &[BindTableVariable {
-                    var_type: BindTableVariableType::DynamicUniform,
+                    var_type: BindTableVariableType::Uniform,
                     binding: 0,
                     count: 4,
                 }],
@@ -25,7 +25,7 @@ fn bind_table_layout_exposes_descriptor_flags() {
 
     let flags = ctx.bind_table_layout_flags(layout);
     assert!(
-        !flags.update_after_bind,
+        flags.update_after_bind,
         "bind tables must support update-after-bind"
     );
     assert!(

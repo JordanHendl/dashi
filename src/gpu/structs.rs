@@ -44,6 +44,19 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct ContextProfiles: u32 {
+        const BINDLESS = 0x1;
+    }
+}
+
+impl Default for ContextProfiles {
+    fn default() -> Self {
+        Self::BINDLESS
+    }
+}
+
 pub type DebugMessengerCallback = unsafe extern "system" fn(
     severity: DebugMessageSeverity,
     message_type: DebugMessageType,
@@ -435,6 +448,7 @@ pub enum WebSurfaceInfo {
 #[repr(C)]
 pub struct ContextInfo {
     pub device: SelectedDevice,
+    pub profiles: ContextProfiles,
     #[cfg(feature = "webgpu")]
     pub web_surface: Option<WebSurfaceInfo>,
 }
@@ -443,6 +457,7 @@ impl Default for ContextInfo {
     fn default() -> Self {
         Self {
             device: SelectedDevice::default(),
+            profiles: ContextProfiles::default(),
             #[cfg(feature = "webgpu")]
             web_surface: None,
         }
