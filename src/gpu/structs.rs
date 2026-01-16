@@ -671,7 +671,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
         Self {
             debug_name: "",
             byte_size: 1024 * 1024,
-            usage: BufferUsage::UNIFORM,
+            usage: BufferUsage::STORAGE,
             num_allocations: 2048,
             allocation_size: 256,
         }
