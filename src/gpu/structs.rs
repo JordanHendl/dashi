@@ -103,17 +103,28 @@ pub enum MemoryVisibility {
     CpuAndGpu,
 }
 
-#[repr(C)]
-#[derive(Default, Hash, Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
-pub enum BufferUsage {
-    #[default]
-    ALL,
-    VERTEX,
-    INDEX,
-    UNIFORM,
-    STORAGE,
-    INDIRECT,
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+    #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+    pub struct BufferUsage: u32 {
+        const VERTEX = 0x1;
+        const INDEX = 0x2;
+        const UNIFORM = 0x4;
+        const STORAGE = 0x8;
+        const INDIRECT = 0x10;
+        const ALL = Self::VERTEX.bits()
+            | Self::INDEX.bits()
+            | Self::UNIFORM.bits()
+            | Self::STORAGE.bits()
+            | Self::INDIRECT.bits();
+    }
+}
+
+impl Default for BufferUsage {
+    fn default() -> Self {
+        Self::ALL
+    }
 }
 
 #[repr(C)]

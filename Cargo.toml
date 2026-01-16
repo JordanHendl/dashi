@@ -39,7 +39,7 @@ serde = {version = "1.0.210", features = ["derive"], optional = true}
 serde_json = {version = "1.0.145",  optional = true}
 anyhow = "1.0.100"
 serde_yaml = {version = "0.9.34", optional = true}
-bitflags = "2.6"
+bitflags = { version = "2.6", features = ["serde"] }
 bytemuck = { version = "1.16", features = ["derive"] }
 smallvec = "1.13"
 rayon = { version = "1.10" }

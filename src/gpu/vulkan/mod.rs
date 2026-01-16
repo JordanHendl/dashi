@@ -1928,19 +1928,22 @@ impl VulkanContext {
     }
 
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
-        let usage = match info.usage {
-            BufferUsage::ALL => vk::BufferUsageFlags::INDEX_BUFFER
-                | vk::BufferUsageFlags::VERTEX_BUFFER
-                | vk::BufferUsageFlags::STORAGE_BUFFER
-                | vk::BufferUsageFlags::INDIRECT_BUFFER
-                | vk::BufferUsageFlags::UNIFORM_BUFFER,
-            BufferUsage::VERTEX => vk::BufferUsageFlags::VERTEX_BUFFER,
-            BufferUsage::INDEX => vk::BufferUsageFlags::INDEX_BUFFER,
-            BufferUsage::UNIFORM => vk::BufferUsageFlags::UNIFORM_BUFFER,
-            BufferUsage::STORAGE => vk::BufferUsageFlags::STORAGE_BUFFER,
-            BufferUsage::INDIRECT => vk::BufferUsageFlags::INDIRECT_BUFFER,
-        } | vk::BufferUsageFlags::TRANSFER_SRC
-            | vk::BufferUsageFlags::TRANSFER_DST;
+        let mut usage = vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST;
+        if info.usage.contains(BufferUsage::VERTEX) {
+            usage |= vk::BufferUsageFlags::VERTEX_BUFFER;
+        }
+        if info.usage.contains(BufferUsage::INDEX) {
+            usage |= vk::BufferUsageFlags::INDEX_BUFFER;
+        }
+        if info.usage.contains(BufferUsage::UNIFORM) {
+            usage |= vk::BufferUsageFlags::UNIFORM_BUFFER;
+        }
+        if info.usage.contains(BufferUsage::STORAGE) {
+            usage |= vk::BufferUsageFlags::STORAGE_BUFFER;
+        }
+        if info.usage.contains(BufferUsage::INDIRECT) {
+            usage |= vk::BufferUsageFlags::INDIRECT_BUFFER;
+        }
 
         let mappable = matches!(info.visibility, MemoryVisibility::CpuAndGpu);
         let create_info = vk_mem::AllocationCreateInfo {
