@@ -27,6 +27,9 @@ pub struct Graphics;
 pub struct PendingGraphics;
 pub struct Compute;
 
+/// Command stream for recording subpass/subdraw work inside an active render pass.
+pub type SubdrawStream = CommandStream<PendingGraphics>;
+
 impl<T> CommandStream<T> {
     pub fn combine<G>(mut self, sink: CommandStream<G>) -> Self {
         self.enc.combine(&sink.enc);
@@ -263,6 +266,11 @@ impl CommandStream<Compute> {
 }
 
 impl CommandStream<PendingGraphics> {
+    /// Create a command stream for subdraw recording inside an active render pass.
+    pub fn subdraw() -> SubdrawStream {
+        Self::new_pending_graphics()
+    }
+
     pub(crate) fn new_pending_graphics() -> Self {
         Self {
             enc: CommandEncoder::new(QueueType::Graphics),

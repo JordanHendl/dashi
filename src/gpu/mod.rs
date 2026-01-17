@@ -29,6 +29,7 @@ pub mod builders;
 pub mod device_selector;
 pub use cmd::{
     CommandStream,
+    SubdrawStream,
 };
 pub use builders::*;
 #[cfg(feature = "vulkan")]

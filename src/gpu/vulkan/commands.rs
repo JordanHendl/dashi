@@ -209,6 +209,21 @@ impl CommandQueue {
     fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
         unsafe { (*self.pool).begin_raw(self.ctx, debug_name, true) }
     }
+
+    #[cfg(debug_assertions)]
+    fn ensure_active_render_pass(&self) -> Result<()> {
+        if self.curr_rp.is_none() {
+            return Err(GPUError::LibraryError(
+                "Drawing requires an active render pass.".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn ensure_active_render_pass(&self) -> Result<()> {
+        Ok(())
+    }
     fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {
             unsafe { (*self.ctx).device.end_command_buffer(self.cmd_buf)? };
@@ -1489,6 +1504,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) -> Result<()> {
+        self.ensure_active_render_pass()?;
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
 
@@ -1559,6 +1575,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) -> Result<()> {
+        self.ensure_active_render_pass()?;
         // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
         // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
         // self.ensure_binding_states(&cmd.bind_tables);
@@ -1648,6 +1665,7 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indirect(&mut self, cmd: &crate::gpu::driver::command::DrawIndirect) -> Result<()> {
+        self.ensure_active_render_pass()?;
         if cmd.vertices.valid() {
             let v = self
                 .ctx_ref()
@@ -1730,6 +1748,7 @@ impl CommandSink for CommandQueue {
         &mut self,
         cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
     ) -> Result<()> {
+        self.ensure_active_render_pass()?;
         if cmd.vertices.valid() {
             let v = self
                 .ctx_ref()
