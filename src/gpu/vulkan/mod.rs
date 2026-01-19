@@ -540,12 +540,15 @@ impl VulkanContext {
             || (vk::api_version_major(device_prop.api_version) == 1
                 && vk::api_version_minor(device_prop.api_version) >= 1);
 
-        let features = vk::PhysicalDeviceFeatures::builder()
-            .shader_clip_distance(true)
-            .multi_draw_indirect(true)
-            .build();
-
+        let supported_features = unsafe { instance.get_physical_device_features(pdevice) };
         let enable_bindless_profile = info.profiles.contains(ContextProfiles::BINDLESS);
+        let mut features = vk::PhysicalDeviceFeatures::builder()
+            .shader_clip_distance(true)
+            .multi_draw_indirect(true);
+        if enable_bindless_profile && supported_features.fragment_stores_and_atomics == vk::TRUE {
+            features = features.fragment_stores_and_atomics(true);
+        }
+        let features = features.build();
         let mut enabled_descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
