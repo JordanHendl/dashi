@@ -560,71 +560,150 @@ impl VulkanContext {
             let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
             let mut vulkan12_features = vk::PhysicalDeviceVulkan12Features::default();
             let mut feature_query = vk::PhysicalDeviceFeatures2::builder().features(features);
-            feature_query = feature_query.push_next(&mut descriptor_indexing);
             if supports_vulkan12 {
                 feature_query = feature_query.push_next(&mut vulkan12_features);
+            } else {
+                feature_query = feature_query.push_next(&mut descriptor_indexing);
             }
             let mut feature_query = feature_query.build();
 
             unsafe { instance.get_physical_device_features2(pdevice, &mut feature_query) };
 
+            if supports_vulkan12 && vulkan12_features.imageless_framebuffer == vk::TRUE {
+                enabled_vulkan12.imageless_framebuffer = vk::TRUE;
+            }
+
             if enable_bindless_profile {
                 if supports_vulkan12 && vulkan12_features.runtime_descriptor_array == vk::TRUE {
                     enabled_vulkan12.runtime_descriptor_array = vk::TRUE;
                 }
-                if descriptor_indexing.runtime_descriptor_array == vk::TRUE {
-                    enabled_descriptor_indexing.runtime_descriptor_array = vk::TRUE;
-                }
-                if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
-                    enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
-                }
-                if descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
-                    == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.descriptor_binding_partially_bound == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .descriptor_binding_sampled_image_update_after_bind = vk::TRUE;
+                    enabled_vulkan12.descriptor_binding_partially_bound = vk::TRUE;
                 }
-                if descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
-                    == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.descriptor_binding_sampled_image_update_after_bind
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .descriptor_binding_uniform_buffer_update_after_bind = vk::TRUE;
+                    enabled_vulkan12.descriptor_binding_sampled_image_update_after_bind = vk::TRUE;
                 }
-                if descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind
-                    == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.descriptor_binding_uniform_buffer_update_after_bind
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .descriptor_binding_storage_buffer_update_after_bind = vk::TRUE;
+                    enabled_vulkan12.descriptor_binding_uniform_buffer_update_after_bind = vk::TRUE;
                 }
-                if descriptor_indexing.descriptor_binding_storage_image_update_after_bind
-                    == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.descriptor_binding_storage_buffer_update_after_bind
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .descriptor_binding_storage_image_update_after_bind = vk::TRUE;
+                    enabled_vulkan12.descriptor_binding_storage_buffer_update_after_bind = vk::TRUE;
                 }
-                if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.descriptor_binding_storage_image_update_after_bind
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .shader_sampled_image_array_non_uniform_indexing = vk::TRUE;
+                    enabled_vulkan12.descriptor_binding_storage_image_update_after_bind = vk::TRUE;
                 }
-                if descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.shader_sampled_image_array_non_uniform_indexing
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .shader_uniform_buffer_array_non_uniform_indexing = vk::TRUE;
+                    enabled_vulkan12.shader_sampled_image_array_non_uniform_indexing = vk::TRUE;
                 }
-                if descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE
+                if supports_vulkan12
+                    && vulkan12_features.shader_uniform_buffer_array_non_uniform_indexing
+                        == vk::TRUE
                 {
-                    enabled_descriptor_indexing
-                        .shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
+                    enabled_vulkan12.shader_uniform_buffer_array_non_uniform_indexing = vk::TRUE;
                 }
+                if supports_vulkan12
+                    && vulkan12_features.shader_storage_buffer_array_non_uniform_indexing
+                        == vk::TRUE
+                {
+                    enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
+                }
+
+                if !supports_vulkan12 {
+                    if descriptor_indexing.runtime_descriptor_array == vk::TRUE {
+                        enabled_descriptor_indexing.runtime_descriptor_array = vk::TRUE;
+                    }
+                    if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
+                        enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
+                    }
+                    if descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .descriptor_binding_sampled_image_update_after_bind = vk::TRUE;
+                    }
+                    if descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .descriptor_binding_uniform_buffer_update_after_bind = vk::TRUE;
+                    }
+                    if descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .descriptor_binding_storage_buffer_update_after_bind = vk::TRUE;
+                    }
+                    if descriptor_indexing.descriptor_binding_storage_image_update_after_bind
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .descriptor_binding_storage_image_update_after_bind = vk::TRUE;
+                    }
+                    if descriptor_indexing.shader_sampled_image_array_non_uniform_indexing
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .shader_sampled_image_array_non_uniform_indexing = vk::TRUE;
+                    }
+                    if descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .shader_uniform_buffer_array_non_uniform_indexing = vk::TRUE;
+                    }
+                    if descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
+                    }
+                }
+            }
+
+            if supports_vulkan12 {
+                enabled_descriptor_indexing.runtime_descriptor_array =
+                    enabled_vulkan12.runtime_descriptor_array;
+                enabled_descriptor_indexing.descriptor_binding_partially_bound =
+                    enabled_vulkan12.descriptor_binding_partially_bound;
+                enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind =
+                    enabled_vulkan12.descriptor_binding_sampled_image_update_after_bind;
+                enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind =
+                    enabled_vulkan12.descriptor_binding_uniform_buffer_update_after_bind;
+                enabled_descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind =
+                    enabled_vulkan12.descriptor_binding_storage_buffer_update_after_bind;
+                enabled_descriptor_indexing.descriptor_binding_storage_image_update_after_bind =
+                    enabled_vulkan12.descriptor_binding_storage_image_update_after_bind;
+                enabled_descriptor_indexing.shader_sampled_image_array_non_uniform_indexing =
+                    enabled_vulkan12.shader_sampled_image_array_non_uniform_indexing;
+                enabled_descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing =
+                    enabled_vulkan12.shader_uniform_buffer_array_non_uniform_indexing;
+                enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing =
+                    enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing;
             }
 
             let descriptor_features_enabled = enabled_descriptor_indexing
                 .runtime_descriptor_array
                 == vk::TRUE
                 || enabled_descriptor_indexing
-                .descriptor_binding_partially_bound
-                == vk::TRUE
+                    .descriptor_binding_partially_bound
+                    == vk::TRUE
                 || enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
                     == vk::TRUE
                 || enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
@@ -640,11 +719,25 @@ impl VulkanContext {
                 || enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing
                     == vk::TRUE;
 
+            let descriptor_features_enabled_v12 = enabled_vulkan12.runtime_descriptor_array
+                == vk::TRUE
+                || enabled_vulkan12.descriptor_binding_partially_bound == vk::TRUE
+                || enabled_vulkan12.descriptor_binding_sampled_image_update_after_bind == vk::TRUE
+                || enabled_vulkan12.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE
+                || enabled_vulkan12.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE
+                || enabled_vulkan12.descriptor_binding_storage_image_update_after_bind == vk::TRUE
+                || enabled_vulkan12.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
+                || enabled_vulkan12.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE
+                || enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE;
+
             let mut f2 = vk::PhysicalDeviceFeatures2::builder().features(features);
-            if descriptor_features_enabled {
+            if !supports_vulkan12 && descriptor_features_enabled {
                 f2 = f2.push_next(&mut enabled_descriptor_indexing);
             }
-            if supports_vulkan12 && enabled_vulkan12.runtime_descriptor_array == vk::TRUE {
+            if supports_vulkan12
+                && (descriptor_features_enabled_v12
+                    || enabled_vulkan12.imageless_framebuffer == vk::TRUE)
+            {
                 f2 = f2.push_next(&mut enabled_vulkan12);
             }
 
@@ -711,7 +804,9 @@ impl VulkanContext {
             device_ci = device_ci.push_next(f2);
             if supports_vulkan11 {
                 device_ci = device_ci.push_next(&mut features16bit);
-                device_ci = device_ci.push_next(&mut imageless);
+                if !supports_vulkan12 {
+                    device_ci = device_ci.push_next(&mut imageless);
+                }
             }
         } else {
             device_ci = device_ci.enabled_features(&features);
