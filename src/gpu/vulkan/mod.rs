@@ -539,6 +539,9 @@ impl VulkanContext {
         let supports_vulkan11 = vk::api_version_major(device_prop.api_version) > 1
             || (vk::api_version_major(device_prop.api_version) == 1
                 && vk::api_version_minor(device_prop.api_version) >= 1);
+        let supports_vulkan12 = vk::api_version_major(device_prop.api_version) > 1
+            || (vk::api_version_major(device_prop.api_version) == 1
+                && vk::api_version_minor(device_prop.api_version) >= 2);
 
         let supported_features = unsafe { instance.get_physical_device_features(pdevice) };
         let enable_bindless_profile = info.profiles.contains(ContextProfiles::BINDLESS);
@@ -551,17 +554,27 @@ impl VulkanContext {
         let features = features.build();
         let mut enabled_descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
+        let mut enabled_vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
         let mut features2 = supports_vulkan11.then(|| {
             let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
-            let mut feature_query = vk::PhysicalDeviceFeatures2::builder()
-                .features(features)
-                .push_next(&mut descriptor_indexing)
-                .build();
+            let mut vulkan12_features = vk::PhysicalDeviceVulkan12Features::default();
+            let mut feature_query = vk::PhysicalDeviceFeatures2::builder().features(features);
+            feature_query = feature_query.push_next(&mut descriptor_indexing);
+            if supports_vulkan12 {
+                feature_query = feature_query.push_next(&mut vulkan12_features);
+            }
+            let mut feature_query = feature_query.build();
 
             unsafe { instance.get_physical_device_features2(pdevice, &mut feature_query) };
 
             if enable_bindless_profile {
+                if supports_vulkan12 && vulkan12_features.runtime_descriptor_array == vk::TRUE {
+                    enabled_vulkan12.runtime_descriptor_array = vk::TRUE;
+                }
+                if descriptor_indexing.runtime_descriptor_array == vk::TRUE {
+                    enabled_descriptor_indexing.runtime_descriptor_array = vk::TRUE;
+                }
                 if descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE {
                     enabled_descriptor_indexing.descriptor_binding_partially_bound = vk::TRUE;
                 }
@@ -607,6 +620,9 @@ impl VulkanContext {
             }
 
             let descriptor_features_enabled = enabled_descriptor_indexing
+                .runtime_descriptor_array
+                == vk::TRUE
+                || enabled_descriptor_indexing
                 .descriptor_binding_partially_bound
                 == vk::TRUE
                 || enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
@@ -627,6 +643,9 @@ impl VulkanContext {
             let mut f2 = vk::PhysicalDeviceFeatures2::builder().features(features);
             if descriptor_features_enabled {
                 f2 = f2.push_next(&mut enabled_descriptor_indexing);
+            }
+            if supports_vulkan12 && enabled_vulkan12.runtime_descriptor_array == vk::TRUE {
+                f2 = f2.push_next(&mut enabled_vulkan12);
             }
 
             features16bit = vk::PhysicalDevice16BitStorageFeatures::builder()
