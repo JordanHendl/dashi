@@ -4,8 +4,8 @@ use ash::vk;
 
 use super::VulkanContext;
 use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
-use crate::gpu::driver::command::CommandSink;
-use crate::gpu::driver::state::{BufferBarrier, Layout, LayoutTransition};
+use crate::gpu::driver::command::{CommandSink, Scope, SyncPoint};
+use crate::gpu::driver::state::{usage_to_access, BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
     BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Fence, GPUError,
@@ -67,6 +67,69 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
                 stencil: *stencil,
             },
         },
+    }
+}
+
+fn sync_scope_access(scope: Scope) -> vk::AccessFlags {
+    match scope {
+        Scope::AllCommonReads => usage_to_access(
+            UsageBits::SAMPLED
+                | UsageBits::STORAGE_READ
+                | UsageBits::UNIFORM_READ
+                | UsageBits::VERTEX_READ
+                | UsageBits::INDEX_READ
+                | UsageBits::INDIRECT_READ,
+        ),
+        Scope::All => vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE,
+    }
+}
+
+fn sync_point_stages(point: SyncPoint) -> (vk::PipelineStageFlags, vk::PipelineStageFlags) {
+    match point {
+        SyncPoint::ComputeToGraphics => (
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+        ),
+        SyncPoint::GraphicsToCompute => (
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+        ),
+        SyncPoint::GraphicsToGraphics => (
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+        ),
+        SyncPoint::TransferToGraphics => (
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+        ),
+        SyncPoint::TransferToCompute => (
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+        ),
+        SyncPoint::ComputeToTransfer => (
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+        SyncPoint::GraphicsToTransfer => (
+            vk::PipelineStageFlags::ALL_GRAPHICS,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+    }
+}
+
+fn sync_point_src_access(point: SyncPoint) -> vk::AccessFlags {
+    match point {
+        SyncPoint::ComputeToGraphics | SyncPoint::ComputeToTransfer => vk::AccessFlags::SHADER_WRITE,
+        SyncPoint::GraphicsToCompute
+        | SyncPoint::GraphicsToGraphics
+        | SyncPoint::GraphicsToTransfer => {
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                | vk::AccessFlags::SHADER_WRITE
+        }
+        SyncPoint::TransferToGraphics | SyncPoint::TransferToCompute => {
+            vk::AccessFlags::TRANSFER_WRITE
+        }
     }
 }
 
@@ -2047,6 +2110,34 @@ impl CommandSink for CommandQueue {
 
     fn prepare_buffer(&mut self, cmd: &crate::gpu::driver::command::PrepareBuffer) -> Result<()> {
         self.ensure_buffer_state_on_queue(cmd.buffer, cmd.usage, cmd.queue)?;
+        Ok(())
+    }
+
+    fn sync_point(&mut self, cmd: &crate::gpu::driver::command::SyncPointCmd) -> Result<()> {
+        let point = SyncPoint::from_u8(cmd.point)
+            .ok_or(GPUError::Unimplemented("invalid sync point"))?;
+        let scope =
+            Scope::from_u8(cmd.scope).ok_or(GPUError::Unimplemented("invalid sync scope"))?;
+        let (src_stage, dst_stage) = sync_point_stages(point);
+        let src_access = sync_point_src_access(point);
+        let dst_access = sync_scope_access(scope);
+        let barrier = vk::MemoryBarrier::builder()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .build();
+
+        unsafe {
+            self.ctx_ref().device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                src_stage,
+                dst_stage,
+                vk::DependencyFlags::empty(),
+                &[barrier],
+                &[],
+                &[],
+            )
+        };
+        self.update_last_access(dst_stage, dst_access);
         Ok(())
     }
 

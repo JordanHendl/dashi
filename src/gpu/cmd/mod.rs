@@ -1,11 +1,10 @@
 use std::marker::PhantomData;
 
+pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::command::{
-    BeginDrawing, BeginRenderPass, BlitImage, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
+    BeginDrawing, BeginRenderPass, BlitImage, CommandEncoder, CommandSink, CopyBuffer,
+    CopyBufferImage, CopyImageBuffer, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
     DrawIndirect, GraphicsPipelineStateUpdate, MSImageResolve,
-};
-use crate::gpu::driver::command::{
-    CommandEncoder, CommandSink, CopyBuffer, CopyBufferImage, CopyImageBuffer,
 };
 use crate::gpu::driver::types::Handle;
 use crate::{
@@ -26,6 +25,110 @@ pub struct Pending;
 pub struct Graphics;
 pub struct PendingGraphics;
 pub struct Compute;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BufferUsage {
+    IndirectRead,
+    VertexRead,
+    IndexRead,
+    UniformRead,
+    StorageRead,
+    StorageWrite,
+    CopySrc,
+    CopyDst,
+    HostRead,
+    HostWrite,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageUsage {
+    SampledRead,
+    StorageRead,
+    StorageWrite,
+    ColorAttachmentWrite,
+    DepthAttachmentWrite,
+    DepthRead,
+    CopySrc,
+    CopyDst,
+    Present,
+}
+
+impl BufferUsage {
+    fn to_resource_use(self) -> ResourceUse {
+        match self {
+            BufferUsage::IndirectRead => ResourceUse::IndirectRead,
+            BufferUsage::VertexRead => ResourceUse::VertexRead,
+            BufferUsage::IndexRead => ResourceUse::IndexRead,
+            BufferUsage::UniformRead => ResourceUse::UniformRead,
+            BufferUsage::StorageRead => ResourceUse::StorageRead,
+            BufferUsage::StorageWrite => ResourceUse::StorageWrite,
+            BufferUsage::CopySrc => ResourceUse::CopySrc,
+            BufferUsage::CopyDst => ResourceUse::CopyDst,
+            BufferUsage::HostRead => ResourceUse::HostRead,
+            BufferUsage::HostWrite => ResourceUse::HostWrite,
+        }
+    }
+}
+
+impl ImageUsage {
+    fn to_resource_use(self) -> ResourceUse {
+        match self {
+            ImageUsage::SampledRead => ResourceUse::Sampled,
+            ImageUsage::StorageRead => ResourceUse::StorageRead,
+            ImageUsage::StorageWrite => ResourceUse::StorageWrite,
+            ImageUsage::ColorAttachmentWrite => ResourceUse::ColorAttachment,
+            ImageUsage::DepthAttachmentWrite => ResourceUse::DepthAttachment,
+            ImageUsage::DepthRead => ResourceUse::DepthRead,
+            ImageUsage::CopySrc => ResourceUse::CopySrc,
+            ImageUsage::CopyDst => ResourceUse::CopyDst,
+            ImageUsage::Present => ResourceUse::Present,
+        }
+    }
+}
+
+pub trait PassResource {
+    type Usage;
+    fn apply_read(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage);
+    fn apply_write(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage);
+}
+
+impl PassResource for Handle<Buffer> {
+    type Usage = BufferUsage;
+
+    fn apply_read(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage) {
+        enc.prepare_buffer_for(resource, usage.to_resource_use());
+    }
+
+    fn apply_write(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage) {
+        enc.prepare_buffer_for(resource, usage.to_resource_use());
+    }
+}
+
+impl PassResource for Handle<Image> {
+    type Usage = ImageUsage;
+
+    fn apply_read(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage) {
+        enc.prepare_image_for(resource, usage.to_resource_use());
+    }
+
+    fn apply_write(enc: &mut CommandEncoder, resource: Self, usage: Self::Usage) {
+        enc.prepare_image_for(resource, usage.to_resource_use());
+    }
+}
+
+pub struct Pass<'a> {
+    enc: &'a mut CommandEncoder,
+}
+
+impl<'a> Pass<'a> {
+    pub fn read<R: PassResource>(&mut self, resource: R, usage: R::Usage) {
+        R::apply_read(self.enc, resource, usage);
+    }
+
+    pub fn write<R: PassResource>(&mut self, resource: R, usage: R::Usage) {
+        R::apply_write(self.enc, resource, usage);
+    }
+}
 
 /// Command stream for recording subpass/subdraw work inside an active render pass.
 pub type SubdrawStream = CommandStream<PendingGraphics>;
@@ -72,6 +175,17 @@ impl CommandStream<Recording> {
             enc: self.enc,
             _state: PhantomData,
         }
+    }
+
+    /// Begin a render-graph-lite pass and declare resource dependencies.
+    pub fn pass(&mut self) -> Pass<'_> {
+        Pass { enc: &mut self.enc }
+    }
+
+    /// Insert an explicit global sync point between pipeline stages.
+    pub fn sync(mut self, point: SyncPoint, scope: Scope) -> Self {
+        self.enc.sync_point(point, scope);
+        self
     }
 
     /// Explicitly transition a buffer to a desired usage when automatic inference

@@ -556,6 +556,7 @@ impl VulkanContext {
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
         let mut enabled_vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
+        let mut use_vulkan12_features = false;
         let mut features2 = supports_vulkan11.then(|| {
             let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
             let mut vulkan12_features = vk::PhysicalDeviceVulkan12Features::default();
@@ -734,10 +735,10 @@ impl VulkanContext {
             if !supports_vulkan12 && descriptor_features_enabled {
                 f2 = f2.push_next(&mut enabled_descriptor_indexing);
             }
-            if supports_vulkan12
+            use_vulkan12_features = supports_vulkan12
                 && (descriptor_features_enabled_v12
-                    || enabled_vulkan12.imageless_framebuffer == vk::TRUE)
-            {
+                    || enabled_vulkan12.imageless_framebuffer == vk::TRUE);
+            if use_vulkan12_features {
                 f2 = f2.push_next(&mut enabled_vulkan12);
             }
 
@@ -795,6 +796,10 @@ impl VulkanContext {
 
         let mut imageless = vk::PhysicalDeviceImagelessFramebufferFeatures::default();
         imageless.imageless_framebuffer = vk::TRUE;
+        let imageless_extension_enabled = extensions_to_enable.iter().any(|ext| {
+            let ext_name = unsafe { CStr::from_ptr(*ext) };
+            ext_name == vk::KhrImagelessFramebufferFn::name()
+        });
 
         let mut device_ci = vk::DeviceCreateInfo::builder()
             .enabled_extension_names(&extensions_to_enable)
@@ -804,7 +809,7 @@ impl VulkanContext {
             device_ci = device_ci.push_next(f2);
             if supports_vulkan11 {
                 device_ci = device_ci.push_next(&mut features16bit);
-                if !supports_vulkan12 {
+                if !supports_vulkan12 && !use_vulkan12_features && imageless_extension_enabled {
                     device_ci = device_ci.push_next(&mut imageless);
                 }
             }
@@ -2046,6 +2051,7 @@ impl VulkanContext {
 
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
         let mut usage = vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST;
+    
         if info.usage.contains(BufferUsage::VERTEX) {
             usage |= vk::BufferUsageFlags::VERTEX_BUFFER;
         }

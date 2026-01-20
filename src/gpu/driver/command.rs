@@ -43,6 +43,7 @@ pub enum Op {
     PrepareBuffer = 20,
     GpuTimerBegin = 21,
     GpuTimerEnd = 22,
+    SyncPoint = 24,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -70,6 +71,57 @@ pub enum StoreOp {
 
 unsafe impl Zeroable for StoreOp {}
 unsafe impl Pod for StoreOp {}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyncPoint {
+    ComputeToGraphics = 0,
+    GraphicsToCompute = 1,
+    GraphicsToGraphics = 2,
+    TransferToGraphics = 3,
+    TransferToCompute = 4,
+    ComputeToTransfer = 5,
+    GraphicsToTransfer = 6,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    AllCommonReads = 0,
+    All = 1,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct SyncPointCmd {
+    pub point: u8,
+    pub scope: u8,
+}
+
+impl SyncPoint {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(SyncPoint::ComputeToGraphics),
+            1 => Some(SyncPoint::GraphicsToCompute),
+            2 => Some(SyncPoint::GraphicsToGraphics),
+            3 => Some(SyncPoint::TransferToGraphics),
+            4 => Some(SyncPoint::TransferToCompute),
+            5 => Some(SyncPoint::ComputeToTransfer),
+            6 => Some(SyncPoint::GraphicsToTransfer),
+            _ => None,
+        }
+    }
+}
+
+impl Scope {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Scope::AllCommonReads),
+            1 => Some(Scope::All),
+            _ => None,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug)]
@@ -605,6 +657,16 @@ impl CommandEncoder {
         self.push(Op::GpuTimerEnd, &GpuTimerEnd { frame });
     }
 
+    pub fn sync_point(&mut self, point: SyncPoint, scope: Scope) {
+        self.push(
+            Op::SyncPoint,
+            &SyncPointCmd {
+                point: point as u8,
+                scope: scope as u8,
+            },
+        );
+    }
+
     pub fn combine(&mut self, other: &CommandEncoder) {
         assert_eq!(
             self.queue, other.queue,
@@ -655,6 +717,13 @@ impl CommandEncoder {
                     let _ = cmd.payload::<NextSubpass>();
                     self.next_subpass();
                 }
+                Op::SyncPoint => {
+                    let payload = cmd.payload::<SyncPointCmd>();
+                    let point = SyncPoint::from_u8(payload.point)
+                        .expect("invalid sync point payload");
+                    let scope = Scope::from_u8(payload.scope).expect("invalid scope payload");
+                    self.sync_point(point, scope);
+                }
             }
         }
     }
@@ -690,6 +759,7 @@ impl CommandEncoder {
                 Op::TransitionImage => sink.transition_image(cmd.payload())?,
                 Op::BeginRenderPass => sink.begin_render_pass(cmd.payload())?,
                 Op::NextSubpass => sink.next_subpass(cmd.payload())?,
+                Op::SyncPoint => sink.sync_point(cmd.payload())?,
             }
         }
         Ok(cnt)
@@ -859,6 +929,7 @@ impl Op {
             x if x == Op::NextSubpass as u16 => Some(Op::NextSubpass),
             x if x == Op::TransitionImage as u16 => Some(Op::TransitionImage),
             x if x == Op::PrepareBuffer as u16 => Some(Op::PrepareBuffer),
+            x if x == Op::SyncPoint as u16 => Some(Op::SyncPoint),
             _ => None,
         }
     }
@@ -889,6 +960,7 @@ pub trait CommandSink {
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd) -> Result<()>;
     fn gpu_timer_begin(&mut self, cmd: &GpuTimerBegin) -> Result<()>;
     fn gpu_timer_end(&mut self, cmd: &GpuTimerEnd) -> Result<()>;
+    fn sync_point(&mut self, cmd: &SyncPointCmd) -> Result<()>;
 }
 
 #[cfg(feature = "copy_texture_compat")]

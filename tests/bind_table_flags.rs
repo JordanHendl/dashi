@@ -52,10 +52,9 @@ fn bind_table_updates_validate_variable_types() {
             }],
         })
         .unwrap();
-
     let mut allocator = ctx.make_dynamic_allocator(&Default::default()).unwrap();
     let mut allocator_b = ctx.make_dynamic_allocator(&Default::default()).unwrap();
-
+    
     let table = ctx
         .make_bind_table(&BindTableInfo {
             debug_name: "bind_table_updates",

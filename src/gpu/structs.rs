@@ -655,7 +655,7 @@ impl<'a> Default for BufferInfo<'a> {
             byte_size: 1024,
             visibility: MemoryVisibility::CpuAndGpu,
             initial_data: None,
-            usage: BufferUsage::UNIFORM,
+            usage: BufferUsage::default(),
         }
     }
 }
@@ -682,7 +682,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
         Self {
             debug_name: "",
             byte_size: 1024 * 1024,
-            usage: BufferUsage::STORAGE,
+            usage: BufferUsage::default(),
             num_allocations: 2048,
             allocation_size: 256,
         }

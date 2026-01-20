@@ -33,6 +33,7 @@ pub enum ResourceUse {
     Present,
     VertexRead,
     IndexRead,
+    IndirectRead,
     UniformRead,
     HostRead,
     HostWrite,
@@ -60,6 +61,7 @@ bitflags! {
         const HOST_READ = 0x4000;
         const HOST_WRITE = 0x8000;
         const COMPUTE_SHADER = 0x9000;
+        const INDIRECT_READ = 0x10000;
     }
 }
 
