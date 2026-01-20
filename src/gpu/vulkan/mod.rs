@@ -2007,6 +2007,7 @@ impl VulkanContext {
             pool: buffer,
             ptr: self.map_buffer_mut(BufferView::new(buffer))?.as_mut_ptr(),
             min_alloc_size,
+            rollover: info.rollover,
         });
     }
 

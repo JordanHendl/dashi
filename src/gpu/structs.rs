@@ -666,6 +666,8 @@ pub struct DynamicAllocatorInfo<'a> {
     pub num_allocations: u32,
     pub byte_size: u32,
     pub allocation_size: u32,
+    /// If true, the allocator resets automatically when it reaches the end.
+    pub rollover: bool,
 }
 
 impl Hash for DynamicAllocatorInfo<'_> {
@@ -674,6 +676,7 @@ impl Hash for DynamicAllocatorInfo<'_> {
         self.num_allocations.hash(state);
         self.byte_size.hash(state);
         self.allocation_size.hash(state);
+        self.rollover.hash(state);
     }
 }
 
@@ -685,6 +688,7 @@ impl<'a> Default for DynamicAllocatorInfo<'a> {
             usage: BufferUsage::default(),
             num_allocations: 2048,
             allocation_size: 256,
+            rollover: true,
         }
     }
 }

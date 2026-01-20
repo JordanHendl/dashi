@@ -103,6 +103,7 @@ pub struct DynamicAllocatorState {
     pub pool: Handle<Buffer>,
     pub report: offset_allocator::StorageReport,
     pub min_alloc_size: u32,
+    pub rollover: bool,
 }
 
 impl Hash for DynamicAllocatorState {
@@ -111,6 +112,7 @@ impl Hash for DynamicAllocatorState {
         self.report.total_free_space.hash(state);
         self.report.largest_free_region.hash(state);
         self.min_alloc_size.hash(state);
+        self.rollover.hash(state);
     }
 }
 
@@ -120,6 +122,7 @@ pub struct DynamicAllocator {
     pub(crate) ptr: *mut u8,
     pub(crate) min_alloc_size: u32,
     pub(crate) pool: Handle<Buffer>,
+    pub(crate) rollover: bool,
 }
 
 impl Default for DynamicAllocator {
@@ -129,6 +132,7 @@ impl Default for DynamicAllocator {
             ptr: std::ptr::null_mut(),
             min_alloc_size: Default::default(),
             pool: Default::default(),
+            rollover: true,
         }
     }
 }
@@ -148,6 +152,7 @@ impl DynamicAllocator {
             pool: self.pool,
             report: self.allocator.storage_report(),
             min_alloc_size: self.min_alloc_size,
+            rollover: self.rollover,
         }
     }
 
@@ -156,9 +161,18 @@ impl DynamicAllocator {
     /// # Safety
     /// The caller must ensure that no pending GPU reads exist for
     /// buffers previously returned by this allocator before calling this
-    /// method.
+    /// method. If rollover is enabled, the allocator may be reset when it
+    /// reaches the end of its space, invalidating previously returned
+    /// buffers.
     pub fn bump(&mut self) -> Option<DynamicBuffer> {
-        let alloc = self.allocator.allocate(self.min_alloc_size)?;
+        let alloc = match self.allocator.allocate(self.min_alloc_size) {
+            Some(alloc) => alloc,
+            None if self.rollover => {
+                self.allocator.reset();
+                self.allocator.allocate(self.min_alloc_size)?
+            }
+            None => return None,
+        };
         Some(DynamicBuffer {
             handle: self.pool,
             alloc,
