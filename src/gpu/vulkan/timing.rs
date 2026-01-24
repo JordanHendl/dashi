@@ -3,6 +3,7 @@ use crate::GPUError;
 
 pub struct GpuTimer {
     pub(super) pool: vk::QueryPool,
+    state: TimerState,
 }
 
 impl GpuTimer {
@@ -12,23 +13,35 @@ impl GpuTimer {
             .query_type(vk::QueryType::TIMESTAMP)
             .build();
         let pool = unsafe { device.create_query_pool(&info, None)? };
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            state: TimerState::Uninitialized,
+        })
     }
 
     pub(super) unsafe fn destroy(&self, device: &ash::Device) {
         device.destroy_query_pool(self.pool, None);
     }
 
-    pub(super) unsafe fn begin(&self, device: &ash::Device, cmd: vk::CommandBuffer) {
+    pub(super) unsafe fn begin(&mut self, device: &ash::Device, cmd: vk::CommandBuffer) {
         device.cmd_reset_query_pool(cmd, self.pool, 0, 2);
         device.cmd_write_timestamp(cmd, vk::PipelineStageFlags::TOP_OF_PIPE, self.pool, 0);
+        self.state = TimerState::Begun;
     }
 
-    pub(super) unsafe fn end(&self, device: &ash::Device, cmd: vk::CommandBuffer) {
+    pub(super) unsafe fn end(&mut self, device: &ash::Device, cmd: vk::CommandBuffer) {
         device.cmd_write_timestamp(cmd, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.pool, 1);
+        if self.state == TimerState::Begun {
+            self.state = TimerState::Ended;
+        }
     }
 
-    pub(super) fn resolve(&self, device: &ash::Device, period: f32) -> Result<f32, GPUError> {
+    pub(super) fn resolve(&mut self, device: &ash::Device, period: f32) -> Result<f32, GPUError> {
+        if self.state != TimerState::Ended {
+            return Err(GPUError::LibraryError(
+                "GPU timer queries have not been initialized or ended yet.".to_string(),
+            ));
+        }
         let mut data = [0u64; 2];
         unsafe {
             device.get_query_pool_results(
@@ -44,3 +57,9 @@ impl GpuTimer {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TimerState {
+    Uninitialized,
+    Begun,
+    Ended,
+}

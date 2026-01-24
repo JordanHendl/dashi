@@ -1963,7 +1963,7 @@ impl VulkanContext {
     /// [`init_gpu_timers`] must be called beforehand, and the matching
     /// [`gpu_timer_end`] must be invoked on the **same** `CommandQueue`.
     pub fn gpu_timer_begin(&mut self, list: &mut CommandQueue, frame: usize) {
-        if let Some(t) = self.gpu_timers.get(frame) {
+        if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe { t.begin(&self.device, list.cmd_buf) };
         }
     }
@@ -1972,7 +1972,7 @@ impl VulkanContext {
     ///
     /// Must pair with a preceding [`gpu_timer_begin`] call on the same list.
     pub fn gpu_timer_end(&mut self, list: &mut CommandQueue, frame: usize) {
-        if let Some(t) = self.gpu_timers.get(frame) {
+        if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe { t.end(&self.device, list.cmd_buf) };
         }
     }
@@ -1983,7 +1983,7 @@ impl VulkanContext {
     /// the GPU has finished executing it (e.g. by waiting on the fence).
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         self.gpu_timers
-            .get(frame)
+            .get_mut(frame)
             .and_then(|t| t.resolve(&self.device, self.timestamp_period).ok())
     }
 
