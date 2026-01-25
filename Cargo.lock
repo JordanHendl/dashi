@@ -1597,7 +1597,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 [[package]]
 name = "resource_pool"
 version = "0.1.0"
-source = "git+https://github.com/JordanHendl/ResourcePool#f73cc83485ed385eb0244af37d7f9511b806ed6d"
+source = "git+https://github.com/JordanHendl/ResourcePool#f7d9cd5ce8156275fc039ee20a4807e910ef23d5"
 dependencies = [
  "bytemuck",
 ]

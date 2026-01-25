@@ -2,6 +2,7 @@ use crate::utils::Handle;
 use ash::vk;
 use offset_allocator;
 use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex};
 use vk_mem;
 
 use super::BufferInfo;
@@ -118,7 +119,7 @@ impl Hash for DynamicAllocatorState {
 
 #[derive(Clone)]
 pub struct DynamicAllocator {
-    pub(crate) allocator: offset_allocator::Allocator,
+    pub(crate) allocator: Arc<Mutex<offset_allocator::Allocator>>,
     pub(crate) ptr: *mut u8,
     pub(crate) min_alloc_size: u32,
     pub(crate) pool: Handle<Buffer>,
@@ -128,7 +129,7 @@ pub struct DynamicAllocator {
 impl Default for DynamicAllocator {
     fn default() -> Self {
         Self {
-            allocator: Default::default(),
+            allocator: Arc::new(Mutex::new(Default::default())),
             ptr: std::ptr::null_mut(),
             min_alloc_size: Default::default(),
             pool: Default::default(),
@@ -143,14 +144,22 @@ impl DynamicAllocator {
     /// # Safety
     /// Only call this when no GPU operations are reading from the
     /// allocations produced by this allocator.
-    pub fn reset(&mut self) {
-        self.allocator.reset();
+    pub fn reset(&self) {
+        let mut allocator = self
+            .allocator
+            .lock()
+            .expect("dynamic allocator lock poisoned");
+        allocator.reset();
     }
 
     pub fn state(&self) -> DynamicAllocatorState {
+        let allocator = self
+            .allocator
+            .lock()
+            .expect("dynamic allocator lock poisoned");
         DynamicAllocatorState {
             pool: self.pool,
-            report: self.allocator.storage_report(),
+            report: allocator.storage_report(),
             min_alloc_size: self.min_alloc_size,
             rollover: self.rollover,
         }
@@ -164,12 +173,16 @@ impl DynamicAllocator {
     /// method. If rollover is enabled, the allocator may be reset when it
     /// reaches the end of its space, invalidating previously returned
     /// buffers.
-    pub fn bump(&mut self) -> Option<DynamicBuffer> {
-        let alloc = match self.allocator.allocate(self.min_alloc_size) {
+    pub fn bump(&self) -> Option<DynamicBuffer> {
+        let mut allocator = self
+            .allocator
+            .lock()
+            .expect("dynamic allocator lock poisoned");
+        let alloc = match allocator.allocate(self.min_alloc_size) {
             Some(alloc) => alloc,
             None if self.rollover => {
-                self.allocator.reset();
-                self.allocator.allocate(self.min_alloc_size)?
+                allocator.reset();
+                allocator.allocate(self.min_alloc_size)?
             }
             None => return None,
         };

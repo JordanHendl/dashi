@@ -1376,42 +1376,45 @@ impl VulkanContext {
         src_access: vk::AccessFlags,
         dst_access: vk::AccessFlags,
     ) {
-        let view = self.image_views.get_mut_ref(img).unwrap();
-        let img = self.images.get_mut_ref(view.img).unwrap();
+        let view = self.image_views.get_ref(img).unwrap();
         let base = view.range.base_mip_level as usize;
         let count = view.range.level_count as usize;
-        let old_layout = img.layouts[base];
         let new_layout = if layout == vk::ImageLayout::UNDEFINED {
             vk::ImageLayout::GENERAL
         } else {
             layout
         };
-        unsafe {
-            self.device.cmd_pipeline_barrier(
-                cmd,
-                src,
-                dst,
-                vk::DependencyFlags::default(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::builder()
-                    .new_layout(new_layout)
-                    .old_layout(old_layout)
-                    .image(img.img)
-                    .src_access_mask(src_access)
-                    .dst_access_mask(dst_access)
-                    .subresource_range(view.range)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .build()],
-            )
-        };
+        self.images
+            .with_mut(view.img, |img| {
+                let old_layout = img.layouts[base];
+                unsafe {
+                    self.device.cmd_pipeline_barrier(
+                        cmd,
+                        src,
+                        dst,
+                        vk::DependencyFlags::default(),
+                        &[],
+                        &[],
+                        &[vk::ImageMemoryBarrier::builder()
+                            .new_layout(new_layout)
+                            .old_layout(old_layout)
+                            .image(img.img)
+                            .src_access_mask(src_access)
+                            .dst_access_mask(dst_access)
+                            .subresource_range(view.range)
+                            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                            .build()],
+                    )
+                };
 
-        for i in base..base + count {
-            if let Some(l) = img.layouts.get_mut(i) {
-                *l = layout;
-            }
-        }
+                for i in base..base + count {
+                    if let Some(l) = img.layouts.get_mut(i) {
+                        *l = layout;
+                    }
+                }
+            })
+            .unwrap();
     }
 
     /// Utility: given an image’s old & new layouts, pick the correct
@@ -2003,7 +2006,9 @@ impl VulkanContext {
             + (info.allocation_size
                 % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
         return Ok(DynamicAllocator {
-            allocator: offset_allocator::Allocator::new(info.byte_size, info.num_allocations),
+            allocator: std::sync::Arc::new(std::sync::Mutex::new(
+                offset_allocator::Allocator::new(info.byte_size, info.num_allocations),
+            )),
             pool: buffer,
             ptr: self.map_buffer_mut(BufferView::new(buffer))?.as_mut_ptr(),
             min_alloc_size,
@@ -2318,11 +2323,16 @@ impl VulkanContext {
     /// - Ensure all GPU work using the buffer has completed.
     /// - The context must still be alive.
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
-        let buf = self.buffers.get_mut_ref(handle).unwrap();
-        if !buf.suballocated {
-            unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
-        }
-        self.buffer_infos.release(buf.info_handle);
+        let info_handle = self
+            .buffers
+            .with_mut(handle, |buf| {
+                if !buf.suballocated {
+                    unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+                }
+                buf.info_handle
+            })
+            .unwrap();
+        self.buffer_infos.release(info_handle);
         self.buffers.release(handle);
     }
 
@@ -2332,8 +2342,11 @@ impl VulkanContext {
     /// - The semaphore must not be in use by the GPU.
     /// - The context must still be alive.
     pub fn destroy_semaphore(&mut self, handle: Handle<Semaphore>) {
-        let sem = self.semaphores.get_mut_ref(handle).unwrap();
-        unsafe { self.device.destroy_semaphore(sem.raw, None) };
+        self.semaphores
+            .with_mut(handle, |sem| unsafe {
+                self.device.destroy_semaphore(sem.raw, None);
+            })
+            .unwrap();
         self.semaphores.release(handle);
     }
 
@@ -2343,8 +2356,11 @@ impl VulkanContext {
     /// - Wait for the fence to be signaled before destroying it.
     /// - The context must still be alive.
     pub fn destroy_fence(&mut self, handle: Handle<Fence>) {
-        let fence = self.fences.get_mut_ref(handle).unwrap();
-        unsafe { self.device.destroy_fence(fence.raw, None) };
+        self.fences
+            .with_mut(handle, |fence| unsafe {
+                self.device.destroy_fence(fence.raw, None);
+            })
+            .unwrap();
         self.fences.release(handle);
     }
 
@@ -2355,9 +2371,9 @@ impl VulkanContext {
     /// - Destroy views before destroying the underlying image.
     /// - The context must still be alive.
     pub fn destroy_image_view(&mut self, handle: Handle<VkImageView>) {
-        if let Some(img) = self.image_views.get_mut_ref(handle) {
-            unsafe { self.device.destroy_image_view(img.view, None) };
-        }
+        let _ = self.image_views.with_mut(handle, |img| unsafe {
+            self.device.destroy_image_view(img.view, None);
+        });
         self.image_view_cache.retain(|_, v| *v != handle);
         self.image_views.release(handle);
     }
@@ -2390,9 +2406,14 @@ impl VulkanContext {
         self.image_view_cache
             .retain(|_, view_handle| !to_destroy.contains(view_handle));
 
-        let img = self.images.get_mut_ref(handle).unwrap();
-        unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
-        self.image_infos.release(img.info_handle);
+        let info_handle = self
+            .images
+            .with_mut(handle, |img| {
+                unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+                img.info_handle
+            })
+            .unwrap();
+        self.image_infos.release(info_handle);
         self.images.release(handle);
     }
 
@@ -2955,8 +2976,11 @@ impl VulkanContext {
                 .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
 
-        let table = self.bind_tables.get_mut_ref(table_handle).unwrap();
-        table.buffer_states = tracked_states;
+        self.bind_tables
+            .with_mut(table_handle, |table| {
+                table.buffer_states = tracked_states;
+            })
+            .unwrap();
 
         Ok(())
     }

@@ -587,16 +587,16 @@ impl CommandQueue {
             )
         };
         self.update_last_access(dst_stage, dst_access);
-        let img = ctx
-            .images
-            .get_mut_ref(cmd.image)
+        ctx.images
+            .with_mut(cmd.image, |img| {
+                for level in 0..cmd.range.level_count {
+                    let mip = (cmd.range.base_mip + level) as usize;
+                    if let Some(l) = img.layouts.get_mut(mip) {
+                        *l = layout_to_vk(cmd.new_layout);
+                    }
+                }
+            })
             .ok_or(GPUError::SlotError())?;
-        for level in 0..cmd.range.level_count {
-            let mip = (cmd.range.base_mip + level) as usize;
-            if let Some(l) = img.layouts.get_mut(mip) {
-                *l = layout_to_vk(cmd.new_layout);
-            }
-        }
         Ok(())
     }
 
@@ -774,14 +774,17 @@ impl CommandSink for CommandQueue {
             for (view, layout) in attachments_prev {
                 let ctx = self.ctx_ref();
                 let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
-                let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
-                let base = v.range.base_mip_level as usize;
-                let count = v.range.level_count as usize;
-                for i in base..base + count {
-                    if let Some(l) = img.layouts.get_mut(i) {
-                        *l = layout;
-                    }
-                }
+                ctx.images
+                    .with_mut(v.img, |img| {
+                        let base = v.range.base_mip_level as usize;
+                        let count = v.range.level_count as usize;
+                        for i in base..base + count {
+                            if let Some(l) = img.layouts.get_mut(i) {
+                                *l = layout;
+                            }
+                        }
+                    })
+                    .ok_or(GPUError::SlotError())?;
             }
         }
 
@@ -890,16 +893,16 @@ impl CommandSink for CommandQueue {
                 target_height,
             )?;
             {
-                let rp_mut = ctx
-                    .render_passes
-                    .get_mut_ref(cmd.render_pass)
+                ctx.render_passes
+                    .with_mut(cmd.render_pass, |rp_mut| {
+                        unsafe {
+                            ctx.device.destroy_framebuffer(rp_mut.fb, None);
+                        }
+                        rp_mut.fb = new_fb;
+                        rp_mut.width = target_width;
+                        rp_mut.height = target_height;
+                    })
                     .ok_or(GPUError::SlotError())?;
-                unsafe {
-                    ctx.device.destroy_framebuffer(rp_mut.fb, None);
-                }
-                rp_mut.fb = new_fb;
-                rp_mut.width = target_width;
-                rp_mut.height = target_height;
             }
             fb = new_fb;
             rp_width = target_width;
@@ -916,14 +919,17 @@ impl CommandSink for CommandQueue {
                 .image_views
                 .get_ref(*view_handle)
                 .ok_or(GPUError::SlotError())?;
-            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
-            let base = v.range.base_mip_level as usize;
-            let count = v.range.level_count as usize;
-            for i in base..base + count {
-                if let Some(l) = img.layouts.get_mut(i) {
-                    *l = initial_layout;
-                }
-            }
+            ctx.images
+                .with_mut(v.img, |img| {
+                    let base = v.range.base_mip_level as usize;
+                    let count = v.range.level_count as usize;
+                    for i in base..base + count {
+                        if let Some(l) = img.layouts.get_mut(i) {
+                            *l = initial_layout;
+                        }
+                    }
+                })
+                .ok_or(GPUError::SlotError())?;
         }
 
         let mut attachment_info =
@@ -1004,14 +1010,17 @@ impl CommandSink for CommandQueue {
             for (view, layout) in attachments_prev {
                 let ctx = self.ctx_ref();
                 let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
-                let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
-                let base = v.range.base_mip_level as usize;
-                let count = v.range.level_count as usize;
-                for i in base..base + count {
-                    if let Some(l) = img.layouts.get_mut(i) {
-                        *l = layout;
-                    }
-                }
+                ctx.images
+                    .with_mut(v.img, |img| {
+                        let base = v.range.base_mip_level as usize;
+                        let count = v.range.level_count as usize;
+                        for i in base..base + count {
+                            if let Some(l) = img.layouts.get_mut(i) {
+                                *l = layout;
+                            }
+                        }
+                    })
+                    .ok_or(GPUError::SlotError())?;
             }
         }
 
@@ -1163,16 +1172,16 @@ impl CommandSink for CommandQueue {
                 target_height,
             )?;
             {
-                let rp_mut = ctx
-                    .render_passes
-                    .get_mut_ref(cmd.render_pass)
+                ctx.render_passes
+                    .with_mut(cmd.render_pass, |rp_mut| {
+                        unsafe {
+                            ctx.device.destroy_framebuffer(rp_mut.fb, None);
+                        }
+                        rp_mut.fb = new_fb;
+                        rp_mut.width = target_width;
+                        rp_mut.height = target_height;
+                    })
                     .ok_or(GPUError::SlotError())?;
-                unsafe {
-                    ctx.device.destroy_framebuffer(rp_mut.fb, None);
-                }
-                rp_mut.fb = new_fb;
-                rp_mut.width = target_width;
-                rp_mut.height = target_height;
             }
             fb = new_fb;
             rp_width = target_width;
@@ -1189,14 +1198,17 @@ impl CommandSink for CommandQueue {
                 .image_views
                 .get_ref(*view_handle)
                 .ok_or(GPUError::SlotError())?;
-            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
-            let base = v.range.base_mip_level as usize;
-            let count = v.range.level_count as usize;
-            for i in base..base + count {
-                if let Some(l) = img.layouts.get_mut(i) {
-                    *l = initial_layout;
-                }
-            }
+            ctx.images
+                .with_mut(v.img, |img| {
+                    let base = v.range.base_mip_level as usize;
+                    let count = v.range.level_count as usize;
+                    for i in base..base + count {
+                        if let Some(l) = img.layouts.get_mut(i) {
+                            *l = initial_layout;
+                        }
+                    }
+                })
+                .ok_or(GPUError::SlotError())?;
         }
 
         let mut attachment_info =
@@ -1247,14 +1259,17 @@ impl CommandSink for CommandQueue {
         for (view, layout) in attachments {
             let ctx = self.ctx_ref();
             let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
-            let img = ctx.images.get_mut_ref(v.img).ok_or(GPUError::SlotError())?;
-            let base = v.range.base_mip_level as usize;
-            let count = v.range.level_count as usize;
-            for i in base..base + count {
-                if let Some(l) = img.layouts.get_mut(i) {
-                    *l = layout;
-                }
-            }
+            ctx.images
+                .with_mut(v.img, |img| {
+                    let base = v.range.base_mip_level as usize;
+                    let count = v.range.level_count as usize;
+                    for i in base..base + count {
+                        if let Some(l) = img.layouts.get_mut(i) {
+                            *l = layout;
+                        }
+                    }
+                })
+                .ok_or(GPUError::SlotError())?;
         }
 
         self.curr_rp = None;
