@@ -2692,9 +2692,10 @@ impl VulkanContext {
             });
         };
         let mut tracked_states = Vec::new();
-        let mut write_descriptor_sets = Vec::with_capacity(9064);
-        let mut buffer_infos = Vec::with_capacity(9064);
-        let mut image_infos = Vec::with_capacity(9064);
+        let total_resources: usize = bindings.iter().map(|binding| binding.resources.len()).sum();
+        let mut write_descriptor_sets = Vec::with_capacity(total_resources);
+        let mut buffer_infos = Vec::with_capacity(total_resources);
+        let mut image_infos = Vec::with_capacity(total_resources);
         let mut seen_slots: HashMap<u32, HashSet<u32>> = HashMap::new();
 
         for binding_info in bindings.iter() {
@@ -2963,10 +2964,10 @@ impl VulkanContext {
     /// Creates a bind table and initializes it with the provided bindings.
     pub fn make_bind_table(&mut self, info: &BindTableInfo) -> Result<Handle<BindTable>, GPUError> {
         let layout = self.bind_table_layouts.get_ref(info.layout).unwrap();
-
+        let set_layouts = [layout.layout];
         let alloc_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(layout.pool)
-            .set_layouts(&[layout.layout])
+            .set_layouts(&set_layouts)
             .build();
 
         let descriptor_sets = unsafe { self.device.allocate_descriptor_sets(&alloc_info)? };
