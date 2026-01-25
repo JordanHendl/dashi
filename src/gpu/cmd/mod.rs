@@ -18,6 +18,9 @@ pub struct CommandStream<S> {
     _state: PhantomData<S>,
 }
 
+unsafe impl<S> Send for CommandStream<S> {}
+unsafe impl<S> Sync for CommandStream<S> {}
+
 pub struct Initial;
 pub struct Recording;
 pub struct Executable;
