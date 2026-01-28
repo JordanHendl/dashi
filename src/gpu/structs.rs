@@ -812,8 +812,19 @@ pub enum BindTableVariableType {
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderType {
     Vertex,
+    TessellationControl,
+    TessellationEvaluation,
+    Geometry,
     Fragment,
     Compute,
+    Task,
+    Mesh,
+    RayGeneration,
+    AnyHit,
+    ClosestHit,
+    Miss,
+    Intersection,
+    Callable,
     All,
 }
 
@@ -863,12 +874,23 @@ impl<'a> Default for BindTableLayoutInfo<'a> {
 }
 
 #[inline]
-fn stage_bit(s: ShaderType) -> u8 {
+fn stage_bit(s: ShaderType) -> u32 {
     match s {
         ShaderType::Vertex => 1 << 0,
-        ShaderType::Fragment => 1 << 1,
-        ShaderType::Compute => 1 << 2,
-        ShaderType::All => 0xFF,
+        ShaderType::TessellationControl => 1 << 1,
+        ShaderType::TessellationEvaluation => 1 << 2,
+        ShaderType::Geometry => 1 << 3,
+        ShaderType::Fragment => 1 << 4,
+        ShaderType::Compute => 1 << 5,
+        ShaderType::Task => 1 << 6,
+        ShaderType::Mesh => 1 << 7,
+        ShaderType::RayGeneration => 1 << 8,
+        ShaderType::AnyHit => 1 << 9,
+        ShaderType::ClosestHit => 1 << 10,
+        ShaderType::Miss => 1 << 11,
+        ShaderType::Intersection => 1 << 12,
+        ShaderType::Callable => 1 << 13,
+        ShaderType::All => u32::MAX,
     }
 }
 
@@ -878,12 +900,12 @@ struct NormalizedBinding {
     binding: u32,
     var_ty: u8,
     count: u32,
-    stages: u8, // aggregated bitmask across all shaders that reference this binding
+    stages: u32, // aggregated bitmask across all shaders that reference this binding
 }
 
 fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
     // Aggregate by (binding, var_ty, count)
-    let mut agg: BTreeMap<(u32, u8, u32), u8> = BTreeMap::new();
+    let mut agg: BTreeMap<(u32, u8, u32), u32> = BTreeMap::new();
 
     for sh in shaders {
         let bit = stage_bit(sh.shader_type);
@@ -1305,11 +1327,49 @@ pub enum DynamicState {
     Scissor,
 }
 
-#[derive(Debug, Clone, Copy, Default, Hash)]
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum CompareOp {
+    Never,
+    Less,
+    Equal,
+    LessOrEqual,
+    Greater,
+    NotEqual,
+    GreaterOrEqual,
+    Always,
+}
+
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DepthInfo {
     pub should_test: bool,
     pub should_write: bool,
+    pub min_depth: f32,
+    pub max_depth: f32,
+    pub depth_compare_op: CompareOp,
+}
+
+impl Default for DepthInfo {
+    fn default() -> Self {
+        Self {
+            should_test: false,
+            should_write: false,
+            min_depth: 0.0,
+            max_depth: 1.0,
+            depth_compare_op: CompareOp::LessOrEqual,
+        }
+    }
+}
+
+impl Hash for DepthInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.should_test.hash(state);
+        self.should_write.hash(state);
+        hash_f32(self.min_depth, state);
+        hash_f32(self.max_depth, state);
+        self.depth_compare_op.hash(state);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Hash)]

@@ -1,8 +1,8 @@
 use ash::vk;
 use crate::{
-    AspectMask, BarrierPoint, BlendFactor, BlendOp, BorderColor, ColorBlendState, DynamicState,
-    Filter, Format, GPUError, ImageViewType, LoadOp, Rect2D, SampleCount, SamplerAddressMode,
-    SamplerInfo, SamplerMipmapMode, StoreOp, WriteMask,
+    AspectMask, BarrierPoint, BlendFactor, BlendOp, BorderColor, ColorBlendState, CompareOp,
+    DynamicState, Filter, Format, GPUError, ImageViewType, LoadOp, Rect2D, SampleCount,
+    SamplerAddressMode, SamplerInfo, SamplerMipmapMode, StoreOp, WriteMask,
 };
 
 impl From<Filter> for vk::Filter {
@@ -140,6 +140,21 @@ impl From<DynamicState> for vk::DynamicState {
 impl From<SampleCount> for vk::SampleCountFlags {
     fn from(value: SampleCount) -> vk::SampleCountFlags {
         convert_sample_count(value)
+    }
+}
+
+impl From<CompareOp> for vk::CompareOp {
+    fn from(op: CompareOp) -> Self {
+        match op {
+            CompareOp::Never => vk::CompareOp::NEVER,
+            CompareOp::Less => vk::CompareOp::LESS,
+            CompareOp::Equal => vk::CompareOp::EQUAL,
+            CompareOp::LessOrEqual => vk::CompareOp::LESS_OR_EQUAL,
+            CompareOp::Greater => vk::CompareOp::GREATER,
+            CompareOp::NotEqual => vk::CompareOp::NOT_EQUAL,
+            CompareOp::GreaterOrEqual => vk::CompareOp::GREATER_OR_EQUAL,
+            CompareOp::Always => vk::CompareOp::ALWAYS,
+        }
     }
 }
 

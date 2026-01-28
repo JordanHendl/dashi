@@ -2513,8 +2513,21 @@ impl VulkanContext {
 
                 let stage_flags = match shader_info.shader_type {
                     ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
+                    ShaderType::TessellationControl => vk::ShaderStageFlags::TESSELLATION_CONTROL,
+                    ShaderType::TessellationEvaluation => {
+                        vk::ShaderStageFlags::TESSELLATION_EVALUATION
+                    }
+                    ShaderType::Geometry => vk::ShaderStageFlags::GEOMETRY,
                     ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
                     ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
+                    ShaderType::Task => vk::ShaderStageFlags::TASK_EXT,
+                    ShaderType::Mesh => vk::ShaderStageFlags::MESH_EXT,
+                    ShaderType::RayGeneration => vk::ShaderStageFlags::RAYGEN_KHR,
+                    ShaderType::AnyHit => vk::ShaderStageFlags::ANY_HIT_KHR,
+                    ShaderType::ClosestHit => vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+                    ShaderType::Miss => vk::ShaderStageFlags::MISS_KHR,
+                    ShaderType::Intersection => vk::ShaderStageFlags::INTERSECTION_KHR,
+                    ShaderType::Callable => vk::ShaderStageFlags::CALLABLE_KHR,
                     ShaderType::All => vk::ShaderStageFlags::ALL,
                 };
 
@@ -3534,7 +3547,14 @@ impl VulkanContext {
         for shader_info in info.shaders {
             let stage_flags = match shader_info.stage {
                 ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
+                ShaderType::TessellationControl => vk::ShaderStageFlags::TESSELLATION_CONTROL,
+                ShaderType::TessellationEvaluation => {
+                    vk::ShaderStageFlags::TESSELLATION_EVALUATION
+                }
+                ShaderType::Geometry => vk::ShaderStageFlags::GEOMETRY,
                 ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
+                ShaderType::Task => vk::ShaderStageFlags::TASK_EXT,
+                ShaderType::Mesh => vk::ShaderStageFlags::MESH_EXT,
                 ShaderType::All => vk::ShaderStageFlags::ALL,
                 other => {
                     return Err(GPUError::UnsupportedShaderStage(other));
@@ -3621,9 +3641,9 @@ impl VulkanContext {
                 vk::PipelineDepthStencilStateCreateInfo::builder()
                     .depth_test_enable(depth.should_test)
                     .depth_write_enable(depth.should_write)
-                    .min_depth_bounds(0.0)
-                    .max_depth_bounds(1.0)
-                    .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+                    .min_depth_bounds(depth.min_depth)
+                    .max_depth_bounds(depth.max_depth)
+                    .depth_compare_op(depth.depth_compare_op.into())
                     .build(),
             ),
             None => None,
