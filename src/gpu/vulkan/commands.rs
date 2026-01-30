@@ -1,6 +1,7 @@
 //! Refactored command helpers for Dashi CommandQueue
 
 use ash::vk;
+use std::ffi::CString;
 
 use super::VulkanContext;
 use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
@@ -2194,6 +2195,27 @@ impl CommandSink for CommandQueue {
                 &[],
             )
         };
+        Ok(())
+    }
+
+    fn debug_label(&mut self, label: &[u8]) -> Result<()> {
+        if let Some(utils) = &self.ctx_ref().debug_utils {
+            let label = String::from_utf8_lossy(label);
+            if let Ok(label) = CString::new(label.as_ref()) {
+                let info = vk::DebugUtilsLabelEXT::builder().label_name(&label);
+                unsafe {
+                    utils.cmd_insert_debug_utils_label(self.cmd_buf, &info);
+                }
+            }
+        } else if let Some(marker) = &self.ctx_ref().debug_marker {
+            let label = String::from_utf8_lossy(label);
+            if let Ok(label) = CString::new(label.as_ref()) {
+                let info = vk::DebugMarkerMarkerInfoEXT::builder().marker_name(&label);
+                unsafe {
+                    marker.cmd_debug_marker_insert(self.cmd_buf, &info);
+                }
+            }
+        }
         Ok(())
     }
 

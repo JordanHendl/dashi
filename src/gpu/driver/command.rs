@@ -44,6 +44,7 @@ pub enum Op {
     GpuTimerBegin = 21,
     GpuTimerEnd = 22,
     SyncPoint = 24,
+    DebugLabel = 25,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -514,6 +515,34 @@ impl CommandEncoder {
         }
     }
 
+    #[inline(always)]
+    fn push_bytes(&mut self, op: Op, payload: &[u8]) {
+        const SIDE_ALIGN: usize = 8;
+        const SIDE_FLAG: u16 = 0x8000;
+
+        self.data.extend_from_slice(&(op as u16).to_ne_bytes());
+        self.data.extend_from_slice(&SIDE_FLAG.to_ne_bytes());
+
+        let offset = self.side.len() as u32;
+        self.data.extend_from_slice(&offset.to_ne_bytes());
+
+        let len_u32: u32 = payload.len() as u32;
+        self.side.extend_from_slice(&len_u32.to_ne_bytes());
+
+        self.side.reserve(SIDE_ALIGN - 1 + payload.len());
+
+        let base = self.side.as_ptr() as usize;
+        let here = base + self.side.len();
+        let start = align_up(here, SIDE_ALIGN);
+        let pad = start - here;
+
+        if pad != 0 {
+            self.side.resize(self.side.len() + pad, 0);
+        }
+
+        self.side.extend_from_slice(payload);
+    }
+
     /// Begin a render pass with the provided attachments.
     pub fn begin_render_pass(&mut self, desc: &BeginRenderPass) {
         self.push(Op::BeginRenderPass, desc);
@@ -647,6 +676,11 @@ impl CommandEncoder {
         self.push(Op::DebugMarkerEnd, &DebugMarkerEnd {});
     }
 
+    /// Insert a debug label into the command stream.
+    pub fn debug_label(&mut self, label: &str) {
+        self.push_bytes(Op::DebugLabel, label.as_bytes());
+    }
+
     /// Begin a GPU timer region for the specified frame index.
     pub fn gpu_timer_begin(&mut self, frame: u32) {
         self.push(Op::GpuTimerBegin, &GpuTimerBegin { frame });
@@ -698,6 +732,7 @@ impl CommandEncoder {
                 Op::ResolveImage => self.resolve_image(cmd.payload()),
                 Op::DebugMarkerBegin => self.begin_debug_marker(),
                 Op::DebugMarkerEnd => self.end_debug_marker(),
+                Op::DebugLabel => self.push_bytes(Op::DebugLabel, cmd.bytes()),
                 Op::GpuTimerBegin => self.gpu_timer_begin(cmd.payload::<GpuTimerBegin>().frame),
                 Op::GpuTimerEnd => self.gpu_timer_end(cmd.payload::<GpuTimerEnd>().frame),
                 Op::CopyImageToBuffer => self.copy_image_to_buffer(cmd.payload()),
@@ -747,6 +782,7 @@ impl CommandEncoder {
                 Op::ResolveImage => sink.resolve_image(cmd.payload())?,
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload())?,
                 Op::DebugMarkerEnd => sink.debug_marker_end(cmd.payload())?,
+                Op::DebugLabel => sink.debug_label(cmd.bytes())?,
                 Op::GpuTimerBegin => sink.gpu_timer_begin(cmd.payload())?,
                 Op::GpuTimerEnd => sink.gpu_timer_end(cmd.payload())?,
                 Op::CopyImageToBuffer => sink.copy_image_to_buffer(cmd.payload())?,
@@ -817,6 +853,10 @@ impl<'a> Command<'a> {
             "payload<T>: misaligned buffer for T"
         );
         unsafe { &*(self.bytes.as_ptr() as *const T) }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.bytes
     }
 }
 
@@ -923,6 +963,7 @@ impl Op {
             x if x == Op::BlitImage as u16 => Some(Op::BlitImage),
             x if x == Op::DebugMarkerBegin as u16 => Some(Op::DebugMarkerBegin),
             x if x == Op::DebugMarkerEnd as u16 => Some(Op::DebugMarkerEnd),
+            x if x == Op::DebugLabel as u16 => Some(Op::DebugLabel),
             x if x == Op::GpuTimerBegin as u16 => Some(Op::GpuTimerBegin),
             x if x == Op::GpuTimerEnd as u16 => Some(Op::GpuTimerEnd),
             x if x == Op::BeginRenderPass as u16 => Some(Op::BeginRenderPass),
@@ -958,6 +999,7 @@ pub trait CommandSink {
     fn submit(&mut self, cmd: &SubmitInfo2) -> Result<Handle<Fence>>;
     fn debug_marker_begin(&mut self, cmd: &DebugMarkerBegin) -> Result<()>;
     fn debug_marker_end(&mut self, cmd: &DebugMarkerEnd) -> Result<()>;
+    fn debug_label(&mut self, label: &[u8]) -> Result<()>;
     fn gpu_timer_begin(&mut self, cmd: &GpuTimerBegin) -> Result<()>;
     fn gpu_timer_end(&mut self, cmd: &GpuTimerEnd) -> Result<()>;
     fn sync_point(&mut self, cmd: &SyncPointCmd) -> Result<()>;
