@@ -11,6 +11,7 @@ pub struct DeviceInfo {
     pub(crate) name: String,
     pub(crate) kind: DeviceType,
     pub(crate) driver_version: u32,
+    pub(crate) gpu_score: u32,
     /// Indicates support for bindless `BindTable` descriptors.
     pub(crate) bind_table_capable: bool,
     pub(crate) display_capable: bool,
@@ -114,12 +115,34 @@ impl DeviceSelector {
         }
     }
 
-    fn check<T: PartialEq>(a: T, b: Option<T>) -> bool {
-        if let Some(c) = b {
-            return c == a;
+    fn matches_filter(device: &DeviceInfo, filter: &DeviceFilter) -> bool {
+        if let Some(ref name) = filter.name {
+            if device.name != *name {
+                return false;
+            }
+        }
+        if let Some(kind) = filter.kind {
+            if device.kind != kind {
+                return false;
+            }
+        }
+        if let Some(driver_version) = filter.driver_version {
+            if device.driver_version != driver_version {
+                return false;
+            }
+        }
+        if let Some(bind_table_capable) = filter.bind_table_capable {
+            if device.bind_table_capable != bind_table_capable {
+                return false;
+            }
+        }
+        if let Some(display_capable) = filter.display_capable {
+            if device.display_capable != display_capable {
+                return false;
+            }
         }
 
-        false
+        true
     }
 
     /// Select the highest scoring device that satisfies the provided `filter`.
@@ -127,39 +150,22 @@ impl DeviceSelector {
     /// Returns [`None`] when no device meets every required criterion.
     pub fn select(&self, filter: DeviceFilter) -> Option<SelectedDevice> {
         let mut max_score = 0;
-        let mut best_device = -1;
+        let mut best_device = None;
         for (id, device) in self.devices.iter().enumerate() {
-            let mut score = 0;
-            if Self::check(&device.name, filter.name.as_ref()) {
-                score += 1;
-            }
-            if Self::check(&device.kind, filter.kind.as_ref()) {
-                score += 1;
-            }
-            if Self::check(&device.display_capable, filter.display_capable.as_ref()) {
-                score += 1;
-            }
-            if Self::check(&device.bind_table_capable, filter.bind_table_capable.as_ref()) {
-                score += 1;
+            if !Self::matches_filter(device, &filter) {
+                continue;
             }
 
-            if device.dashi_capable {
-                score += 1;
-            }
-
-            if score > max_score {
+            let score = device.gpu_score + u32::from(device.dashi_capable);
+            if best_device.is_none() || score > max_score {
                 max_score = score;
-                best_device = id as i32;
+                best_device = Some(id);
             }
         }
 
-        if best_device >= 0 {
-            return Some(SelectedDevice {
-                device_id: best_device as usize,
-                info: self.devices[best_device as usize].clone(),
-            });
-        }
-
-        None
+        best_device.map(|id| SelectedDevice {
+            device_id: id,
+            info: self.devices[id].clone(),
+        })
     }
 }

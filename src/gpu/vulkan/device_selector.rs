@@ -1,5 +1,5 @@
-use crate::gpu::device_selector::{DeviceInfo, DeviceSelector, DeviceType, SelectedDevice};
 use super::{GPUError, DEBUG_LAYER_NAMES};
+use crate::gpu::device_selector::{DeviceInfo, DeviceSelector, DeviceType, SelectedDevice};
 use ash::*;
 use std::ffi::{c_char, CStr};
 
@@ -24,6 +24,7 @@ impl From<vk::PhysicalDeviceProperties> for DeviceInfo {
             },
             kind: value.device_type.into(),
             driver_version: value.driver_version,
+            gpu_score: DeviceSelector::gpu_score(&value),
             bind_table_capable: false,
             display_capable: false,
             dashi_capable: false,
@@ -32,6 +33,20 @@ impl From<vk::PhysicalDeviceProperties> for DeviceInfo {
 }
 
 impl DeviceSelector {
+    fn gpu_score(properties: &vk::PhysicalDeviceProperties) -> u32 {
+        let type_score: u32 = match properties.device_type {
+            vk::PhysicalDeviceType::DISCRETE_GPU => 1000,
+            vk::PhysicalDeviceType::INTEGRATED_GPU => 600,
+            vk::PhysicalDeviceType::VIRTUAL_GPU => 400,
+            vk::PhysicalDeviceType::CPU => 200,
+            _ => 300,
+        };
+        let max_dimension = properties.limits.max_image_dimension2_d as u32;
+        type_score
+            .saturating_mul(10_000)
+            .saturating_add(max_dimension)
+    }
+
     /// Enumerate available Vulkan physical devices and build a selector.
     ///
     /// A Vulkan instance must be creatable on the running platform; otherwise
@@ -63,9 +78,10 @@ impl DeviceSelector {
             let available_layers = entry.enumerate_instance_layer_properties()?;
             for &layer in &DEBUG_LAYER_NAMES {
                 let name = unsafe { CStr::from_ptr(layer) };
-                if available_layers.iter().any(|prop| unsafe {
-                    CStr::from_ptr(prop.layer_name.as_ptr()) == name
-                }) {
+                if available_layers
+                    .iter()
+                    .any(|prop| unsafe { CStr::from_ptr(prop.layer_name.as_ptr()) == name })
+                {
                     layer_names.push(layer);
                 }
             }
@@ -135,8 +151,7 @@ impl DeviceSelector {
 
     fn has_swapchain_extension(enabled: &[vk::ExtensionProperties]) -> bool {
         enabled.iter().any(|ext| unsafe {
-            CStr::from_ptr(ext.extension_name.as_ptr())
-                == ash::extensions::khr::Swapchain::name()
+            CStr::from_ptr(ext.extension_name.as_ptr()) == ash::extensions::khr::Swapchain::name()
         })
     }
 }
