@@ -85,6 +85,95 @@ fn sync_scope_access(scope: Scope) -> vk::AccessFlags {
     }
 }
 
+#[inline]
+fn sanitize_access_for_stage(
+    stage: vk::PipelineStageFlags,
+    mut access: vk::AccessFlags,
+) -> vk::AccessFlags {
+    if access.is_empty()
+        || stage.is_empty()
+        || stage.intersects(
+            vk::PipelineStageFlags::TOP_OF_PIPE | vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        )
+    {
+        return vk::AccessFlags::empty();
+    }
+
+    if stage.contains(vk::PipelineStageFlags::ALL_COMMANDS) {
+        return access;
+    }
+
+    let graphics_stage = stage.intersects(vk::PipelineStageFlags::ALL_GRAPHICS);
+
+    let strip_if_unsupported = |mask: vk::PipelineStageFlags| {
+        !stage.intersects(mask)
+            && !(graphics_stage && mask.intersects(vk::PipelineStageFlags::ALL_GRAPHICS))
+    };
+
+    if access.contains(vk::AccessFlags::INDIRECT_COMMAND_READ)
+        && strip_if_unsupported(vk::PipelineStageFlags::DRAW_INDIRECT)
+    {
+        access &= !vk::AccessFlags::INDIRECT_COMMAND_READ;
+    }
+
+    if access.intersects(vk::AccessFlags::INDEX_READ | vk::AccessFlags::VERTEX_ATTRIBUTE_READ)
+        && strip_if_unsupported(vk::PipelineStageFlags::VERTEX_INPUT)
+    {
+        access &= !(vk::AccessFlags::INDEX_READ | vk::AccessFlags::VERTEX_ATTRIBUTE_READ);
+    }
+
+    if access.intersects(
+        vk::AccessFlags::UNIFORM_READ | vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+    ) && strip_if_unsupported(
+        vk::PipelineStageFlags::VERTEX_SHADER
+            | vk::PipelineStageFlags::TESSELLATION_CONTROL_SHADER
+            | vk::PipelineStageFlags::TESSELLATION_EVALUATION_SHADER
+            | vk::PipelineStageFlags::GEOMETRY_SHADER
+            | vk::PipelineStageFlags::FRAGMENT_SHADER
+            | vk::PipelineStageFlags::COMPUTE_SHADER,
+    ) {
+        access &= !(vk::AccessFlags::UNIFORM_READ
+            | vk::AccessFlags::SHADER_READ
+            | vk::AccessFlags::SHADER_WRITE);
+    }
+
+    if access.contains(vk::AccessFlags::INPUT_ATTACHMENT_READ)
+        && strip_if_unsupported(vk::PipelineStageFlags::FRAGMENT_SHADER)
+    {
+        access &= !vk::AccessFlags::INPUT_ATTACHMENT_READ;
+    }
+
+    if access.intersects(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+        && strip_if_unsupported(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+    {
+        access &= !(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+    }
+
+    if access.intersects(
+        vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+            | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+    ) && strip_if_unsupported(
+        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+    ) {
+        access &= !(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+            | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
+    }
+
+    if access.intersects(vk::AccessFlags::TRANSFER_READ | vk::AccessFlags::TRANSFER_WRITE)
+        && strip_if_unsupported(vk::PipelineStageFlags::TRANSFER)
+    {
+        access &= !(vk::AccessFlags::TRANSFER_READ | vk::AccessFlags::TRANSFER_WRITE);
+    }
+
+    if access.intersects(vk::AccessFlags::HOST_READ | vk::AccessFlags::HOST_WRITE)
+        && strip_if_unsupported(vk::PipelineStageFlags::HOST)
+    {
+        access &= !(vk::AccessFlags::HOST_READ | vk::AccessFlags::HOST_WRITE);
+    }
+
+    access
+}
+
 fn sync_point_stages(point: SyncPoint) -> (vk::PipelineStageFlags, vk::PipelineStageFlags) {
     match point {
         SyncPoint::ComputeToGraphics => (
@@ -538,8 +627,8 @@ impl CommandQueue {
 
         let src_stage = cmd.old_stage;
         let dst_stage = cmd.new_stage;
-        let src_access = cmd.old_access;
-        let dst_access = cmd.new_access;
+        let src_access = sanitize_access_for_stage(src_stage, cmd.old_access);
+        let dst_access = sanitize_access_for_stage(dst_stage, cmd.new_access);
 
         let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
             (
@@ -609,10 +698,10 @@ impl CommandQueue {
             .ok_or(GPUError::SlotError())?;
 
         let src_stage = cmd.old_stage;
-        let src_access = cmd.old_access;
+        let src_access = sanitize_access_for_stage(src_stage, cmd.old_access);
 
         let dst_stage = cmd.new_stage;
-        let dst_access = cmd.new_access;
+        let dst_access = sanitize_access_for_stage(dst_stage, cmd.new_access);
 
         let (src_family, dst_family) = if cmd.old_queue != cmd.new_queue {
             (
@@ -2136,7 +2225,7 @@ impl CommandSink for CommandQueue {
             Scope::from_u8(cmd.scope).ok_or(GPUError::Unimplemented("invalid sync scope"))?;
         let (src_stage, dst_stage) = sync_point_stages(point);
         let src_access = sync_point_src_access(point);
-        let dst_access = sync_scope_access(scope);
+        let dst_access = sanitize_access_for_stage(dst_stage, sync_scope_access(scope));
         let barrier = vk::MemoryBarrier::builder()
             .src_access_mask(src_access)
             .dst_access_mask(dst_access)
