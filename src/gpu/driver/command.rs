@@ -2,8 +2,9 @@ use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 
 use crate::{
-    BindTable, Buffer, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter, GraphicsPipeline,
-    Image, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2, Viewport,
+    BindTable, Buffer, BufferView, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
+    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2,
+    Viewport,
 };
 
 use super::{
@@ -207,8 +208,8 @@ pub struct DrawIndexed {
 pub struct DrawIndirect {
     /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
-    /// Indirect argument buffer handle.
-    pub indirect: Handle<Buffer>,
+    /// Indirect argument buffer view.
+    pub indirect: BufferView,
     /// Resources to bind before drawing.
     pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
@@ -224,7 +225,7 @@ impl Default for DrawIndirect {
     fn default() -> Self {
         Self {
             vertices: Default::default(),
-            indirect: Default::default(),
+            indirect: BufferView::new(Default::default()),
             bind_tables: Default::default(),
             dynamic_buffers: Default::default(),
             draw_count: 1,
@@ -240,8 +241,8 @@ pub struct DrawIndexedIndirect {
     /// Vertex buffer handle.
     pub vertices: Handle<Buffer>,
     pub indices: Handle<Buffer>,
-    /// Indirect argument buffer handle.
-    pub indirect: Handle<Buffer>,
+    /// Indirect argument buffer view.
+    pub indirect: BufferView,
     /// Resources to bind before drawing.
     pub bind_tables: [Option<Handle<BindTable>>; 4],
     pub dynamic_buffers: [Option<DynamicBuffer>; 4],
@@ -258,7 +259,7 @@ impl Default for DrawIndexedIndirect {
         Self {
             vertices: Default::default(),
             indices: Default::default(),
-            indirect: Default::default(),
+            indirect: BufferView::new(Default::default()),
             bind_tables: Default::default(),
             dynamic_buffers: Default::default(),
             draw_count: 1,

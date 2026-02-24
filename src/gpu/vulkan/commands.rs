@@ -1892,14 +1892,14 @@ impl CommandSink for CommandQueue {
         let indirect = self
             .ctx_ref()
             .buffers
-            .get_ref(cmd.indirect)
+            .get_ref(cmd.indirect.handle)
             .ok_or(GPUError::SlotError())?;
 
         unsafe {
             self.ctx_ref().device.cmd_draw_indirect(
                 self.cmd_buf,
                 indirect.buf,
-                indirect.offset as u64 + cmd.offset as u64,
+                indirect.offset as u64 + cmd.indirect.offset + cmd.offset as u64,
                 cmd.draw_count,
                 cmd.stride,
             );
@@ -1992,14 +1992,14 @@ impl CommandSink for CommandQueue {
         let indirect = self
             .ctx_ref()
             .buffers
-            .get_ref(cmd.indirect)
+            .get_ref(cmd.indirect.handle)
             .ok_or(GPUError::SlotError())?;
 
         unsafe {
             self.ctx_ref().device.cmd_draw_indexed_indirect(
                 self.cmd_buf,
                 indirect.buf,
-                indirect.offset as u64 + cmd.offset as u64,
+                indirect.offset as u64 + cmd.indirect.offset + cmd.offset as u64,
                 cmd.draw_count,
                 cmd.stride,
             );
