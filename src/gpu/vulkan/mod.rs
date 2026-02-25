@@ -2192,6 +2192,16 @@ impl VulkanContext {
     ///
     /// After calling this method the context and all of its resources become invalid.
     pub fn destroy(mut self) {
+        // Ensure all in-flight work has completed so resources can be released safely
+        // regardless of the state the caller leaves the context in.
+        unsafe {
+            let _ = self.device.device_wait_idle();
+        }
+
+        // Some resources (for example dynamic allocator pools) may still be mapped.
+        // Best-effort unmap them before allocator/resource teardown.
+        self.unmap_all_mapped_buffers();
+
         if let Some(messenger) = self.debug_messenger.take() {
             if let Some(utils) = &self.debug_utils {
                 unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
@@ -2306,6 +2316,18 @@ impl VulkanContext {
         }
     }
 
+    fn unmap_all_mapped_buffers(&mut self) {
+        self.buffers.for_each_occupied_mut(|buf| {
+            let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+            let alloc_info = self.allocator.get_allocation_info(&alloc);
+            if alloc_info.mapped_data.is_null() {
+                return;
+            }
+
+            unsafe { self.allocator.unmap_memory(&mut alloc) };
+        });
+    }
+
     /// Destroys a [`DynamicAllocator`] and its backing buffer.
     ///
     /// # Prerequisites
@@ -2313,7 +2335,7 @@ impl VulkanContext {
     /// - The allocator's buffer must not be mapped.
     /// - The context must still be alive.
     pub fn destroy_dynamic_allocator(&mut self, alloc: DynamicAllocator) {
-        self.unmap_buffer(alloc.pool).unwrap();
+        let _ = self.unmap_buffer(alloc.pool);
         self.destroy_buffer(alloc.pool);
     }
 
