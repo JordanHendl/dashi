@@ -4,7 +4,10 @@ use ash::vk;
 use std::ffi::CString;
 
 use super::VulkanContext;
-use super::{convert_rect2d_to_vulkan, RenderPass, SampleCount, SubpassSampleInfo};
+use super::{
+    convert_rect2d_to_vulkan, ImagelessFramebufferAttachmentInfo, RenderPass, SampleCount,
+    SubpassSampleInfo,
+};
 use crate::gpu::driver::command::{CommandSink, Scope, SyncPoint};
 use crate::gpu::driver::state::{usage_to_access, BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
@@ -69,6 +72,32 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
             },
         },
     }
+}
+
+fn collect_imageless_attachment_infos(
+    ctx: &VulkanContext,
+    attachments: &[(Handle<super::VkImageView>, vk::ImageLayout)],
+) -> Result<(Vec<ImagelessFramebufferAttachmentInfo>, u32, u32), GPUError> {
+    let mut attachment_infos = Vec::with_capacity(attachments.len());
+    let mut attachment_min_width = u32::MAX;
+    let mut attachment_min_height = u32::MAX;
+
+    for (view_handle, _) in attachments {
+        let view = ctx
+            .image_views
+            .get_ref(*view_handle)
+            .ok_or(GPUError::SlotError())?;
+        let image_info = ctx.image_info(view.img);
+        attachment_min_width = attachment_min_width.min(image_info.dim[0]);
+        attachment_min_height = attachment_min_height.min(image_info.dim[1]);
+        attachment_infos.push(ImagelessFramebufferAttachmentInfo {
+            format: image_info.format,
+            layer_count: view.range.layer_count.max(1),
+            cube_compatible: image_info.cube_compatible,
+        });
+    }
+
+    Ok((attachment_infos, attachment_min_width, attachment_min_height))
 }
 
 fn sync_scope_access(scope: Scope) -> vk::AccessFlags {
@@ -884,7 +913,7 @@ impl CommandSink for CommandQueue {
         let (
             rp_raw,
             mut fb,
-            attachment_formats,
+            rp_attachment_infos,
             rp_subpass_samples,
             rp_initial_layouts,
             mut rp_width,
@@ -898,7 +927,7 @@ impl CommandSink for CommandQueue {
             (
                 rp_obj.raw,
                 rp_obj.fb,
-                rp_obj.attachment_formats.clone(),
+                rp_obj.attachment_infos.clone(),
                 rp_obj.subpass_samples.clone(),
                 rp_obj.attachment_initial_layouts.clone(),
                 rp_obj.width,
@@ -954,43 +983,34 @@ impl CommandSink for CommandQueue {
                 .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
         }
 
-        let mut attachment_min_width = u32::MAX;
-        let mut attachment_min_height = u32::MAX;
-        {
-            let ctx = self.ctx_ref();
-            for (view_handle, _) in &self.curr_attachments {
-                let v = ctx
-                    .image_views
-                    .get_ref(*view_handle)
-                    .ok_or(GPUError::SlotError())?;
-                let info = ctx.image_info(v.img);
-                attachment_min_width = attachment_min_width.min(info.dim[0]);
-                attachment_min_height = attachment_min_height.min(info.dim[1]);
-            }
-        }
+        let (attachment_infos, attachment_min_width, attachment_min_height) =
+            collect_imageless_attachment_infos(self.ctx_ref(), &self.curr_attachments)?;
 
         if attachment_min_width != u32::MAX {
             target_width = target_width.min(attachment_min_width).max(1);
             target_height = target_height.min(attachment_min_height).max(1);
         }
 
-        if target_width != rp_width || target_height != rp_height {
+        let attachments_changed = attachment_infos != rp_attachment_infos;
+        if target_width != rp_width || target_height != rp_height || attachments_changed {
             let ctx = self.ctx_ref();
             let new_fb = ctx.create_imageless_framebuffer(
                 rp_raw,
-                &attachment_formats,
+                &attachment_infos,
                 target_width,
                 target_height,
             )?;
+            let updated_attachment_infos = attachment_infos;
+            unsafe {
+                ctx.device.destroy_framebuffer(fb, None);
+            }
             {
                 ctx.render_passes
-                    .with_mut(cmd.render_pass, |rp_mut| {
-                        unsafe {
-                            ctx.device.destroy_framebuffer(rp_mut.fb, None);
-                        }
+                    .with_mut(cmd.render_pass, move |rp_mut| {
                         rp_mut.fb = new_fb;
                         rp_mut.width = target_width;
                         rp_mut.height = target_height;
+                        rp_mut.attachment_infos = updated_attachment_infos;
                     })
                     .ok_or(GPUError::SlotError())?;
             }
@@ -1122,7 +1142,7 @@ impl CommandSink for CommandQueue {
             mut fb,
             rp_subpass_samples,
             rp_subpass_formats,
-            attachment_formats,
+            rp_attachment_infos,
             rp_initial_layouts,
             mut rp_width,
             mut rp_height,
@@ -1137,7 +1157,7 @@ impl CommandSink for CommandQueue {
                 rp.fb,
                 rp.subpass_samples.clone(),
                 rp.subpass_formats.clone(),
-                rp.attachment_formats.clone(),
+                rp.attachment_infos.clone(),
                 rp.attachment_initial_layouts.clone(),
                 rp.width,
                 rp.height,
@@ -1233,43 +1253,34 @@ impl CommandSink for CommandQueue {
                 .push((handle, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
         }
 
-        let mut attachment_min_width = u32::MAX;
-        let mut attachment_min_height = u32::MAX;
-        {
-            let ctx = self.ctx_ref();
-            for (view_handle, _) in &self.curr_attachments {
-                let v = ctx
-                    .image_views
-                    .get_ref(*view_handle)
-                    .ok_or(GPUError::SlotError())?;
-                let info = ctx.image_info(v.img);
-                attachment_min_width = attachment_min_width.min(info.dim[0]);
-                attachment_min_height = attachment_min_height.min(info.dim[1]);
-            }
-        }
+        let (attachment_infos, attachment_min_width, attachment_min_height) =
+            collect_imageless_attachment_infos(self.ctx_ref(), &self.curr_attachments)?;
 
         if attachment_min_width != u32::MAX {
             target_width = target_width.min(attachment_min_width).max(1);
             target_height = target_height.min(attachment_min_height).max(1);
         }
 
-        if target_width != rp_width || target_height != rp_height {
+        let attachments_changed = attachment_infos != rp_attachment_infos;
+        if target_width != rp_width || target_height != rp_height || attachments_changed {
             let ctx = self.ctx_ref();
             let new_fb = ctx.create_imageless_framebuffer(
                 rp_raw,
-                &attachment_formats,
+                &attachment_infos,
                 target_width,
                 target_height,
             )?;
+            let updated_attachment_infos = attachment_infos;
+            unsafe {
+                ctx.device.destroy_framebuffer(fb, None);
+            }
             {
                 ctx.render_passes
-                    .with_mut(cmd.render_pass, |rp_mut| {
-                        unsafe {
-                            ctx.device.destroy_framebuffer(rp_mut.fb, None);
-                        }
+                    .with_mut(cmd.render_pass, move |rp_mut| {
                         rp_mut.fb = new_fb;
                         rp_mut.width = target_width;
                         rp_mut.height = target_height;
+                        rp_mut.attachment_infos = updated_attachment_infos;
                     })
                     .ok_or(GPUError::SlotError())?;
             }
@@ -2324,3 +2335,5 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 }
+
+

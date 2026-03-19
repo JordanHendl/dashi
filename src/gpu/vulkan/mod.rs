@@ -206,9 +206,27 @@ pub struct RenderPass {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) attachment_formats: Vec<Format>,
+    pub(super) attachment_infos: Vec<ImagelessFramebufferAttachmentInfo>,
     pub(super) attachment_initial_layouts: Vec<vk::ImageLayout>,
     pub(super) subpass_samples: Vec<SubpassSampleInfo>,
     pub(super) subpass_formats: Vec<SubpassAttachmentFormats>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct ImagelessFramebufferAttachmentInfo {
+    pub(super) format: Format,
+    pub(super) layer_count: u32,
+    pub(super) cube_compatible: bool,
+}
+
+impl ImagelessFramebufferAttachmentInfo {
+    fn from_format(format: Format) -> Self {
+        Self {
+            format,
+            layer_count: 1,
+            cube_compatible: false,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -3303,16 +3321,22 @@ impl VulkanContext {
     fn create_imageless_framebuffer(
         &self,
         render_pass: vk::RenderPass,
-        attachment_formats: &[Format],
+        attachment_infos: &[ImagelessFramebufferAttachmentInfo],
         width: u32,
         height: u32,
     ) -> Result<vk::Framebuffer, GPUError> {
-        let mut view_formats_vk = Vec::with_capacity(attachment_formats.len());
-        let mut attachment_image_infos = Vec::with_capacity(attachment_formats.len());
+        let mut view_formats_vk = Vec::with_capacity(attachment_infos.len());
+        let mut attachment_image_infos = Vec::with_capacity(attachment_infos.len());
         let width = width.max(1);
         let height = height.max(1);
+        let framebuffer_layers = attachment_infos
+            .iter()
+            .map(|attachment| attachment.layer_count.max(1))
+            .max()
+            .unwrap_or(1);
 
-        for fmt in attachment_formats {
+        for attachment in attachment_infos {
+            let fmt = attachment.format;
             let mut usage = vk::ImageUsageFlags::TRANSFER_DST
                 | vk::ImageUsageFlags::TRANSFER_SRC
                 | vk::ImageUsageFlags::SAMPLED;
@@ -3323,13 +3347,18 @@ impl VulkanContext {
                 usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
             }
 
-            let vk_fmt = lib_to_vk_image_format(fmt);
+            let vk_fmt = lib_to_vk_image_format(&fmt);
             view_formats_vk.push(vk_fmt);
             let info = vk::FramebufferAttachmentImageInfo::builder()
+                .flags(if attachment.cube_compatible {
+                    vk::ImageCreateFlags::CUBE_COMPATIBLE
+                } else {
+                    vk::ImageCreateFlags::empty()
+                })
                 .usage(usage)
                 .width(width)
                 .height(height)
-                .layer_count(1)
+                .layer_count(attachment.layer_count.max(1))
                 .view_formats(std::slice::from_ref(view_formats_vk.last().unwrap()))
                 .build();
             attachment_image_infos.push(info);
@@ -3343,8 +3372,8 @@ impl VulkanContext {
             .render_pass(render_pass)
             .width(width)
             .height(height)
-            .layers(1)
-            .attachment_count(attachment_formats.len() as u32)
+            .layers(framebuffer_layers)
+            .attachment_count(attachment_infos.len() as u32)
             .push_next(&mut attachments_info);
 
         let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
@@ -3488,8 +3517,14 @@ impl VulkanContext {
         let width = info.viewport.scissor.w.max(1);
         let height = info.viewport.scissor.h.max(1);
 
+        let attachment_infos = attachment_formats
+            .iter()
+            .copied()
+            .map(ImagelessFramebufferAttachmentInfo::from_format)
+            .collect::<Vec<_>>();
+
         let fb =
-            self.create_imageless_framebuffer(render_pass, &attachment_formats, width, height)?;
+            self.create_imageless_framebuffer(render_pass, &attachment_infos, width, height)?;
 
         return Ok(self
             .render_passes
@@ -3499,6 +3534,7 @@ impl VulkanContext {
                 width,
                 height,
                 attachment_formats,
+                attachment_infos,
                 attachment_initial_layouts,
                 subpass_samples,
                 subpass_formats,
@@ -3904,10 +3940,15 @@ impl VulkanContext {
 
         let width = 1;
         let height = 1;
+        let attachment_infos = attachment_formats
+            .iter()
+            .copied()
+            .map(ImagelessFramebufferAttachmentInfo::from_format)
+            .collect::<Vec<_>>();
 
         let fb = self.create_imageless_framebuffer(
             dummy_render_pass,
-            &attachment_formats,
+            &attachment_infos,
             width,
             height,
         )?;
@@ -4006,6 +4047,7 @@ impl VulkanContext {
                 width,
                 height,
                 attachment_formats,
+                attachment_infos,
                 attachment_initial_layouts,
                 subpass_samples,
                 subpass_formats,
@@ -4039,3 +4081,4 @@ impl VulkanContext {
             .unwrap());
     }
 }
+
