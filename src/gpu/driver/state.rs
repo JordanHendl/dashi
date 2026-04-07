@@ -411,7 +411,10 @@ pub mod vulkan {
         (UsageBits::UAV_WRITE, vk::PipelineStageFlags::COMPUTE_SHADER),
         (UsageBits::COPY_SRC, vk::PipelineStageFlags::TRANSFER),
         (UsageBits::COPY_DST, vk::PipelineStageFlags::TRANSFER),
-        (UsageBits::COMPUTE_SHADER, vk::PipelineStageFlags::COMPUTE_SHADER),
+        (
+            UsageBits::COMPUTE_SHADER,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+        ),
         // When transitioning to PRESENT we still need to synchronize with the
         // producing stage (e.g., TRANSFER). Avoid BOTTOM_OF_PIPE, which is
         // incompatible with non-empty access masks.
@@ -426,7 +429,10 @@ pub mod vulkan {
         ),
         (UsageBits::VERTEX_READ, vk::PipelineStageFlags::VERTEX_INPUT),
         (UsageBits::INDEX_READ, vk::PipelineStageFlags::VERTEX_INPUT),
-        (UsageBits::INDIRECT_READ, vk::PipelineStageFlags::DRAW_INDIRECT),
+        (
+            UsageBits::INDIRECT_READ,
+            vk::PipelineStageFlags::DRAW_INDIRECT,
+        ),
         (
             UsageBits::UNIFORM_READ,
             vk::PipelineStageFlags::ALL_COMMANDS,
@@ -473,7 +479,10 @@ pub mod vulkan {
             vk::AccessFlags::VERTEX_ATTRIBUTE_READ,
         ),
         (UsageBits::INDEX_READ, vk::AccessFlags::INDEX_READ),
-        (UsageBits::INDIRECT_READ, vk::AccessFlags::INDIRECT_COMMAND_READ),
+        (
+            UsageBits::INDIRECT_READ,
+            vk::AccessFlags::INDIRECT_COMMAND_READ,
+        ),
         (UsageBits::UNIFORM_READ, vk::AccessFlags::UNIFORM_READ),
         (UsageBits::STORAGE_READ, vk::AccessFlags::SHADER_READ),
         (UsageBits::STORAGE_WRITE, vk::AccessFlags::SHADER_WRITE),

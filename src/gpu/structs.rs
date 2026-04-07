@@ -1,9 +1,9 @@
+use crate::gpu::device_selector::SelectedDevice;
+use crate::utils::Handle;
 use crate::{
     BindTable, BindTableLayout, Buffer, CommandQueue, ComputePipelineLayout, DynamicAllocatorState,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, Semaphore,
 };
-use crate::gpu::device_selector::SelectedDevice;
-use crate::utils::Handle;
 use bitflags::bitflags;
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1938,6 +1938,7 @@ impl Default for WindowInfo {
     }
 }
 
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DisplayInfo {
     pub window: WindowInfo,
@@ -1961,6 +1962,13 @@ impl Default for DisplayInfo {
             buffering: WindowBuffering::Double,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayStatus {
+    Ready { size: [u32; 2] },
+    Resized { size: [u32; 2] },
+    Closed,
 }
 
 /// Information used when creating an OpenXR display.

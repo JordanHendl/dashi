@@ -626,8 +626,7 @@ impl VulkanContext {
                     enabled_vulkan12.descriptor_binding_storage_image_update_after_bind = vk::TRUE;
                 }
                 if supports_vulkan12
-                    && vulkan12_features.shader_sampled_image_array_non_uniform_indexing
-                        == vk::TRUE
+                    && vulkan12_features.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
                 {
                     enabled_vulkan12.shader_sampled_image_array_non_uniform_indexing = vk::TRUE;
                 }
@@ -717,12 +716,9 @@ impl VulkanContext {
                     enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing;
             }
 
-            let descriptor_features_enabled = enabled_descriptor_indexing
-                .runtime_descriptor_array
+            let descriptor_features_enabled = enabled_descriptor_indexing.runtime_descriptor_array
                 == vk::TRUE
-                || enabled_descriptor_indexing
-                    .descriptor_binding_partially_bound
-                    == vk::TRUE
+                || enabled_descriptor_indexing.descriptor_binding_partially_bound == vk::TRUE
                 || enabled_descriptor_indexing.descriptor_binding_sampled_image_update_after_bind
                     == vk::TRUE
                 || enabled_descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind
@@ -964,8 +960,7 @@ impl VulkanContext {
                 || descriptor_indexing_features
                     .descriptor_binding_storage_buffer_update_after_bind
                     == vk::TRUE
-                || descriptor_indexing_features
-                    .descriptor_binding_storage_image_update_after_bind
+                || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
                     == vk::TRUE);
 
         let empty_set_layout =
@@ -1124,8 +1119,7 @@ impl VulkanContext {
                 || descriptor_indexing_features
                     .descriptor_binding_storage_buffer_update_after_bind
                     == vk::TRUE
-                || descriptor_indexing_features
-                    .descriptor_binding_storage_image_update_after_bind
+                || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
                     == vk::TRUE);
 
         let empty_set_layout =
@@ -1203,13 +1197,13 @@ impl VulkanContext {
     /// Query hardware feature support in API-agnostic terms.
     pub fn features(&self) -> ContextFeatures {
         let descriptor_features = &self.descriptor_indexing_features;
-        let update_after_bind = descriptor_features.descriptor_binding_sampled_image_update_after_bind
+        let update_after_bind = descriptor_features
+            .descriptor_binding_sampled_image_update_after_bind
             == vk::TRUE
             || descriptor_features.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE
             || descriptor_features.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE
             || descriptor_features.descriptor_binding_storage_image_update_after_bind == vk::TRUE;
-        let partially_bound =
-            descriptor_features.descriptor_binding_partially_bound == vk::TRUE;
+        let partially_bound = descriptor_features.descriptor_binding_partially_bound == vk::TRUE;
 
         ContextFeatures {
             update_after_bind,
@@ -2096,7 +2090,7 @@ impl VulkanContext {
 
     pub fn make_buffer(&mut self, info: &BufferInfo) -> Result<Handle<Buffer>, GPUError> {
         let mut usage = vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST;
-    
+
         if info.usage.contains(BufferUsage::VERTEX) {
             usage |= vk::BufferUsageFlags::VERTEX_BUFFER;
         }
@@ -3635,9 +3629,7 @@ impl VulkanContext {
             let stage_flags = match shader_info.stage {
                 ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
                 ShaderType::TessellationControl => vk::ShaderStageFlags::TESSELLATION_CONTROL,
-                ShaderType::TessellationEvaluation => {
-                    vk::ShaderStageFlags::TESSELLATION_EVALUATION
-                }
+                ShaderType::TessellationEvaluation => vk::ShaderStageFlags::TESSELLATION_EVALUATION,
                 ShaderType::Geometry => vk::ShaderStageFlags::GEOMETRY,
                 ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
                 ShaderType::Task => vk::ShaderStageFlags::TASK_EXT,
@@ -3975,12 +3967,8 @@ impl VulkanContext {
             .map(ImagelessFramebufferAttachmentInfo::from_format)
             .collect::<Vec<_>>();
 
-        let fb = self.create_imageless_framebuffer(
-            dummy_render_pass,
-            &attachment_infos,
-            width,
-            height,
-        )?;
+        let fb =
+            self.create_imageless_framebuffer(dummy_render_pass, &attachment_infos, width, height)?;
 
         let vinputs: &[vk::VertexInputBindingDescription] = if layout.vertex_attribs.is_empty() {
             &[]

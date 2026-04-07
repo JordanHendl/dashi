@@ -33,3 +33,16 @@ jobs:
         with:
           name: test-results
           path: test-results.txt
+
+  windows-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          cache: true
+      - name: Compile
+        run: cargo check --all --locked

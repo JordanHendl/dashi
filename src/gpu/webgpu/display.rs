@@ -49,9 +49,7 @@ impl<'a> Display<'a> {
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                         surface_texture: texture,
                     })
-                    .map_err(|_| {
-                        GPUError::SwapchainConfigError("Failed to acquire WebGPU frame")
-                    })
+                    .map_err(|_| GPUError::SwapchainConfigError("Failed to acquire WebGPU frame"))
             }
             Err(wgpu::SurfaceError::OutOfMemory) => Err(GPUError::SwapchainConfigError(
                 "WebGPU surface is out of memory",

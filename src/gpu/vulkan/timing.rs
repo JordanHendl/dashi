@@ -1,5 +1,5 @@
-use ash::vk;
 use crate::GPUError;
+use ash::vk;
 
 pub struct GpuTimer {
     pub(super) pool: vk::QueryPool,

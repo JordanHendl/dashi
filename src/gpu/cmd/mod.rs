@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, CommandEncoder, CommandSink, CopyBuffer,
     CopyBufferImage, CopyImageBuffer, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
     DrawIndirect, GraphicsPipelineStateUpdate, MSImageResolve,
 };
+pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::types::Handle;
 use crate::{
     Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, Result, SubmitInfo2, UsageBits,

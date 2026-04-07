@@ -12,7 +12,7 @@ use super::{
     state::{resource_use_to_buffer_usage, resource_use_to_image_usage_layout, Layout},
     types::{Handle, ResourceUse, UsageBits},
 };
-use crate::structs::{IndirectCommand, IndexedIndirectCommand, SubresourceRange};
+use crate::structs::{IndexedIndirectCommand, IndirectCommand, SubresourceRange};
 
 //===----------------------------------------------------------------------===//
 // Command definitions
@@ -767,8 +767,8 @@ impl CommandEncoder {
                 }
                 Op::SyncPoint => {
                     let payload = cmd.payload::<SyncPointCmd>();
-                    let point = SyncPoint::from_u8(payload.point)
-                        .expect("invalid sync point payload");
+                    let point =
+                        SyncPoint::from_u8(payload.point).expect("invalid sync point payload");
                     let scope = Scope::from_u8(payload.scope).expect("invalid scope payload");
                     self.sync_point(point, scope);
                 }

@@ -34,3 +34,14 @@ Run all tests with:
 ```bash
 cargo test
 ```
+
+Verify the window-control path with:
+
+```bash
+cargo check
+cargo test
+cargo test --test winit_window_controls -- --ignored
+```
+
+The `winit_window_controls` test is Windows-only and ignored by default because
+it opens a native window and exercises minimize/restore behavior.

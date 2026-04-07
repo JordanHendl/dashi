@@ -8,7 +8,10 @@ fn compile_shader(source_path: &Path, kind: shaderc::ShaderKind) -> PathBuf {
     let source = fs::read_to_string(source_path).expect("failed to read shader source");
     let compiler = shaderc::Compiler::new().expect("failed to create shader compiler");
     let mut options = shaderc::CompileOptions::new().expect("failed to create shader options");
-    options.set_target_env(shaderc::TargetEnv::Vulkan, shaderc::EnvVersion::Vulkan1_2 as u32);
+    options.set_target_env(
+        shaderc::TargetEnv::Vulkan,
+        shaderc::EnvVersion::Vulkan1_2 as u32,
+    );
     options.set_generate_debug_info();
 
     let artifact = compiler
@@ -47,12 +50,6 @@ fn main() {
     let vert_spv_str = vert_spv.to_string_lossy().replace('\\', "/");
     let frag_spv_str = frag_spv.to_string_lossy().replace('\\', "/");
 
-    println!(
-        "cargo:rustc-env=HELLO_TRIANGLE_VERT_SPV={}",
-        vert_spv_str
-    );
-    println!(
-        "cargo:rustc-env=HELLO_TRIANGLE_FRAG_SPV={}",
-        frag_spv_str
-    );
+    println!("cargo:rustc-env=HELLO_TRIANGLE_VERT_SPV={}", vert_spv_str);
+    println!("cargo:rustc-env=HELLO_TRIANGLE_FRAG_SPV={}", frag_spv_str);
 }

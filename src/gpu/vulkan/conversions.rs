@@ -1,9 +1,9 @@
-use ash::vk;
 use crate::{
     AspectMask, BarrierPoint, BlendFactor, BlendOp, BorderColor, ColorBlendState, CompareOp,
     DynamicState, Filter, Format, GPUError, ImageViewType, LoadOp, Rect2D, SampleCount,
     SamplerAddressMode, SamplerInfo, SamplerMipmapMode, StoreOp, WriteMask,
 };
+use ash::vk;
 
 impl From<Filter> for vk::Filter {
     fn from(filter: Filter) -> Self {
@@ -166,11 +166,23 @@ impl From<SamplerInfo> for vk::SamplerCreateInfo {
             address_mode_u: info.address_mode_u.into(),
             address_mode_v: info.address_mode_v.into(),
             address_mode_w: info.address_mode_w.into(),
-            anisotropy_enable: if info.anisotropy_enable { vk::TRUE } else { vk::FALSE },
+            anisotropy_enable: if info.anisotropy_enable {
+                vk::TRUE
+            } else {
+                vk::FALSE
+            },
             max_anisotropy: info.max_anisotropy,
             border_color: info.border_color.into(),
-            unnormalized_coordinates: if info.unnormalized_coordinates { vk::TRUE } else { vk::FALSE },
-            compare_enable: if info.compare_enable { vk::TRUE } else { vk::FALSE },
+            unnormalized_coordinates: if info.unnormalized_coordinates {
+                vk::TRUE
+            } else {
+                vk::FALSE
+            },
+            compare_enable: if info.compare_enable {
+                vk::TRUE
+            } else {
+                vk::FALSE
+            },
             mipmap_mode: info.mipmap_mode.into(),
             ..Default::default()
         }
@@ -179,8 +191,14 @@ impl From<SamplerInfo> for vk::SamplerCreateInfo {
 
 pub(super) fn convert_rect2d_to_vulkan(rect: Rect2D) -> vk::Rect2D {
     vk::Rect2D {
-        offset: vk::Offset2D { x: rect.x as i32, y: rect.y as i32 },
-        extent: vk::Extent2D { width: rect.w, height: rect.h },
+        offset: vk::Offset2D {
+            x: rect.x as i32,
+            y: rect.y as i32,
+        },
+        extent: vk::Extent2D {
+            width: rect.w,
+            height: rect.h,
+        },
     }
 }
 
@@ -224,7 +242,11 @@ pub(super) fn vk_to_lib_image_format(fmt: vk::Format) -> Result<Format, GPUError
 pub fn channel_count(fmt: &Format) -> u32 {
     match fmt {
         Format::RGB8 => 3,
-        Format::BGRA8 | Format::BGRA8Unorm | Format::RGBA8 | Format::RGBA8Unorm | Format::RGBA32F => 4,
+        Format::BGRA8
+        | Format::BGRA8Unorm
+        | Format::RGBA8
+        | Format::RGBA8Unorm
+        | Format::RGBA32F => 4,
         Format::D24S8 => 4,
         Format::R8Sint | Format::R8Uint => 1,
     }
@@ -271,10 +293,10 @@ pub(super) fn convert_store_op(store_op: StoreOp) -> vk::AttachmentStoreOp {
 
 pub(super) fn convert_sample_count(sample_count: SampleCount) -> vk::SampleCountFlags {
     match sample_count {
-        SampleCount::S1  => vk::SampleCountFlags::TYPE_1,
-        SampleCount::S2  => vk::SampleCountFlags::TYPE_2,
-        SampleCount::S4  => vk::SampleCountFlags::TYPE_4,
-        SampleCount::S8  => vk::SampleCountFlags::TYPE_8,
+        SampleCount::S1 => vk::SampleCountFlags::TYPE_1,
+        SampleCount::S2 => vk::SampleCountFlags::TYPE_2,
+        SampleCount::S4 => vk::SampleCountFlags::TYPE_4,
+        SampleCount::S8 => vk::SampleCountFlags::TYPE_8,
         SampleCount::S16 => vk::SampleCountFlags::TYPE_16,
         SampleCount::S32 => vk::SampleCountFlags::TYPE_32,
         SampleCount::S64 => vk::SampleCountFlags::TYPE_64,

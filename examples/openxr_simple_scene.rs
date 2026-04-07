@@ -6,7 +6,7 @@ fn main() {
 #[cfg(feature = "dashi-openxr")]
 use dashi::*;
 #[cfg(feature = "dashi-openxr")]
-use glam::{Mat4, Vec3, Quat};
+use glam::{Mat4, Quat, Vec3};
 #[cfg(feature = "dashi-openxr")]
 use openxr as xr;
 #[cfg(feature = "dashi-openxr")]
@@ -22,7 +22,11 @@ pub struct Timer {
 #[cfg(feature = "dashi-openxr")]
 impl Timer {
     pub fn new() -> Self {
-        Self { start_time: None, elapsed: Duration::new(0, 0), is_paused: false }
+        Self {
+            start_time: None,
+            elapsed: Duration::new(0, 0),
+            is_paused: false,
+        }
     }
     pub fn start(&mut self) {
         if self.start_time.is_none() {
@@ -34,7 +38,11 @@ impl Timer {
     }
     pub fn elapsed_ms(&self) -> u128 {
         if let Some(start_time) = self.start_time {
-            if self.is_paused { self.elapsed.as_millis() } else { start_time.elapsed().as_millis() }
+            if self.is_paused {
+                self.elapsed.as_millis()
+            } else {
+                start_time.elapsed().as_millis()
+            }
         } else {
             self.elapsed.as_millis()
         }
@@ -50,16 +58,33 @@ fn fov_to_projection(fov: xr::Fovf, near: f32, far: f32) -> Mat4 {
     let width = tan_right - tan_left;
     let height = tan_up - tan_down;
     Mat4::from_cols_array(&[
-        2.0 / width, 0.0, (tan_right + tan_left) / width, 0.0,
-        0.0, 2.0 / height, (tan_up + tan_down) / height, 0.0,
-        0.0, 0.0, far / (near - far), -(far * near) / (far - near),
-        0.0, 0.0, -1.0, 0.0,
+        2.0 / width,
+        0.0,
+        (tan_right + tan_left) / width,
+        0.0,
+        0.0,
+        2.0 / height,
+        (tan_up + tan_down) / height,
+        0.0,
+        0.0,
+        0.0,
+        far / (near - far),
+        -(far * near) / (far - near),
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
     ])
 }
 
 #[cfg(feature = "dashi-openxr")]
 fn pose_to_view(pose: xr::Posef) -> Mat4 {
-    let orientation = Quat::from_xyzw(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
+    let orientation = Quat::from_xyzw(
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z,
+        pose.orientation.w,
+    );
     let position = Vec3::new(pose.position.x, pose.position.y, pose.position.z);
     Mat4::from_rotation_translation(orientation, position).inverse()
 }
@@ -79,11 +104,7 @@ fn main() {
     let width = views[0].recommended_image_rect_width;
     let height = views[0].recommended_image_rect_height;
 
-    const VERTICES: [[f32; 3]; 3] = [
-        [0.0, -0.5, -2.0],
-        [0.5, 0.5, -2.0],
-        [-0.5, 0.5, -2.0],
-    ];
+    const VERTICES: [[f32; 3]; 3] = [[0.0, -0.5, -2.0], [0.5, 0.5, -2.0], [-0.5, 0.5, -2.0]];
     const INDICES: [u32; 3] = [0, 1, 2];
 
     let vertices = ctx
@@ -116,7 +137,10 @@ fn main() {
             ..Default::default()
         })
         .unwrap();
-    let fb_view = ImageView { img: fb, ..Default::default() };
+    let fb_view = ImageView {
+        img: fb,
+        ..Default::default()
+    };
 
     let table_layout = ctx
         .make_bind_table_layout(&BindTableLayoutInfo {
@@ -147,19 +171,25 @@ fn main() {
             shaders: &[
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
-                    spirv: inline_spirv::inline_spirv!(r"#version 450
+                    spirv: inline_spirv::inline_spirv!(
+                        r"#version 450
 layout(location = 0) in vec3 inPosition;
 layout(binding = 0) uniform Data { mat4 mvp; };
 void main() {
     gl_Position = mvp * vec4(inPosition, 1.0);
-}", vert),
+}",
+                        vert
+                    ),
                     specialization: &[],
                 },
                 PipelineShaderInfo {
                     stage: ShaderType::Fragment,
-                    spirv: inline_spirv::inline_spirv!(r"#version 450
+                    spirv: inline_spirv::inline_spirv!(
+                        r"#version 450
 layout(location = 0) out vec4 out_color;
-void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
+void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }",
+                        frag
+                    ),
                     specialization: &[],
                 },
             ],
@@ -171,12 +201,22 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
     let render_pass = ctx
         .make_render_pass(&RenderPassInfo {
             viewport: Viewport {
-                area: FRect2D { w: width as f32, h: height as f32, ..Default::default() },
-                scissor: Rect2D { w: width, h: height, ..Default::default() },
+                area: FRect2D {
+                    w: width as f32,
+                    h: height as f32,
+                    ..Default::default()
+                },
+                scissor: Rect2D {
+                    w: width,
+                    h: height,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             subpasses: &[SubpassDescription {
-                color_attachments: &[AttachmentDescription { ..Default::default() }],
+                color_attachments: &[AttachmentDescription {
+                    ..Default::default()
+                }],
                 depth_stencil_attachment: None,
                 subpass_dependencies: &[],
             }],
@@ -232,42 +272,56 @@ void main() { out_color = vec4(0.2, 0.8, 0.2, 1.0); }", frag),
         allocator.reset();
         let (_idx, state) = ctx.acquire_xr_image(&mut display).unwrap();
 
-        let loc = display.xr_instance().locate_views(
-            xr::ViewConfigurationType::PRIMARY_STEREO,
-            state.predicted_display_time,
-            display.xr_input().base_space(),
-        ).unwrap();
+        let loc = display
+            .xr_instance()
+            .locate_views(
+                xr::ViewConfigurationType::PRIMARY_STEREO,
+                state.predicted_display_time,
+                display.xr_input().base_space(),
+            )
+            .unwrap();
 
         let view = loc.views[0];
         let vp = fov_to_projection(view.fov, 0.1, 100.0) * pose_to_view(view.pose);
 
-        framed_list.record(|list| {
-            list.begin_drawing(&DrawBegin {
-                viewport: Viewport {
-                    area: FRect2D { w: width as f32, h: height as f32, ..Default::default() },
-                    scissor: Rect2D { w: width, h: height, ..Default::default() },
+        framed_list
+            .record(|list| {
+                list.begin_drawing(&DrawBegin {
+                    viewport: Viewport {
+                        area: FRect2D {
+                            w: width as f32,
+                            h: height as f32,
+                            ..Default::default()
+                        },
+                        scissor: Rect2D {
+                            w: width,
+                            h: height,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    pipeline: graphics_pipeline,
+                    render_target,
+                    clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
+                })
+                .unwrap();
+                let mut buf = allocator.bump().unwrap();
+                let mut mat = &mut buf.slice::<[f32; 16]>()[0];
+                mat.copy_from_slice(&vp.to_cols_array());
+                list.append(Command::DrawIndexed(DrawIndexed {
+                    vertices,
+                    indices,
+                    index_count: INDICES.len() as u32,
+                    bindings: Bindings {
+                        bind_tables: [Some(bind_table), None, None, None],
+                        dynamic_buffers: [Some(buf), None, None, None],
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                pipeline: graphics_pipeline,
-                render_target,
-                clear_values: &[ClearValue::Color([0.0, 0.0, 0.0, 1.0])],
-            }).unwrap();
-            let mut buf = allocator.bump().unwrap();
-            let mut mat = &mut buf.slice::<[f32; 16]>()[0];
-            mat.copy_from_slice(&vp.to_cols_array());
-            list.append(Command::DrawIndexed(DrawIndexed {
-                vertices,
-                indices,
-                index_count: INDICES.len() as u32,
-                bindings: Bindings {
-                    bind_tables: [Some(bind_table), None, None, None],
-                    dynamic_buffers: [Some(buf), None, None, None],
-                    ..Default::default()
-                },
-                ..Default::default()
-            }));
-            list.end_drawing().unwrap();
-        }).unwrap();
+                }));
+                list.end_drawing().unwrap();
+            })
+            .unwrap();
         framed_list.submit(&SubmitInfo::default()).unwrap();
         ctx.present_xr_display(&mut display, state).unwrap();
     }

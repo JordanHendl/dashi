@@ -125,13 +125,11 @@ impl Context {
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
             .map_err(|_| GPUError::SwapchainConfigError("Failed to create WebGPU surface"))?;
-        let adapter = pollster::block_on(instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            },
-        ))
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
         .ok_or(GPUError::SwapchainConfigError(
             "No compatible WebGPU adapter available",
         ))?;
@@ -157,13 +155,11 @@ impl Context {
 
     pub fn headless(_info: &ContextInfo) -> Result<Self> {
         let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: true,
-            },
-        ))
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: true,
+        }))
         .ok_or(GPUError::SwapchainConfigError(
             "No compatible WebGPU adapter available",
         ))?;
@@ -240,9 +236,12 @@ impl Context {
 fn resolve_canvas(info: &ContextInfo) -> Result<web_sys::HtmlCanvasElement> {
     use wasm_bindgen::JsCast;
 
-    let web_surface = info.web_surface.as_ref().ok_or(
-        GPUError::SwapchainConfigError("WebGPU surface requires a canvas descriptor"),
-    )?;
+    let web_surface = info
+        .web_surface
+        .as_ref()
+        .ok_or(GPUError::SwapchainConfigError(
+            "WebGPU surface requires a canvas descriptor",
+        ))?;
     match web_surface {
         crate::gpu::vulkan::WebSurfaceInfo::Canvas(canvas) => Ok(canvas.clone()),
         crate::gpu::vulkan::WebSurfaceInfo::CanvasId(canvas_id) => {
@@ -253,18 +252,14 @@ fn resolve_canvas(info: &ContextInfo) -> Result<web_sys::HtmlCanvasElement> {
                 ))?;
             let element = document
                 .get_element_by_id(canvas_id)
-                .ok_or(GPUError::SwapchainConfigError(
-                    "Canvas element not found",
-                ))?;
+                .ok_or(GPUError::SwapchainConfigError("Canvas element not found"))?;
             element
                 .dyn_into::<web_sys::HtmlCanvasElement>()
-                .map_err(|_| {
-                    GPUError::SwapchainConfigError("Element is not an HtmlCanvasElement")
-                })
+                .map_err(|_| GPUError::SwapchainConfigError("Element is not an HtmlCanvasElement"))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        crate::gpu::vulkan::WebSurfaceInfo::Unsupported => Err(
-            GPUError::SwapchainConfigError("WebGPU surface is unsupported on this platform"),
-        ),
+        crate::gpu::vulkan::WebSurfaceInfo::Unsupported => Err(GPUError::SwapchainConfigError(
+            "WebGPU surface is unsupported on this platform",
+        )),
     }
 }

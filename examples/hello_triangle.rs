@@ -1,9 +1,6 @@
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
 use dashi::*;
 use std::time::{Duration, Instant};
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-use winit::event_loop::ControlFlow;
-use winit::platform::run_return::EventLoopExtRunReturn;
 
 pub struct Timer {
     start_time: Option<Instant>,
@@ -71,6 +68,45 @@ impl Timer {
     }
 }
 
+fn viewport_for(size: [u32; 2]) -> Viewport {
+    Viewport {
+        area: FRect2D {
+            w: size[0] as f32,
+            h: size[1] as f32,
+            ..Default::default()
+        },
+        scissor: Rect2D {
+            w: size[0],
+            h: size[1],
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn rebuild_framebuffer(
+    ctx: &mut gpu::Context,
+    size: [u32; 2],
+) -> Result<(Handle<Image>, ImageView, Viewport), GPUError> {
+    let fb = ctx.make_image(&ImageInfo {
+        debug_name: "color_attachment",
+        dim: [size[0], size[1], 1],
+        format: Format::RGBA8,
+        mip_levels: 1,
+        initial_data: None,
+        ..Default::default()
+    })?;
+
+    Ok((
+        fb,
+        ImageView {
+            img: fb,
+            ..Default::default()
+        },
+        viewport_for(size),
+    ))
+}
+
 fn main() {
     let device = DeviceSelector::new()
         .unwrap()
@@ -118,23 +154,6 @@ fn main() {
             initial_data: unsafe { Some(INDICES.align_to::<u8>().1) },
         })
         .unwrap();
-
-    // Allocate the framebuffer image & view
-    let fb = ctx
-        .make_image(&ImageInfo {
-            debug_name: "color_attachment",
-            dim: [WIDTH, HEIGHT, 1],
-            format: Format::RGBA8,
-            mip_levels: 8, // set >1 to automatically generate mipmaps
-            initial_data: None,
-            ..Default::default()
-        })
-        .unwrap();
-
-    let fb_view = ImageView {
-        img: fb,
-        ..Default::default()
-    };
 
     // Make the bind table layout. This describes the bindings into a shader.
     let bt_layout = ctx
@@ -266,12 +285,21 @@ void main() {
         .unwrap();
 
     // Display for windowing
-    let mut display = ctx.make_display(&Default::default()).unwrap();
+    let mut display = DisplayBuilder::new()
+        .title("Hello Triangle")
+        .size(WIDTH, HEIGHT)
+        .resizable(true)
+        .build(&mut ctx)
+        .unwrap();
+    let mut display_size = match ctx.prepare_display(&mut display).unwrap() {
+        DisplayStatus::Closed => return,
+        DisplayStatus::Ready { size } | DisplayStatus::Resized { size } => size,
+    };
+    let (mut fb, mut fb_view, mut viewport) = rebuild_framebuffer(&mut ctx, display_size).unwrap();
     // Timer to move the triangle
     let mut timer = Timer::new();
 
     timer.start();
-    const MAX_FRAMES_IN_FLIGHT: usize = 3;
     let mut ring = ctx
         .make_command_ring(&CommandQueueInfo2 {
             debug_name: "cmd",
@@ -284,35 +312,27 @@ void main() {
         // Reset the allocator
         allocator.reset();
 
-        // Listen to events
-        let mut should_exit = false;
-        {
-            let event_loop = display.winit_event_loop();
-            event_loop.run_return(|event, _target, control_flow| {
-                *control_flow = ControlFlow::Exit;
-                if let Event::WindowEvent { event, .. } = event {
-                    match event {
-                        WindowEvent::CloseRequested => should_exit = true,
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
-                                    state: ElementState::Pressed,
-                                    ..
-                                },
-                            ..
-                        } => should_exit = true,
-                        _ => {}
-                    }
-                }
-            });
-        }
-        if should_exit {
-            break 'running;
+        match ctx.prepare_display(&mut display).unwrap() {
+            DisplayStatus::Closed => break 'running,
+            DisplayStatus::Ready { size } => {
+                display_size = size;
+            }
+            DisplayStatus::Resized { size } => {
+                display_size = size;
+                ctx.destroy_image(fb);
+                let rebuilt = rebuild_framebuffer(&mut ctx, size).unwrap();
+                fb = rebuilt.0;
+                fb_view = rebuilt.1;
+                viewport = rebuilt.2;
+            }
         }
 
         // Get the next image from the display.
-        let (img, sem, _idx, _good) = ctx.acquire_new_image(&mut display).unwrap();
+        let (img, sem, _idx, _good) = match ctx.acquire_new_image(&mut display) {
+            Ok(frame) => frame,
+            Err(GPUError::DisplayNeedsRebuild) => continue,
+            Err(err) => panic!("acquire_new_image failed: {:?}", err),
+        };
 
         ring.record(|list| {
             // Begin render pass & bind pipeline
@@ -320,19 +340,7 @@ void main() {
 
             // Begin render pass & bind pipeline
             let draw = stream.begin_drawing(&BeginDrawing {
-                viewport: Viewport {
-                    area: FRect2D {
-                        w: WIDTH as f32,
-                        h: HEIGHT as f32,
-                        ..Default::default()
-                    },
-                    scissor: Rect2D {
-                        w: WIDTH,
-                        h: HEIGHT,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
+                viewport,
                 render_pass,
                 pipeline: graphics_pipeline,
                 color_attachments: [Some(fb_view), None, None, None, None, None, None, None],
@@ -390,7 +398,13 @@ void main() {
 
         // Present the display image, waiting on the semaphore that will signal when our
         // drawing/blitting is done.
-        ctx.present_display(&display, &[render_sems[frame_slot]])
-            .unwrap();
+        match ctx.present_display(&display, &[render_sems[frame_slot]]) {
+            Ok(()) => {}
+            Err(GPUError::DisplayNeedsRebuild) => continue,
+            Err(err) => panic!("present_display failed: {:?}", err),
+        }
     }
+
+    let _ = display_size;
+    ctx.destroy_image(fb);
 }

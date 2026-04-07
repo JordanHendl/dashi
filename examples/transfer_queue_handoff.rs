@@ -38,7 +38,8 @@ fn main() -> Result<(), GPUError> {
     })?;
 
     // Upload data on the transfer queue.
-    let mut transfer_list = ctx.begin_command_queue(QueueType::Transfer, "transfer_upload", false)?;
+    let mut transfer_list =
+        ctx.begin_command_queue(QueueType::Transfer, "transfer_upload", false)?;
     let upload_stream = CommandStream::new_with_queue(QueueType::Transfer)
         .begin()
         .copy_buffers(&CopyBuffer {
