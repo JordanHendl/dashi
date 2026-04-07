@@ -142,6 +142,10 @@ impl<T> CommandStream<T> {
         self
     }
 
+    pub fn debug_validate(&self, label: &str) {
+        self.enc.debug_validate(label);
+    }
+
     /// Returns the queue type this command stream targets.
     pub fn queue_type(&self) -> QueueType {
         self.enc.queue_type()

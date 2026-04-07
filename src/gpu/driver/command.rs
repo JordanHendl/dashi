@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
+use std::backtrace::Backtrace;
 
 use crate::{
     BindTable, Buffer, BufferView, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
@@ -709,6 +710,17 @@ impl CommandEncoder {
         );
 
         for cmd in other.iter() {
+            if let Some(expected) = debug_expected_payload_size(cmd.op) {
+                if cmd.bytes().len() != expected {
+                    eprintln!(
+                        "dashi combine: op={:?} actual_len={} expected_len={}",
+                        cmd.op,
+                        cmd.bytes().len(),
+                        expected
+                    );
+                    eprintln!("{}", Backtrace::force_capture());
+                }
+            }
             match cmd.op {
                 Op::BeginDrawing => self.begin_drawing(cmd.payload()),
                 Op::EndDrawing => {
@@ -765,9 +777,33 @@ impl CommandEncoder {
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
     pub fn append<S: CommandSink>(&self, sink: &mut S) -> Result<usize> {
+        let mut gpu_timer_frames = Vec::new();
+        for cmd in self.iter() {
+            if let Op::GpuTimerBegin = cmd.op {
+                let frame = cmd.payload::<GpuTimerBegin>().frame;
+                if !gpu_timer_frames.contains(&frame) {
+                    gpu_timer_frames.push(frame);
+                }
+            }
+        }
+        if !gpu_timer_frames.is_empty() {
+            sink.prepare_gpu_timers(&gpu_timer_frames)?;
+        }
+
         let mut cnt = 0;
         for cmd in self.iter() {
             cnt += 1;
+            if let Some(expected) = debug_expected_payload_size(cmd.op) {
+                if cmd.bytes().len() != expected {
+                    eprintln!(
+                        "dashi append: op={:?} actual_len={} expected_len={} command_index={}",
+                        cmd.op,
+                        cmd.bytes().len(),
+                        expected,
+                        cnt
+                    );
+                }
+            }
             match cmd.op {
                 Op::BeginDrawing => sink.begin_drawing(cmd.payload())?,
                 Op::EndDrawing => sink.end_drawing(cmd.payload())?,
@@ -815,6 +851,23 @@ impl CommandEncoder {
         Ok(None)
     }
 
+    pub fn debug_validate(&self, label: &str) {
+        for (index, cmd) in self.iter().enumerate() {
+            if let Some(expected) = debug_expected_payload_size(cmd.op) {
+                assert_eq!(
+                    cmd.bytes().len(),
+                    expected,
+                    "command stream '{}' is malformed at command {}: op={:?} actual_len={} expected_len={}",
+                    label,
+                    index + 1,
+                    cmd.op,
+                    cmd.bytes().len(),
+                    expected
+                );
+            }
+        }
+    }
+
     /// Iterate over recorded commands.
     pub fn iter(&self) -> CommandIter {
         CommandIter {
@@ -845,7 +898,8 @@ impl<'a> Command<'a> {
         assert_eq!(
             self.bytes.len(),
             size_of::<T>(),
-            "payload<T>: wrong byte length"
+            "payload<T>: wrong byte length for {:?}",
+            self.op
         );
         let addr = self.bytes.as_ptr() as usize;
         assert_eq!(
@@ -864,6 +918,37 @@ impl<'a> Command<'a> {
 pub struct CommandIter<'a> {
     data: &'a [u8],
     side: &'a [u8],
+}
+
+pub(crate) fn debug_expected_payload_size(op: Op) -> Option<usize> {
+    Some(match op {
+        Op::BeginDrawing => size_of::<BeginDrawing>(),
+        Op::EndDrawing => size_of::<EndDrawing>(),
+        Op::BindGraphicsPipeline => size_of::<BindGraphicsPipeline>(),
+        Op::UpdateGraphicsPipelineState => size_of::<GraphicsPipelineStateUpdate>(),
+        Op::Draw => size_of::<Draw>(),
+        Op::DrawIndexed => size_of::<DrawIndexed>(),
+        Op::DrawIndirect => size_of::<DrawIndirect>(),
+        Op::DrawIndexedIndirect => size_of::<DrawIndexedIndirect>(),
+        Op::Dispatch => size_of::<Dispatch>(),
+        Op::DispatchIndirect => return None,
+        Op::CopyBuffer => size_of::<CopyBuffer>(),
+        Op::CopyBufferToImage => size_of::<CopyBufferImage>(),
+        Op::CopyImageToBuffer => size_of::<CopyImageBuffer>(),
+        Op::CopyImage => size_of::<CopyImage>(),
+        Op::BlitImage => size_of::<BlitImage>(),
+        Op::ResolveImage => size_of::<MSImageResolve>(),
+        Op::DebugMarkerBegin => size_of::<DebugMarkerBegin>(),
+        Op::DebugMarkerEnd => size_of::<DebugMarkerEnd>(),
+        Op::TransitionImage => size_of::<TransitionImage>(),
+        Op::BeginRenderPass => size_of::<BeginRenderPass>(),
+        Op::NextSubpass => size_of::<NextSubpass>(),
+        Op::PrepareBuffer => size_of::<PrepareBuffer>(),
+        Op::GpuTimerBegin => size_of::<GpuTimerBegin>(),
+        Op::GpuTimerEnd => size_of::<GpuTimerEnd>(),
+        Op::SyncPoint => size_of::<SyncPointCmd>(),
+        Op::DebugLabel => return None,
+    })
 }
 
 impl<'a> Iterator for CommandIter<'a> {
@@ -978,6 +1063,10 @@ impl Op {
 }
 
 pub trait CommandSink {
+    fn prepare_gpu_timers(&mut self, _frames: &[u32]) -> Result<()> {
+        Ok(())
+    }
+
     fn begin_render_pass(&mut self, pass: &BeginRenderPass) -> Result<()>;
     fn begin_drawing(&mut self, pass: &BeginDrawing) -> Result<()>;
     fn end_drawing(&mut self, pass: &EndDrawing) -> Result<()>;

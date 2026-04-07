@@ -342,6 +342,7 @@ impl VulkanContext {
                 mip_levels: 1,
                 samples: SampleCount::S1,
                 cube_compatible: false,
+                storage: false,
                 initial_data: None,
             };
             let info_handle = self

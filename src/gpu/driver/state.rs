@@ -445,7 +445,13 @@ pub mod vulkan {
 
     pub const USAGE_TO_ACCESS: &[(UsageBits, vk::AccessFlags)] = &[
         (UsageBits::SAMPLED, vk::AccessFlags::SHADER_READ),
-        (UsageBits::RT_WRITE, vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
+        (
+            UsageBits::RT_WRITE,
+            vk::AccessFlags::from_raw(
+                vk::AccessFlags::COLOR_ATTACHMENT_READ.as_raw()
+                    | vk::AccessFlags::COLOR_ATTACHMENT_WRITE.as_raw(),
+            ),
+        ),
         (UsageBits::UAV_READ, vk::AccessFlags::SHADER_READ),
         (UsageBits::UAV_WRITE, vk::AccessFlags::SHADER_WRITE),
         (UsageBits::COPY_SRC, vk::AccessFlags::TRANSFER_READ),
@@ -457,7 +463,10 @@ pub mod vulkan {
         ),
         (
             UsageBits::DEPTH_WRITE,
-            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            vk::AccessFlags::from_raw(
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ.as_raw()
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE.as_raw(),
+            ),
         ),
         (
             UsageBits::VERTEX_READ,
@@ -475,7 +484,30 @@ pub mod vulkan {
 
 #[cfg(test)]
 mod tests {
-    //
+    #[cfg(feature = "vulkan")]
+    use ash::vk;
+
+    use super::usage_to_access;
+    use crate::gpu::driver::types::UsageBits;
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn color_attachment_usage_includes_read_access() {
+        let access = usage_to_access(UsageBits::RT_WRITE);
+
+        assert!(access.contains(vk::AccessFlags::COLOR_ATTACHMENT_READ));
+        assert!(access.contains(vk::AccessFlags::COLOR_ATTACHMENT_WRITE));
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn depth_attachment_usage_includes_read_access() {
+        let access = usage_to_access(UsageBits::DEPTH_WRITE);
+
+        assert!(access.contains(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ));
+        assert!(access.contains(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE));
+    }
+
     //    #[test]
     //    fn image_state_changes() {
     //        let mut tracker = StateTracker::new();

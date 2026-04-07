@@ -24,7 +24,6 @@ impl GpuTimer {
     }
 
     pub(super) unsafe fn begin(&mut self, device: &ash::Device, cmd: vk::CommandBuffer) {
-        device.cmd_reset_query_pool(cmd, self.pool, 0, 2);
         device.cmd_write_timestamp(cmd, vk::PipelineStageFlags::TOP_OF_PIPE, self.pool, 0);
         self.state = TimerState::Begun;
     }

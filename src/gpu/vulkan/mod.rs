@@ -1687,6 +1687,9 @@ impl VulkanContext {
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
         } else {
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            if info.storage {
+                base_usage_flags = base_usage_flags | vk::ImageUsageFlags::STORAGE;
+            }
         }
 
         if info.cube_compatible {
@@ -1971,6 +1974,9 @@ impl VulkanContext {
         for timer in self.gpu_timers.drain(..) {
             unsafe { timer.destroy(&self.device) };
         }
+        if !self.gpu_timers_enabled() {
+            return Ok(());
+        }
         let mut timers = Vec::with_capacity(count);
         for _ in 0..count {
             timers.push(GpuTimer::new(&self.device)?);
@@ -1979,11 +1985,20 @@ impl VulkanContext {
         Ok(())
     }
 
+    pub(crate) fn gpu_timers_enabled(&self) -> bool {
+        !std::env::var("DASHI_DISABLE_GPU_TIMERS")
+            .map(|value| value == "1")
+            .unwrap_or(false)
+    }
+
     /// Begin timing for `frame` on the provided command list.
     ///
     /// [`init_gpu_timers`] must be called beforehand, and the matching
     /// [`gpu_timer_end`] must be invoked on the **same** `CommandQueue`.
     pub fn gpu_timer_begin(&mut self, list: &mut CommandQueue, frame: usize) {
+        if !self.gpu_timers_enabled() {
+            return;
+        }
         if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe { t.begin(&self.device, list.cmd_buf) };
         }
@@ -1993,6 +2008,9 @@ impl VulkanContext {
     ///
     /// Must pair with a preceding [`gpu_timer_begin`] call on the same list.
     pub fn gpu_timer_end(&mut self, list: &mut CommandQueue, frame: usize) {
+        if !self.gpu_timers_enabled() {
+            return;
+        }
         if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe { t.end(&self.device, list.cmd_buf) };
         }
@@ -2003,6 +2021,9 @@ impl VulkanContext {
     /// Only valid once the associated command list has been submitted and
     /// the GPU has finished executing it (e.g. by waiting on the fence).
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
+        if !self.gpu_timers_enabled() {
+            return None;
+        }
         self.gpu_timers
             .get_mut(frame)
             .and_then(|t| t.resolve(&self.device, self.timestamp_period).ok())
@@ -2784,7 +2805,7 @@ impl VulkanContext {
             let slots = seen_slots.entry(binding_info.binding).or_default();
             for res in binding_info.resources {
                 let actual_type = resource_var_type(&res.resource);
-                if &actual_type != expected_type {
+                if !resource_matches_var_type(&res.resource, *expected_type) {
                     return Err(GPUError::InvalidBindTableBinding {
                         binding: binding_info.binding,
                         reason: format!(
@@ -2870,6 +2891,12 @@ impl VulkanContext {
                     ShaderResource::Image(image_view) => {
                         let handle = self.get_or_create_image_view(image_view)?;
                         let image = self.image_views.get_ref(handle).unwrap();
+                        let descriptor_type =
+                            if *expected_type == BindTableVariableType::StorageImage {
+                                vk::DescriptorType::STORAGE_IMAGE
+                            } else {
+                                vk::DescriptorType::SAMPLED_IMAGE
+                            };
 
                         let image_info = vk::DescriptorImageInfo::builder()
                             .image_view(image.view)
@@ -2881,7 +2908,7 @@ impl VulkanContext {
                         let write_descriptor_set = vk::WriteDescriptorSet::builder()
                             .dst_set(descriptor_set)
                             .dst_binding(binding_info.binding)
-                            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                            .descriptor_type(descriptor_type)
                             .dst_array_element(res.slot)
                             .image_info(&image_infos[image_infos.len() - 1..])
                             .build();
@@ -3205,6 +3232,7 @@ impl VulkanContext {
                     format: attachment_cfg.description.format,
                     mip_levels: 1,
                     cube_compatible: false,
+                    storage: false,
                     initial_data: None,
                     samples: attachment_cfg.description.samples,
                 };
@@ -3241,6 +3269,7 @@ impl VulkanContext {
                     format: depth_cfg.description.format,
                     mip_levels: 1,
                     cube_compatible: false,
+                    storage: false,
                     initial_data: None,
                     samples: depth_cfg.description.samples,
                 };
@@ -4081,4 +4110,3 @@ impl VulkanContext {
             .unwrap());
     }
 }
-

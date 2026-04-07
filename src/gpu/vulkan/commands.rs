@@ -863,6 +863,28 @@ impl CommandQueue {
 }
 
 impl CommandSink for CommandQueue {
+    fn prepare_gpu_timers(&mut self, frames: &[u32]) -> Result<()> {
+        let ctx = self.ctx;
+        if ctx.is_null() {
+            return Ok(());
+        }
+
+        if unsafe { !(*ctx).gpu_timers_enabled() } {
+            return Ok(());
+        }
+
+        unsafe {
+            let device = &(*ctx).device;
+            for frame in frames {
+                if let Some(timer) = (&(*ctx).gpu_timers).get(*frame as usize) {
+                    device.cmd_reset_query_pool(self.cmd_buf, timer.pool, 0, 2);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn begin_render_pass(
         &mut self,
         cmd: &crate::gpu::driver::command::BeginRenderPass,
@@ -2335,5 +2357,3 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 }
-
-
