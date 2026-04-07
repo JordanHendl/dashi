@@ -28,6 +28,7 @@ pub enum GPUError {
     LibraryError(String),
     SlotError(),
     HeadlessDisplayNotSupported,
+    DisplayNeedsRebuild,
     UnsupportedFormat(vk::Format),
     SwapchainConfigError(&'static str),
     UnsupportedShaderStage(ShaderType),
@@ -84,6 +85,7 @@ impl fmt::Display for GPUError {
             GPUError::LibraryError(msg) => write!(f, "Library failed to initialize. Error: {}", msg),
             GPUError::SlotError() => write!(f, "Slot Error"),
             GPUError::HeadlessDisplayNotSupported => write!(f, "Headless Display not supported"),
+            GPUError::DisplayNeedsRebuild => write!(f, "Display needs rebuild"),
             GPUError::UnsupportedFormat(format) => write!(f, "Format {:?} not supported", format),
             GPUError::SwapchainConfigError(msg) => {
                 write!(f, "Swapchain configuration error: {}", msg)

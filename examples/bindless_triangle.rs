@@ -411,16 +411,17 @@ void main() {
             let mut clear_values = [None; 8];
             clear_values[0] = Some(ClearValue::Color([0.0, 0.0, 0.0, 1.0]));
 
-            let mut drawing = stream.begin_drawing(&BeginDrawing {
-                viewport,
-                render_pass,
-                pipeline: graphics_pipeline,
-                color_attachments,
-                depth_attachment: None,
-                clear_values,
-                ..Default::default()
-            })
-            .update_viewport(&viewport);
+            let mut drawing = stream
+                .begin_drawing(&BeginDrawing {
+                    viewport,
+                    render_pass,
+                    pipeline: graphics_pipeline,
+                    color_attachments,
+                    depth_attachment: None,
+                    clear_values,
+                    ..Default::default()
+                })
+                .update_viewport(&viewport);
 
             for slot in 0..transforms.len() {
                 #[repr(C)]

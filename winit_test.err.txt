@@ -1,0 +1,458 @@
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:345:59
+    |
+345 |     pub(super) debug_marker: Option<ash::extensions::ext::DebugMarker>,
+    |                                                           ^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:777:39
+    |
+777 |                 ash::extensions::ext::DebugMarker::name().as_ptr(),
+    |                                       ^^^^^^^^^^^
+
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:788:39
+    |
+788 |                 ash::extensions::ext::DebugMarker::name().as_ptr(),
+    |                                       ^^^^^^^^^^^
+
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:850:47
+    |
+850 |             ext_name == ash::extensions::ext::DebugMarker::name()
+    |                                               ^^^^^^^^^^^
+
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:929:40
+    |
+929 |             Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
+    |                                        ^^^^^^^^^^^
+
+warning: use of deprecated struct `ash::extensions::ext::DebugMarker`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+    --> src\gpu\vulkan\mod.rs:1083:40
+     |
+1083 |             Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
+     |                                        ^^^^^^^^^^^
+
+warning: use of deprecated method `ash::extensions::ext::DebugMarker::cmd_debug_marker_insert`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+    --> src\gpu\vulkan\commands.rs:2347:28
+     |
+2347 |                     marker.cmd_debug_marker_insert(self.cmd_buf, &info);
+     |                            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated associated function `ash::extensions::ext::DebugMarker::name`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:777:52
+    |
+777 |                 ash::extensions::ext::DebugMarker::name().as_ptr(),
+    |                                                    ^^^^
+
+warning: use of deprecated associated function `ash::extensions::ext::DebugMarker::name`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:788:52
+    |
+788 |                 ash::extensions::ext::DebugMarker::name().as_ptr(),
+    |                                                    ^^^^
+
+warning: use of deprecated associated function `ash::extensions::ext::DebugMarker::name`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:850:60
+    |
+850 |             ext_name == ash::extensions::ext::DebugMarker::name()
+    |                                                            ^^^^
+
+warning: use of deprecated associated function `ash::extensions::ext::DebugMarker::new`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+   --> src\gpu\vulkan\mod.rs:929:53
+    |
+929 |             Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
+    |                                                     ^^^
+
+warning: use of deprecated associated function `ash::extensions::ext::DebugMarker::new`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+    --> src\gpu\vulkan\mod.rs:1083:53
+     |
+1083 |             Some(ash::extensions::ext::DebugMarker::new(&instance, &device))
+     |                                                     ^^^
+
+warning: use of deprecated method `ash::extensions::ext::DebugMarker::debug_marker_set_object_name`: Please use the [DebugUtils](struct.DebugUtils.html) extension instead.
+    --> src\gpu\vulkan\mod.rs:1248:22
+     |
+1248 |                     .debug_marker_set_object_name(
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `resource_pool::Pool::<T>::get_mut_ref`: use with_mut to avoid &mut escaping synchronization
+   --> src\utils\gpupool.rs:185:19
+    |
+185 |         self.pool.get_mut_ref(item)
+    |                   ^^^^^^^^^^^
+
+warning: use of deprecated method `resource_pool::DynamicPool::get_mut_ref`: use with_mut to avoid &mut escaping synchronization
+   --> src\utils\gpupool.rs:353:19
+    |
+353 |         self.pool.get_mut_ref(item)
+    |                   ^^^^^^^^^^^
+
+warning: unused variable: `range`
+   --> src\gpu\driver\command.rs:616:74
+    |
+616 |     pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, range: SubresourceRange) {
+    |                                                                          ^^^^^ help: if this is intentional, prefix it with an underscore: `_range`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\gpu\structs.rs:1628:21
+     |
+1628 |                 let mut value_i: Option<[i32; 4]> = None;
+     |                     ----^^^^^^^
+     |                     |
+     |                     help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\gpu\structs.rs:1629:21
+     |
+1629 |                 let mut value_u: Option<[u32; 4]> = None;
+     |                     ----^^^^^^^
+     |                     |
+     |                     help: remove this `mut`
+
+warning: unused variable: `value_i`
+    --> src\gpu\structs.rs:1628:21
+     |
+1628 |                 let mut value_i: Option<[i32; 4]> = None;
+     |                     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_value_i`
+
+warning: unused variable: `value_u`
+    --> src\gpu\structs.rs:1629:21
+     |
+1629 |                 let mut value_u: Option<[u32; 4]> = None;
+     |                     ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_value_u`
+
+warning: unused variable: `value`
+   --> src\gpu\vulkan\error.rs:128:13
+    |
+128 |     fn from(value: anyhow::Error) -> Self {
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_value`
+
+warning: unused variable: `value`
+   --> src\gpu\vulkan\error.rs:135:13
+    |
+135 |     fn from(value: serde_yaml::Error) -> Self {
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_value`
+
+warning: unnecessary `unsafe` block
+    --> src\gpu\vulkan\commands.rs:2060:9
+     |
+2060 |         unsafe {
+     |         ^^^^^^ unnecessary `unsafe` block
+     |
+     = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `stream`
+    --> src\gpu\vulkan\mod.rs:1295:9
+     |
+1295 |         stream: CommandStream<Executable>,
+     |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_stream`
+
+warning: unused variable: `info`
+    --> src\gpu\vulkan\mod.rs:1296:9
+     |
+1296 |         info: &CommandQueueInfo,
+     |         ^^^^ help: if this is intentional, prefix it with an underscore: `_info`
+
+warning: unused variable: `buffer_size`
+    --> src\gpu\vulkan\mod.rs:1774:13
+     |
+1774 |         let buffer_size = buf.size as u64;
+     |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_buffer_size`
+
+warning: variable does not need to be mutable
+    --> src\gpu\vulkan\mod.rs:2621:13
+     |
+2621 |         let mut layout_binding_info =
+     |             ----^^^^^^^^^^^^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: struct `BlitPadding` is never constructed
+   --> src\gpu\driver\command.rs:348:8
+    |
+348 | struct BlitPadding {
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `INLINE_MAX` is never used
+   --> src\gpu\driver\command.rs:961:15
+    |
+961 |         const INLINE_MAX: usize = 32;
+    |               ^^^^^^^^^^
+
+warning: function `pick_layout_for_usage` is never used
+   --> src\gpu\driver\state.rs:117:4
+    |
+117 | fn pick_layout_for_usage(usage: UsageBits) -> Layout {
+    |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `from_raw` is never used
+   --> src\gpu\structs.rs:314:19
+    |
+309 | impl XrSwapchainImage {
+    | --------------------- associated function in this implementation
+...
+314 |     pub(crate) fn from_raw(raw_handle: u64) -> Self {
+    |                   ^^^^^^^^
+
+warning: struct `Tag` is never constructed
+    --> src\gpu\structs.rs:1616:16
+     |
+1616 |         struct Tag {
+     |                ^^^
+
+warning: field `callback_state` is never read
+  --> src\gpu\vulkan\mod.rs:79:5
+   |
+77 | pub struct DebugMessenger {
+   |            -------------- field in this struct
+78 |     raw_handle: u64,
+79 |     callback_state: Box<DebugMessengerCallbackState>,
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `DebugMessenger` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `attachment_formats` is never read
+   --> src\gpu\vulkan\mod.rs:208:16
+    |
+203 | pub struct RenderPass {
+    |            ---------- field in this struct
+...
+208 |     pub(super) attachment_formats: Vec<Format>,
+    |                ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `RenderPass` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: method `oneshot_transition_image` is never used
+    --> src\gpu\vulkan\mod.rs:1352:8
+     |
+ 415 | impl VulkanContext {
+     | ------------------ method in this implementation
+...
+1352 |     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `begin_secondary` is never used
+   --> src\gpu\vulkan\commands.rs:401:8
+    |
+381 | impl CommandQueue {
+    | ----------------- method in this implementation
+...
+401 |     fn begin_secondary(&mut self, debug_name: &str) -> Result<CommandQueue> {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `convert_barrier_point_vk` is never used
+   --> src\gpu\vulkan\conversions.rs:205:15
+    |
+205 | pub(super) fn convert_barrier_point_vk(pt: BarrierPoint) -> vk::PipelineStageFlags {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `debug_name` is never read
+  --> src\gpu\vulkan\memory.rs:36:5
+   |
+34 | pub(crate) struct BufferInfoRecord {
+   |                   ---------------- field in this struct
+35 |     pub(crate) info: BufferInfo<'static>,
+36 |     debug_name: String,
+   |     ^^^^^^^^^^
+   |
+   = note: `BufferInfoRecord` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `debug_name` is never read
+  --> src\gpu\vulkan\image.rs:18:5
+   |
+16 | pub(crate) struct ImageInfoRecord {
+   |                   --------------- field in this struct
+17 |     pub(crate) info: ImageInfo<'static>,
+18 |     debug_name: String,
+   |     ^^^^^^^^^^
+   |
+   = note: `ImageInfoRecord` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `bind_descriptor_set` is never used
+  --> src\gpu\vulkan\descriptor_sets.rs:23:19
+   |
+22 | impl CommandQueue {
+   | ----------------- method in this implementation
+23 |     pub(crate) fn bind_descriptor_set(
+   |                   ^^^^^^^^^^^^^^^^^^^
+
+warning: field `min_sample_shading` is never read
+  --> src\gpu\vulkan\pipelines.rs:22:16
+   |
+10 | pub struct GraphicsPipelineLayout {
+   |            ---------------------- field in this struct
+...
+22 |     pub(super) min_sample_shading: f32,
+   |                ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `GraphicsPipelineLayout` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `attachment_formats`, `depth_format`, and `sample_count` are never read
+  --> src\gpu\vulkan\pipelines.rs:38:16
+   |
+32 | pub struct GraphicsPipeline {
+   |            ---------------- fields in this struct
+...
+38 |     pub(super) attachment_formats: Vec<Format>,
+   |                ^^^^^^^^^^^^^^^^^^
+39 |     pub(super) depth_format: Option<Format>,
+   |                ^^^^^^^^^^^^
+40 |     pub(super) sample_count: SampleCount,
+   |                ^^^^^^^^^^^^
+   |
+   = note: `GraphicsPipeline` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src\gpu\driver\command.rs:872:17
+    |
+872 |     pub fn iter(&self) -> CommandIter {
+    |                 ^^^^^     ^^^^^^^^^^^ the same lifetime is hidden here
+    |                 |
+    |                 the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+872 |     pub fn iter(&self) -> CommandIter<'_> {
+    |                                      ++++
+
+warning: `extern` fn uses type `gpu::structs::DebugMessageSeverity`, which is not FFI-safe
+  --> src\gpu\structs.rs:60:35
+   |
+60 |   pub type DebugMessengerCallback = unsafe extern "system" fn(
+   |  ___________________________________^
+61 | |     severity: DebugMessageSeverity,
+62 | |     message_type: DebugMessageType,
+63 | |     message: &CStr,
+64 | |     user_data: *mut c_void,
+65 | | ) -> bool;
+   | |_________^ not FFI-safe
+   |
+   = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct
+   = note: this struct has unspecified layout
+note: the type is defined here
+  --> src\gpu\structs.rs:28:1
+   |
+28 | / bitflags! {
+29 | |     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+30 | |     pub struct DebugMessageSeverity: u32 {
+31 | |         const VERBOSE = 0x1;
+...  |
+36 | | }
+   | |_^
+   = note: `#[warn(improper_ctypes_definitions)]` on by default
+   = note: this warning originates in the macro `$crate::__declare_public_bitflags` which comes from the expansion of the macro `bitflags` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `extern` fn uses type `gpu::structs::DebugMessageSeverity`, which is not FFI-safe
+  --> src\gpu\structs.rs:89:16
+   |
+89 |     _severity: DebugMessageSeverity,
+   |                ^^^^^^^^^^^^^^^^^^^^ not FFI-safe
+   |
+   = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct
+   = note: this struct has unspecified layout
+note: the type is defined here
+  --> src\gpu\structs.rs:28:1
+   |
+28 | / bitflags! {
+29 | |     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+30 | |     pub struct DebugMessageSeverity: u32 {
+31 | |         const VERBOSE = 0x1;
+...  |
+36 | | }
+   | |_^
+   = note: this warning originates in the macro `$crate::__declare_public_bitflags` which comes from the expansion of the macro `bitflags` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `extern` fn uses type `gpu::structs::DebugMessageType`, which is not FFI-safe
+  --> src\gpu\structs.rs:90:20
+   |
+90 |     _message_type: DebugMessageType,
+   |                    ^^^^^^^^^^^^^^^^ not FFI-safe
+   |
+   = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct
+   = note: this struct has unspecified layout
+note: the type is defined here
+  --> src\gpu\structs.rs:38:1
+   |
+38 | / bitflags! {
+39 | |     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+40 | |     pub struct DebugMessageType: u32 {
+41 | |         const GENERAL = 0x1;
+...  |
+45 | | }
+   | |_^
+   = note: this warning originates in the macro `$crate::__declare_public_bitflags` which comes from the expansion of the macro `bitflags` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: `extern` fn uses type `CStr`, which is not FFI-safe
+  --> src\gpu\structs.rs:91:15
+   |
+91 |     _message: &CStr,
+   |               ^^^^^ not FFI-safe
+   |
+   = help: consider passing a `*const std::ffi::c_char` instead, and use `CStr::as_ptr()`
+   = note: `CStr`/`CString` do not have a guaranteed layout
+
+warning: `dashi` (lib) generated 47 warnings (run `cargo fix --lib -p dashi` to apply 12 suggestions)
+warning: associated function `headless` is never used
+  --> tests\common\mod.rs:34:12
+   |
+33 | impl ValidationContext {
+   | ---------------------- associated function in this implementation
+34 |     pub fn headless(info: &ContextInfo) -> Result<Self, GPUError> {
+   |            ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `extern` fn uses type `DebugMessageSeverity`, which is not FFI-safe
+  --> tests\common\mod.rs:12:23
+   |
+12 |     message_severity: DebugMessageSeverity,
+   |                       ^^^^^^^^^^^^^^^^^^^^ not FFI-safe
+   |
+   = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct
+   = note: this struct has unspecified layout
+   = note: `#[warn(improper_ctypes_definitions)]` on by default
+
+warning: `extern` fn uses type `DebugMessageType`, which is not FFI-safe
+  --> tests\common\mod.rs:13:19
+   |
+13 |     message_type: DebugMessageType,
+   |                   ^^^^^^^^^^^^^^^^ not FFI-safe
+   |
+   = help: consider adding a `#[repr(C)]` or `#[repr(transparent)]` attribute to this struct
+   = note: this struct has unspecified layout
+
+warning: `extern` fn uses type `CStr`, which is not FFI-safe
+  --> tests\common\mod.rs:14:15
+   |
+14 |     _message: &std::ffi::CStr,
+   |               ^^^^^^^^^^^^^^^ not FFI-safe
+   |
+   = help: consider passing a `*const std::ffi::c_char` instead, and use `CStr::as_ptr()`
+   = note: `CStr`/`CString` do not have a guaranteed layout
+
+warning: `dashi` (test "winit_window_controls") generated 4 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running tests\winit_window_controls.rs (target\debug\deps\winit_window_controls-b775f37d5fa20a6f.exe)
+creating windowed validation context
+creating display
+[WARNING][VALIDATION] Validation Warning: [ WARNING-vkGetDeviceProcAddr-device ] | MessageID = 0x22b1fbac | vkGetDeviceProcAddr(): pName is trying to grab vkGetPhysicalDevicePresentRectanglesKHR which is an instance level function
+initial prepare
+resizing to 800x600
+[WARNING][VALIDATION] Validation Warning: [ WARNING-vkGetDeviceProcAddr-device ] | MessageID = 0x22b1fbac | vkGetDeviceProcAddr(): pName is trying to grab vkGetPhysicalDevicePresentRectanglesKHR which is an instance level function
+wait_for_status observed: Resized { size: [800, 600] }
+minimizing display
+restore thread sleeping
+calling prepare_display after minimize
+restore thread calling ShowWindow(SW_RESTORE)
+prepare_display after minimize returned: Ready { size: [800, 600] }

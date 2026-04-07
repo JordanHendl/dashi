@@ -1,9 +1,9 @@
+use crate::gpu::device_selector::SelectedDevice;
+use crate::utils::Handle;
 use crate::{
     BindTable, BindTableLayout, Buffer, CommandQueue, ComputePipelineLayout, DynamicAllocatorState,
     GraphicsPipelineLayout, Image, RenderPass, Sampler, Semaphore,
 };
-use crate::gpu::device_selector::SelectedDevice;
-use crate::utils::Handle;
 use bitflags::bitflags;
 use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -559,6 +559,7 @@ pub struct ImageInfo<'a> {
     pub mip_levels: u32,
     pub samples: SampleCount,
     pub cube_compatible: bool,
+    pub storage: bool,
     pub initial_data: Option<&'a [u8]>,
 }
 
@@ -570,6 +571,7 @@ impl Hash for ImageInfo<'_> {
         self.mip_levels.hash(state);
         self.samples.hash(state);
         self.cube_compatible.hash(state);
+        self.storage.hash(state);
     }
 }
 
@@ -583,6 +585,7 @@ impl<'a> Default for ImageInfo<'a> {
             mip_levels: 1,
             samples: SampleCount::S1,
             cube_compatible: false,
+            storage: false,
             initial_data: None,
         }
     }
@@ -973,6 +976,19 @@ pub(crate) fn resource_var_type(resource: &ShaderResource) -> BindTableVariableT
     }
 }
 
+pub(crate) fn resource_matches_var_type(
+    resource: &ShaderResource,
+    expected_type: BindTableVariableType,
+) -> bool {
+    match resource {
+        ShaderResource::Image(_) => matches!(
+            expected_type,
+            BindTableVariableType::Image | BindTableVariableType::StorageImage
+        ),
+        _ => resource_var_type(resource) == expected_type,
+    }
+}
+
 pub(crate) fn indexed_bindings_compatible_with_layout(
     variables: &[BindTableVariable],
     bindings: &[IndexedBindingInfo],
@@ -991,7 +1007,7 @@ pub(crate) fn indexed_bindings_compatible_with_layout(
         let slots = seen_slots.entry(binding.binding).or_default();
 
         for res in binding.resources {
-            if resource_var_type(&res.resource) != *expected_type {
+            if !resource_matches_var_type(&res.resource, *expected_type) {
                 return false;
             }
 
@@ -1165,6 +1181,33 @@ mod layout_validation_tests {
                 ],
             },
         ];
+
+        assert!(indexed_bindings_compatible_with_layout(
+            &layout_vars,
+            &bindings
+        ));
+    }
+
+    #[test]
+    fn accepts_storage_image_bindings() {
+        let layout_vars = vec![BindTableVariable {
+            var_type: BindTableVariableType::StorageImage,
+            binding: 0,
+            count: 1,
+        }];
+
+        let bindings = [IndexedBindingInfo {
+            binding: 0,
+            resources: &[IndexedResource {
+                slot: 0,
+                resource: ShaderResource::Image(ImageView {
+                    img: Handle::new(5, 0),
+                    range: Default::default(),
+                    aspect: AspectMask::Color,
+                    view_type: ImageViewType::Type2D,
+                }),
+            }],
+        }];
 
         assert!(indexed_bindings_compatible_with_layout(
             &layout_vars,
@@ -1895,6 +1938,7 @@ impl Default for WindowInfo {
     }
 }
 
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct DisplayInfo {
     pub window: WindowInfo,
@@ -1918,6 +1962,13 @@ impl Default for DisplayInfo {
             buffering: WindowBuffering::Double,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayStatus {
+    Ready { size: [u32; 2] },
+    Resized { size: [u32; 2] },
+    Closed,
 }
 
 /// Information used when creating an OpenXR display.

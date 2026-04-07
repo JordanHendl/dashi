@@ -32,6 +32,7 @@ impl ImageInfoRecord {
             mip_levels: info.mip_levels,
             samples: info.samples,
             cube_compatible: info.cube_compatible,
+            storage: info.storage,
             initial_data: None,
         };
 

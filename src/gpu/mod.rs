@@ -20,18 +20,15 @@ pub mod context;
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 pub use context::Context;
 
-pub mod execution;
-pub mod driver;
 pub mod cmd;
+pub mod driver;
+pub mod execution;
 pub mod structs;
 pub use structs::*;
 pub mod builders;
 pub mod device_selector;
-pub use cmd::{
-    CommandStream,
-    SubdrawStream,
-};
 pub use builders::*;
+pub use cmd::{CommandStream, SubdrawStream};
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 

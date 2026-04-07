@@ -1,8 +1,14 @@
+use super::execution::CommandRing;
+#[cfg(all(
+    feature = "vulkan",
+    feature = "dashi-winit",
+    not(feature = "dashi-openxr")
+))]
+use crate::gpu::vulkan::Display as VulkanDisplay;
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
 use crate::gpu::{ContextFeatures, ContextInfo, VulkanContext};
-use crate::{CommandQueue, Fence, QueueType, Result, SubmitInfo};
-use super::execution::CommandRing;
+use crate::{CommandQueue, DisplayStatus, Fence, QueueType, Result, SubmitInfo};
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 enum ContextBackend {
@@ -94,8 +100,7 @@ impl Context {
         debug_name: &str,
         is_secondary: bool,
     ) -> Result<CommandQueue> {
-        self.pool_mut(queue_type)
-            .begin(debug_name, is_secondary)
+        self.pool_mut(queue_type).begin(debug_name, is_secondary)
     }
 
     pub fn submit_command_queue(
@@ -168,6 +173,22 @@ impl Context {
         CommandRing::new(self, info.debug_name, 3, info.queue_type)
     }
 
+    #[cfg(all(
+        feature = "vulkan",
+        feature = "dashi-winit",
+        not(feature = "dashi-openxr")
+    ))]
+    pub fn prepare_display(&mut self, display: &mut VulkanDisplay) -> Result<DisplayStatus> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.prepare_display(display),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => Err(crate::GPUError::Unimplemented(
+                "prepare_display requires the Vulkan winit display backend",
+            )),
+        }
+    }
+
     /// Query hardware feature support in API-agnostic terms.
     pub fn features(&self) -> ContextFeatures {
         match &self.backend {
@@ -193,15 +214,13 @@ impl std::ops::Deref for Context {
     type Target = VulkanContext;
 
     fn deref(&self) -> &Self::Target {
-        self.vulkan()
-            .expect("Vulkan backend not active")
+        self.vulkan().expect("Vulkan backend not active")
     }
 }
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 impl std::ops::DerefMut for Context {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.vulkan_mut()
-            .expect("Vulkan backend not active")
+        self.vulkan_mut().expect("Vulkan backend not active")
     }
 }

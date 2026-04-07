@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, CommandEncoder, CommandSink, CopyBuffer,
     CopyBufferImage, CopyImageBuffer, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
     DrawIndirect, GraphicsPipelineStateUpdate, MSImageResolve,
 };
+pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::types::Handle;
 use crate::{
     Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, Result, SubmitInfo2, UsageBits,
@@ -140,6 +140,10 @@ impl<T> CommandStream<T> {
     pub fn combine<G>(mut self, sink: CommandStream<G>) -> Self {
         self.enc.combine(&sink.enc);
         self
+    }
+
+    pub fn debug_validate(&self, label: &str) {
+        self.enc.debug_validate(label);
     }
 
     /// Returns the queue type this command stream targets.

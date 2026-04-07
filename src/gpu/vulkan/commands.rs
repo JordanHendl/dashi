@@ -97,7 +97,11 @@ fn collect_imageless_attachment_infos(
         });
     }
 
-    Ok((attachment_infos, attachment_min_width, attachment_min_height))
+    Ok((
+        attachment_infos,
+        attachment_min_width,
+        attachment_min_height,
+    ))
 }
 
 fn sync_scope_access(scope: Scope) -> vk::AccessFlags {
@@ -152,7 +156,9 @@ fn sanitize_access_for_stage(
     }
 
     if access.intersects(
-        vk::AccessFlags::UNIFORM_READ | vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+        vk::AccessFlags::UNIFORM_READ
+            | vk::AccessFlags::SHADER_READ
+            | vk::AccessFlags::SHADER_WRITE,
     ) && strip_if_unsupported(
         vk::PipelineStageFlags::VERTEX_SHADER
             | vk::PipelineStageFlags::TESSELLATION_CONTROL_SHADER
@@ -172,10 +178,12 @@ fn sanitize_access_for_stage(
         access &= !vk::AccessFlags::INPUT_ATTACHMENT_READ;
     }
 
-    if access.intersects(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-        && strip_if_unsupported(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+    if access.intersects(
+        vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+    ) && strip_if_unsupported(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
     {
-        access &= !(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+        access &=
+            !(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
     }
 
     if access.intersects(
@@ -238,7 +246,9 @@ fn sync_point_stages(point: SyncPoint) -> (vk::PipelineStageFlags, vk::PipelineS
 
 fn sync_point_src_access(point: SyncPoint) -> vk::AccessFlags {
     match point {
-        SyncPoint::ComputeToGraphics | SyncPoint::ComputeToTransfer => vk::AccessFlags::SHADER_WRITE,
+        SyncPoint::ComputeToGraphics | SyncPoint::ComputeToTransfer => {
+            vk::AccessFlags::SHADER_WRITE
+        }
         SyncPoint::GraphicsToCompute
         | SyncPoint::GraphicsToGraphics
         | SyncPoint::GraphicsToTransfer => {
@@ -863,6 +873,28 @@ impl CommandQueue {
 }
 
 impl CommandSink for CommandQueue {
+    fn prepare_gpu_timers(&mut self, frames: &[u32]) -> Result<()> {
+        let ctx = self.ctx;
+        if ctx.is_null() {
+            return Ok(());
+        }
+
+        if unsafe { !(*ctx).gpu_timers_enabled() } {
+            return Ok(());
+        }
+
+        unsafe {
+            let device = &(*ctx).device;
+            for frame in frames {
+                if let Some(timer) = (&(*ctx).gpu_timers).get(*frame as usize) {
+                    device.cmd_reset_query_pool(self.cmd_buf, timer.pool, 0, 2);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn begin_render_pass(
         &mut self,
         cmd: &crate::gpu::driver::command::BeginRenderPass,
@@ -2230,8 +2262,8 @@ impl CommandSink for CommandQueue {
     }
 
     fn sync_point(&mut self, cmd: &crate::gpu::driver::command::SyncPointCmd) -> Result<()> {
-        let point = SyncPoint::from_u8(cmd.point)
-            .ok_or(GPUError::Unimplemented("invalid sync point"))?;
+        let point =
+            SyncPoint::from_u8(cmd.point).ok_or(GPUError::Unimplemented("invalid sync point"))?;
         let scope =
             Scope::from_u8(cmd.scope).ok_or(GPUError::Unimplemented("invalid sync scope"))?;
         let (src_stage, dst_stage) = sync_point_stages(point);
@@ -2335,5 +2367,3 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 }
-
-

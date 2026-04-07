@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dashi::gpu::vulkan::{
-    ContextInfo, DebugMessageSeverity, DebugMessageType, DebugMessenger,
-    DebugMessengerCreateInfo, GPUError,
+    ContextInfo, DebugMessageSeverity, DebugMessageType, DebugMessenger, DebugMessengerCreateInfo,
+    GPUError,
 };
 use dashi::Context;
 
@@ -55,6 +55,29 @@ impl ValidationContext {
         })
     }
 
+    pub fn windowed(info: &ContextInfo) -> Result<Self, GPUError> {
+        let original_validation = std::env::var("DASHI_VALIDATION").ok();
+        std::env::set_var("DASHI_VALIDATION", "1");
+
+        let ctx = match Context::new(info) {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                if let Some(value) = &original_validation {
+                    std::env::set_var("DASHI_VALIDATION", value);
+                } else {
+                    std::env::remove_var("DASHI_VALIDATION");
+                }
+                return Err(err);
+            }
+        };
+
+        let guard = ValidationGuard::new(&ctx, original_validation)?;
+
+        Ok(Self {
+            ctx: Some(ctx),
+            guard: Some(guard),
+        })
+    }
 }
 
 impl std::ops::Deref for ValidationContext {

@@ -7,7 +7,9 @@ pub type Pool<T> = resource_pool::Pool<T>;
 pub type DynamicPool = resource_pool::DynamicPool;
 pub mod gpupool;
 
-pub fn resource_list_to_indexed_resources(list: &ResourceList<ShaderResource>) -> Vec<IndexedResource> {
+pub fn resource_list_to_indexed_resources(
+    list: &ResourceList<ShaderResource>,
+) -> Vec<IndexedResource> {
     let mut v = Vec::new();
     let mut slot = 0;
     list.pool.for_each_occupied(|f| {
