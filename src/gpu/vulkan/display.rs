@@ -744,41 +744,55 @@ impl VulkanContext {
     }
 
     #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
-    pub fn prepare_display(&mut self, dsp: &mut Display) -> Result<DisplayStatus, GPUError> {
-        if dsp.closed {
-            return Ok(DisplayStatus::Closed);
+    pub fn prepare_display_from_state(
+        &mut self,
+        dsp: &mut Display,
+        close_requested: bool,
+    ) -> Result<Option<DisplayStatus>, GPUError> {
+        if close_requested {
+            dsp.closed = true;
         }
 
+        if dsp.closed {
+            return Ok(Some(DisplayStatus::Closed));
+        }
+
+        let size = dsp.size();
+        let minimized = size[0] == 0 || size[1] == 0 || dsp.is_os_minimized();
+        let action = classify_prepare_action(
+            [dsp.extent.width, dsp.extent.height],
+            size,
+            dsp.needs_rebuild.get(),
+            close_requested,
+            minimized,
+        );
+
+        if action.wait_for_restore {
+            dsp.minimized = true;
+            return Ok(None);
+        }
+
+        dsp.minimized = false;
+        dsp.info.window.size = size;
+
+        if action.should_rebuild {
+            self.rebuild_display_swapchain(dsp, size)?;
+        }
+
+        Ok(action.status)
+    }
+
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    pub fn prepare_display(&mut self, dsp: &mut Display) -> Result<DisplayStatus, GPUError> {
         loop {
             let batch = dsp.pump_events(dsp.minimized);
-            let size = dsp.size();
-            let minimized = size[0] == 0 || size[1] == 0 || dsp.is_os_minimized();
-            let action = classify_prepare_action(
-                [dsp.extent.width, dsp.extent.height],
-                size,
-                dsp.needs_rebuild.get(),
-                batch.close_requested,
-                minimized,
-            );
-
-            if batch.close_requested {
-                dsp.closed = true;
+            match self.prepare_display_from_state(dsp, batch.close_requested)? {
+                Some(status) => return Ok(status),
+                None => {
+                    dsp.minimized = true;
+                    thread::sleep(Duration::from_millis(16));
+                }
             }
-
-            if action.wait_for_restore {
-                dsp.minimized = true;
-                thread::sleep(Duration::from_millis(16));
-                continue;
-            }
-
-            dsp.minimized = false;
-            dsp.info.window.size = size;
-
-            if action.should_rebuild {
-                self.rebuild_display_swapchain(dsp, size)?;
-            }
-
-            return Ok(action.status.expect("ready, resized, or closed"));
         }
     }
 

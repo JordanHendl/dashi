@@ -178,6 +178,26 @@ impl Context {
         feature = "dashi-winit",
         not(feature = "dashi-openxr")
     ))]
+    pub fn prepare_display_from_state(
+        &mut self,
+        display: &mut VulkanDisplay,
+        close_requested: bool,
+    ) -> Result<Option<DisplayStatus>> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.prepare_display_from_state(display, close_requested),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => Err(crate::GPUError::Unimplemented(
+                "prepare_display_from_state requires the Vulkan winit display backend",
+            )),
+        }
+    }
+
+    #[cfg(all(
+        feature = "vulkan",
+        feature = "dashi-winit",
+        not(feature = "dashi-openxr")
+    ))]
     pub fn prepare_display(&mut self, display: &mut VulkanDisplay) -> Result<DisplayStatus> {
         match &mut self.backend {
             #[cfg(feature = "vulkan")]
