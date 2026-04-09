@@ -744,41 +744,67 @@ impl VulkanContext {
     }
 
     #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
-    pub fn prepare_display(&mut self, dsp: &mut Display) -> Result<DisplayStatus, GPUError> {
-        if dsp.closed {
-            return Ok(DisplayStatus::Closed);
+    pub fn prepare_display_from_state(
+        &mut self,
+        dsp: &mut Display,
+        close_requested: bool,
+    ) -> Result<Option<DisplayStatus>, GPUError> {
+        if close_requested {
+            dsp.closed = true;
         }
 
+        if dsp.closed {
+            return Ok(Some(DisplayStatus::Closed));
+        }
+
+        let size = dsp.size();
+        let minimized = size[0] == 0 || size[1] == 0 || dsp.is_os_minimized();
+        let action = classify_prepare_action(
+            [dsp.extent.width, dsp.extent.height],
+            size,
+            dsp.needs_rebuild.get(),
+            close_requested,
+            minimized,
+        );
+
+        if std::env::var_os("DASHI_TRACE_PREPARE").is_some() {
+            eprintln!(
+                "[dashi] prepare_display_from_state size={:?} extent={:?} needs_rebuild={} close_requested={} minimized={} action={:?}",
+                size,
+                [dsp.extent.width, dsp.extent.height],
+                dsp.needs_rebuild.get(),
+                close_requested,
+                minimized,
+                action
+            );
+        }
+
+        if action.wait_for_restore {
+            dsp.minimized = true;
+            return Ok(None);
+        }
+
+        dsp.minimized = false;
+        dsp.info.window.size = size;
+
+        if action.should_rebuild {
+            self.rebuild_display_swapchain(dsp, size)?;
+        }
+
+        Ok(action.status)
+    }
+
+    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    pub fn prepare_display(&mut self, dsp: &mut Display) -> Result<DisplayStatus, GPUError> {
         loop {
             let batch = dsp.pump_events(dsp.minimized);
-            let size = dsp.size();
-            let minimized = size[0] == 0 || size[1] == 0 || dsp.is_os_minimized();
-            let action = classify_prepare_action(
-                [dsp.extent.width, dsp.extent.height],
-                size,
-                dsp.needs_rebuild.get(),
-                batch.close_requested,
-                minimized,
-            );
-
-            if batch.close_requested {
-                dsp.closed = true;
+            match self.prepare_display_from_state(dsp, batch.close_requested)? {
+                Some(status) => return Ok(status),
+                None => {
+                    dsp.minimized = true;
+                    thread::sleep(Duration::from_millis(16));
+                }
             }
-
-            if action.wait_for_restore {
-                dsp.minimized = true;
-                thread::sleep(Duration::from_millis(16));
-                continue;
-            }
-
-            dsp.minimized = false;
-            dsp.info.window.size = size;
-
-            if action.should_rebuild {
-                self.rebuild_display_swapchain(dsp, size)?;
-            }
-
-            return Ok(action.status.expect("ready, resized, or closed"));
         }
     }
 
@@ -834,9 +860,6 @@ impl VulkanContext {
         }
 
         let signal_sem_handle = dsp.semaphores[dsp.frame_idx as usize];
-        let fence = dsp.fences[dsp.frame_idx as usize];
-
-        self.wait(fence)?;
 
         let signal_sem = self.semaphores.get_ref(signal_sem_handle).unwrap();
         let acquire_result = unsafe {
@@ -844,7 +867,7 @@ impl VulkanContext {
                 &vk::AcquireNextImageInfoKHR::builder()
                     .swapchain(dsp.swapchain)
                     .semaphore(signal_sem.raw)
-                    .fence(self.fences.get_ref(fence).unwrap().raw)
+                    .fence(vk::Fence::null())
                     .timeout(std::u64::MAX)
                     .device_mask(0x1)
                     .build(),

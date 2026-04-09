@@ -1829,6 +1829,7 @@ pub struct VertexDescriptionInfo<'a> {
 pub struct PipelineShaderInfo<'a> {
     pub stage: ShaderType,
     pub spirv: &'a [u32], // ConstSlice in Rust can be a reference slice
+    pub entry_point: &'a str,
     pub specialization: &'a [SpecializationInfo<'a>], // ConstSlice as a reference slice
 }
 

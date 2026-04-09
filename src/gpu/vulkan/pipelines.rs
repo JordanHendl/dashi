@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Default, Debug)]
 pub struct ComputePipelineLayout {
     pub(super) shader_stage: vk::PipelineShaderStageCreateInfo,
+    pub(super) _entry_point: Option<std::sync::Arc<std::ffi::CString>>,
     pub(super) layout: vk::PipelineLayout,
 }
 
@@ -10,6 +11,7 @@ pub struct ComputePipelineLayout {
 pub struct GraphicsPipelineLayout {
     pub(super) input_assembly: vk::PipelineInputAssemblyStateCreateInfo,
     pub(super) shader_stages: Vec<vk::PipelineShaderStageCreateInfo>,
+    pub(super) _entry_points: Vec<std::sync::Arc<std::ffi::CString>>,
     pub(super) depth_stencil: Option<vk::PipelineDepthStencilStateCreateInfo>,
     pub(super) multisample: vk::PipelineMultisampleStateCreateInfo,
     pub(super) rasterizer: vk::PipelineRasterizationStateCreateInfo,

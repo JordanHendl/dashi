@@ -8,7 +8,10 @@ use crate::gpu::vulkan::Display as VulkanDisplay;
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
 use crate::gpu::{ContextFeatures, ContextInfo, VulkanContext};
-use crate::{CommandQueue, DisplayStatus, Fence, QueueType, Result, SubmitInfo};
+use crate::{
+    BindTable, BindTableLayout, Buffer, CommandQueue, ComputePipeline, ComputePipelineLayout,
+    DisplayStatus, Fence, QueueType, Result, SubmitInfo,
+};
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 enum ContextBackend {
@@ -125,12 +128,69 @@ impl Context {
         }
     }
 
+    pub fn poll_fence(&mut self, fence: crate::Handle<Fence>) -> Result<bool> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.poll_fence(fence),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.poll_fence(fence),
+        }
+    }
+
     pub fn destroy_command_queue(&mut self, queue: CommandQueue) {
         match &mut self.backend {
             #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.destroy_cmd_queue(queue),
             #[cfg(feature = "webgpu")]
             ContextBackend::WebGpu(ctx) => ctx.destroy_cmd_queue(queue),
+        }
+    }
+
+    pub fn destroy_buffer(&mut self, handle: crate::Handle<Buffer>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_buffer(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_buffer(handle),
+        }
+    }
+
+    pub fn destroy_bind_table(&mut self, handle: crate::Handle<BindTable>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_bind_table(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_bind_table(handle),
+        }
+    }
+
+    pub fn destroy_bind_table_layout(&mut self, handle: crate::Handle<BindTableLayout>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_bind_table_layout(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_bind_table_layout(handle),
+        }
+    }
+
+    pub fn destroy_compute_pipeline(&mut self, handle: crate::Handle<ComputePipeline>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_compute_pipeline(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_compute_pipeline(handle),
+        }
+    }
+
+    pub fn destroy_compute_pipeline_layout(
+        &mut self,
+        handle: crate::Handle<ComputePipelineLayout>,
+    ) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_compute_pipeline_layout(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_compute_pipeline_layout(handle),
         }
     }
 
@@ -171,6 +231,26 @@ impl Context {
 
     pub fn make_command_ring(&mut self, info: &crate::CommandQueueInfo2) -> Result<CommandRing> {
         CommandRing::new(self, info.debug_name, 3, info.queue_type)
+    }
+
+    #[cfg(all(
+        feature = "vulkan",
+        feature = "dashi-winit",
+        not(feature = "dashi-openxr")
+    ))]
+    pub fn prepare_display_from_state(
+        &mut self,
+        display: &mut VulkanDisplay,
+        close_requested: bool,
+    ) -> Result<Option<DisplayStatus>> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.prepare_display_from_state(display, close_requested),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => Err(crate::GPUError::Unimplemented(
+                "prepare_display_from_state requires the Vulkan winit display backend",
+            )),
+        }
     }
 
     #[cfg(all(

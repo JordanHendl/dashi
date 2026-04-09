@@ -1274,6 +1274,19 @@ impl VulkanContext {
         Ok(())
     }
 
+    /// Return `true` once `fence` has signaled and reset it for reuse.
+    pub fn poll_fence(&mut self, fence: Handle<Fence>) -> Result<bool> {
+        let fence = self.fences.get_ref(fence).unwrap();
+        match unsafe { self.device.get_fence_status(fence.raw) } {
+            Ok(true) => {
+                unsafe { self.device.reset_fences(&[fence.raw]) }?;
+                Ok(true)
+            }
+            Ok(false) => Ok(false),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     /// Retrieve a queue handle for the requested type, applying fallback
     /// semantics if a dedicated queue was not created.
     fn queue(&self, ty: QueueType) -> vk::Queue {
@@ -2389,6 +2402,43 @@ impl VulkanContext {
             .unwrap();
         self.buffer_infos.release(info_handle);
         self.buffers.release(handle);
+    }
+
+    /// Releases a bind table handle after its descriptor pool has been destroyed.
+    pub fn destroy_bind_table(&mut self, handle: Handle<BindTable>) {
+        self.bind_tables.release(handle);
+    }
+
+    /// Destroys a bind table layout and its descriptor pool.
+    pub fn destroy_bind_table_layout(&mut self, handle: Handle<BindTableLayout>) {
+        self.bind_table_layouts
+            .with_mut(handle, |layout| unsafe {
+                self.device.destroy_descriptor_set_layout(layout.layout, None);
+                self.device.destroy_descriptor_pool(layout.pool, None);
+            })
+            .unwrap();
+        self.bind_table_layouts.release(handle);
+    }
+
+    /// Destroys a compute pipeline.
+    pub fn destroy_compute_pipeline(&mut self, handle: Handle<ComputePipeline>) {
+        self.compute_pipelines
+            .with_mut(handle, |pipeline| unsafe {
+                self.device.destroy_pipeline(pipeline.raw, None);
+            })
+            .unwrap();
+        self.compute_pipelines.release(handle);
+    }
+
+    /// Destroys a compute pipeline layout and its shader module.
+    pub fn destroy_compute_pipeline_layout(&mut self, handle: Handle<ComputePipelineLayout>) {
+        self.compute_pipeline_layouts
+            .with_mut(handle, |layout| unsafe {
+                self.device.destroy_shader_module(layout.shader_stage.module, None);
+                self.device.destroy_pipeline_layout(layout.layout, None);
+            })
+            .unwrap();
+        self.compute_pipeline_layouts.release(handle);
     }
 
     /// Destroys a semaphore.
@@ -3594,10 +3644,17 @@ impl VulkanContext {
         &mut self,
         info: &ComputePipelineLayoutInfo,
     ) -> Result<Handle<ComputePipelineLayout>, GPUError> {
+        let entry_point = std::sync::Arc::new(CString::new(info.shader.entry_point).map_err(
+            |_| {
+                GPUError::LibraryError(
+                    "compute shader entry point contained an interior NUL".to_string(),
+                )
+            },
+        )?);
         let shader_stage = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE) // HAS to be compute.
             .module(self.create_shader_module(info.shader.spirv).unwrap())
-            .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
+            .name(entry_point.as_c_str())
             .build();
 
         let layout = self.create_pipeline_layout(&info.bt_layouts)?;
@@ -3607,6 +3664,7 @@ impl VulkanContext {
             .insert(ComputePipelineLayout {
                 layout,
                 shader_stage,
+                _entry_point: Some(entry_point),
             })
             .unwrap());
     }
@@ -3625,6 +3683,7 @@ impl VulkanContext {
     ) -> Result<Handle<GraphicsPipelineLayout>, GPUError> {
         let mut shader_stages: Vec<vk::PipelineShaderStageCreateInfo> =
             Vec::with_capacity(info.shaders.len());
+        let mut shader_entry_points = Vec::with_capacity(info.shaders.len());
         for shader_info in info.shaders {
             let stage_flags = match shader_info.stage {
                 ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
@@ -3639,14 +3698,22 @@ impl VulkanContext {
                     return Err(GPUError::UnsupportedShaderStage(other));
                 }
             };
+            let entry_point = std::sync::Arc::new(CString::new(shader_info.entry_point).map_err(
+                |_| {
+                    GPUError::LibraryError(
+                        "graphics shader entry point contained an interior NUL".to_string(),
+                    )
+                },
+            )?);
 
             shader_stages.push(
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(stage_flags)
                     .module(self.create_shader_module(shader_info.spirv).unwrap())
-                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap()) // Entry point is usually "main"
+                    .name(entry_point.as_c_str())
                     .build(),
             );
+            shader_entry_points.push(entry_point);
         }
 
         // Step 2: Create Vertex Input State
@@ -3755,6 +3822,7 @@ impl VulkanContext {
             .insert(GraphicsPipelineLayout {
                 layout,
                 shader_stages,
+                _entry_points: shader_entry_points,
                 vertex_input: vertex_binding_description,
                 vertex_attribs: vertex_attribute_descriptions,
                 rasterizer,
