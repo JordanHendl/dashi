@@ -12,7 +12,7 @@ use crate::gpu::driver::command::{CommandSink, Scope, SyncPoint};
 use crate::gpu::driver::state::{usage_to_access, BufferBarrier, Layout, LayoutTransition};
 use crate::utils::Handle;
 use crate::{
-    BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Fence, GPUError,
+    BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, Fence, GPUError, ImageBox,
     GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, SubmitInfo2, UsageBits,
 };
 
@@ -53,6 +53,31 @@ fn image_aspect_for_format(format: crate::gpu::Format) -> vk::ImageAspectFlags {
     } else {
         vk::ImageAspectFlags::COLOR
     }
+}
+
+fn image_is_3d(info: &crate::gpu::ImageInfo) -> bool {
+    info.dim[2] > 1
+}
+
+fn validate_3d_image_range(
+    info: &crate::gpu::ImageInfo,
+    range: crate::gpu::SubresourceRange,
+    op: &str,
+) -> Result<()> {
+    if image_is_3d(info) && (range.base_layer != 0 || range.layer_count != 1) {
+        return Err(GPUError::LibraryError(format!(
+            "{op} requires 3D images to use base_layer=0 and layer_count=1"
+        )));
+    }
+    Ok(())
+}
+
+fn image_box_extent(region: ImageBox, dims: [u32; 3]) -> [u32; 3] {
+    [
+        if region.w == 0 { dims[0] } else { region.w },
+        if region.h == 0 { dims[1] } else { region.h },
+        if region.d == 0 { dims[2] } else { region.d },
+    ]
 }
 fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     match cv {
@@ -622,6 +647,9 @@ impl CommandQueue {
         if let Some(bt) = self.ctx_ref().bind_tables.get_ref(table) {
             for (buffer, usage) in &bt.buffer_states {
                 self.ensure_buffer_state_on_queue(*buffer, *usage, queue)?;
+            }
+            for (image, range, usage, layout) in &bt.image_states {
+                self.ensure_image_state(*image, *range, *usage, *layout)?;
             }
         }
         Ok(())
@@ -1489,28 +1517,12 @@ impl CommandSink for CommandQueue {
                 .ok_or(GPUError::SlotError())?;
             let src_info = self.ctx_ref().image_info(cmd.src);
             let dst_info = self.ctx_ref().image_info(cmd.dst);
+            validate_3d_image_range(src_info, cmd.src_range, "vkCmdBlitImage")?;
+            validate_3d_image_range(dst_info, cmd.dst_range, "vkCmdBlitImage")?;
             let src_dims = super::mip_dimensions(src_info.dim, cmd.src_range.base_mip);
             let dst_dims = super::mip_dimensions(dst_info.dim, cmd.dst_range.base_mip);
-            let src_width = if cmd.src_region.w == 0 {
-                src_dims[0]
-            } else {
-                cmd.src_region.w
-            };
-            let src_height = if cmd.src_region.h == 0 {
-                src_dims[1]
-            } else {
-                cmd.src_region.h
-            };
-            let dst_width = if cmd.dst_region.w == 0 {
-                dst_dims[0]
-            } else {
-                cmd.dst_region.w
-            };
-            let dst_height = if cmd.dst_region.h == 0 {
-                dst_dims[1]
-            } else {
-                cmd.dst_region.h
-            };
+            let [src_width, src_height, src_depth] = image_box_extent(cmd.src_region, src_dims);
+            let [dst_width, dst_height, dst_depth] = image_box_extent(cmd.dst_region, dst_dims);
             let regions = [vk::ImageBlit {
                 src_subresource: vk::ImageSubresourceLayers {
                     aspect_mask: image_aspect_for_format(src_info.format),
@@ -1522,12 +1534,12 @@ impl CommandSink for CommandQueue {
                     vk::Offset3D {
                         x: cmd.src_region.x as i32,
                         y: cmd.src_region.y as i32,
-                        z: 0,
+                        z: cmd.src_region.z as i32,
                     },
                     vk::Offset3D {
                         x: cmd.src_region.x.saturating_add(src_width) as i32,
                         y: cmd.src_region.y.saturating_add(src_height) as i32,
-                        z: 1,
+                        z: cmd.src_region.z.saturating_add(src_depth) as i32,
                     },
                 ],
                 dst_subresource: vk::ImageSubresourceLayers {
@@ -1540,12 +1552,12 @@ impl CommandSink for CommandQueue {
                     vk::Offset3D {
                         x: cmd.dst_region.x as i32,
                         y: cmd.dst_region.y as i32,
-                        z: 0,
+                        z: cmd.dst_region.z as i32,
                     },
                     vk::Offset3D {
                         x: cmd.dst_region.x.saturating_add(dst_width) as i32,
                         y: cmd.dst_region.y.saturating_add(dst_height) as i32,
-                        z: 1,
+                        z: cmd.dst_region.z.saturating_add(dst_depth) as i32,
                     },
                 ],
             }];
@@ -1597,6 +1609,13 @@ impl CommandSink for CommandQueue {
                 .ok_or(GPUError::SlotError())?;
             let src_info = self.ctx_ref().image_info(cmd.src);
             let dst_info = self.ctx_ref().image_info(cmd.dst);
+            if image_is_3d(src_info) || image_is_3d(dst_info) {
+                return Err(GPUError::LibraryError(
+                    "vkCmdResolveImage does not support 3D images in dashi".to_string(),
+                ));
+            }
+            validate_3d_image_range(src_info, cmd.src_range, "vkCmdResolveImage")?;
+            validate_3d_image_range(dst_info, cmd.dst_range, "vkCmdResolveImage")?;
 
             let width = match (cmd.src_region.w, cmd.dst_region.w) {
                 (0, 0) => src_info.dim[0].min(dst_info.dim[0]),
@@ -1716,8 +1735,10 @@ impl CommandSink for CommandQueue {
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) -> Result<()> {
         self.ensure_active_render_pass()?;
-        // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-        // self.ensure_binding_states(&cmd.bind_tables);
+        if cmd.vertices.valid() {
+            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
+        }
+        self.ensure_binding_states(&cmd.bind_tables)?;
 
         if cmd.vertices.valid() {
             let v = self
@@ -1787,10 +1808,13 @@ impl CommandSink for CommandQueue {
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) -> Result<()> {
         self.ensure_active_render_pass()?;
-        // self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ);
-        // self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ);
-        // self.ensure_binding_states(&cmd.bind_tables);
-        //
+        if cmd.vertices.valid() {
+            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
+        }
+        if cmd.indices.valid() {
+            self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ)?;
+        }
+        self.ensure_binding_states(&cmd.bind_tables)?;
 
         if cmd.vertices.valid() && cmd.indices.valid() {
             let v = self
@@ -1878,6 +1902,11 @@ impl CommandSink for CommandQueue {
     fn draw_indirect(&mut self, cmd: &crate::gpu::driver::command::DrawIndirect) -> Result<()> {
         self.ensure_active_render_pass()?;
         if cmd.vertices.valid() {
+            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
+        }
+        self.ensure_buffer_state(cmd.indirect.handle, UsageBits::INDIRECT_READ)?;
+        self.ensure_binding_states(&cmd.bind_tables)?;
+        if cmd.vertices.valid() {
             let v = self
                 .ctx_ref()
                 .buffers
@@ -1960,6 +1989,14 @@ impl CommandSink for CommandQueue {
         cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
     ) -> Result<()> {
         self.ensure_active_render_pass()?;
+        if cmd.vertices.valid() {
+            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
+        }
+        if cmd.indices.valid() {
+            self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ)?;
+        }
+        self.ensure_buffer_state(cmd.indirect.handle, UsageBits::INDIRECT_READ)?;
+        self.ensure_binding_states(&cmd.bind_tables)?;
         if cmd.vertices.valid() {
             let v = self
                 .ctx_ref()
@@ -2158,6 +2195,7 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.dst)
                 .ok_or(GPUError::SlotError())?;
             let img_info = self.ctx_ref().image_info(cmd.dst);
+            validate_3d_image_range(img_info, cmd.range, "vkCmdCopyBufferToImage")?;
             let mip = cmd.range.base_mip as usize;
             let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);
             self.ctx_ref().device.cmd_copy_buffer_to_image(
@@ -2207,6 +2245,7 @@ impl CommandSink for CommandQueue {
                 .get_ref(cmd.src)
                 .ok_or(GPUError::SlotError())?;
             let img_info = self.ctx_ref().image_info(cmd.src);
+            validate_3d_image_range(img_info, cmd.range, "vkCmdCopyImageToBuffer")?;
             let mip = cmd.range.base_mip as usize;
 
             let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);

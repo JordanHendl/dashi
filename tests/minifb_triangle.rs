@@ -182,6 +182,7 @@ void main() {
 "#,
                         vert
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
@@ -195,6 +196,7 @@ void main() {
 "#,
                         frag
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
             ],

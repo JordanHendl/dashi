@@ -75,6 +75,121 @@ fn test_image() {
 
 #[test]
 #[serial]
+fn test_3d_image_validation() {
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
+
+    assert!(ctx
+        .make_image(&ImageInfo {
+            debug_name: "3d_layers_invalid",
+            dim: [4, 4, 4],
+            layers: 2,
+            format: Format::RGBA8Unorm,
+            ..Default::default()
+        })
+        .is_err());
+
+    assert!(ctx
+        .make_image(&ImageInfo {
+            debug_name: "3d_cube_invalid",
+            dim: [4, 4, 4],
+            cube_compatible: true,
+            format: Format::RGBA8Unorm,
+            ..Default::default()
+        })
+        .is_err());
+
+    assert!(ctx
+        .make_image(&ImageInfo {
+            debug_name: "3d_msaa_invalid",
+            dim: [4, 4, 4],
+            samples: SampleCount::S4,
+            format: Format::RGBA8Unorm,
+            ..Default::default()
+        })
+        .is_err());
+
+    let image = ctx
+        .make_image(&ImageInfo {
+            debug_name: "3d_valid",
+            dim: [4, 4, 4],
+            format: Format::RGBA8Unorm,
+            ..Default::default()
+        })
+        .unwrap();
+
+    let sampler = ctx
+        .make_sampler(&SamplerInfo {
+            min_filter: Filter::Nearest,
+            mag_filter: Filter::Nearest,
+            ..Default::default()
+        })
+        .unwrap();
+
+    let layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
+            debug_name: "3d_view_layout",
+            shaders: &[ShaderInfo {
+                shader_type: ShaderType::Compute,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::SampledImage,
+                    binding: 0,
+                    count: 1,
+                }],
+            }],
+        })
+        .unwrap();
+
+    assert!(ctx
+        .make_bind_table(&BindTableInfo {
+            debug_name: "3d_view_invalid",
+            layout,
+            bindings: &[IndexedBindingInfo {
+                binding: 0,
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::SampledImage(
+                        ImageView {
+                            img: image,
+                            view_type: ImageViewType::Type2D,
+                            ..Default::default()
+                        },
+                        sampler,
+                    ),
+                }],
+            }],
+            set: 0,
+        })
+        .is_err());
+
+    let table = ctx
+        .make_bind_table(&BindTableInfo {
+            debug_name: "3d_view_valid",
+            layout,
+            bindings: &[IndexedBindingInfo {
+                binding: 0,
+                resources: &[IndexedResource {
+                    slot: 0,
+                    resource: ShaderResource::SampledImage(
+                        ImageView {
+                            img: image,
+                            view_type: ImageViewType::Type3D,
+                            ..Default::default()
+                        },
+                        sampler,
+                    ),
+                }],
+            }],
+            set: 0,
+        })
+        .unwrap();
+
+    ctx.destroy_bind_table(table);
+    ctx.destroy_bind_table_layout(layout);
+    ctx.destroy_image(image);
+}
+
+#[test]
+#[serial]
 fn test_headless_context_creation() {
     // headless() should succeed...
     let ctx = ValidationContext::headless(&ContextInfo::default());
@@ -210,6 +325,7 @@ void main() {
 ",
                     comp
                 ),
+                entry_point: "main",
                 specialization: &[],
             },
         })

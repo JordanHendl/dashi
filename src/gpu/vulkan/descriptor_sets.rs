@@ -1,4 +1,5 @@
 use super::*;
+use crate::gpu::driver::state::Layout;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub struct BindTable {
     pub(super) set_id: u32,
     pub(super) layout: Handle<BindTableLayout>,
     pub(super) buffer_states: Vec<(Handle<Buffer>, UsageBits)>,
+    pub(super) image_states: Vec<(Handle<Image>, SubresourceRange, UsageBits, Layout)>,
 }
 
 impl CommandQueue {

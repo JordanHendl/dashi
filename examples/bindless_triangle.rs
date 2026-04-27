@@ -299,9 +299,10 @@ void main() {
     gl_Position = model * vec4(in_position, 0.0, 1.0);
     out_coords = in_position.xy;
 }
-"#,
+        "#,
             vert
         ),
+        entry_point: "main",
         specialization: &[],
     };
 
@@ -324,9 +325,10 @@ layout(set = 1, binding = 1) uniform sampler2D in_tex[1024];
 void main() {
     out_color = texture(in_tex[tex_id], in_coords);
 }
-"#,
+        "#,
             frag
         ),
+        entry_point: "main",
         specialization: &[],
     };
 

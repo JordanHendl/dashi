@@ -122,6 +122,7 @@ layout(binding = 0) uniform position_offset { vec2 pos; };
 void main(){frag_color=inPosition;gl_Position=vec4(inPosition+pos,0.0,1.0);}",
                         vert
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
@@ -133,6 +134,7 @@ layout(location = 0) out vec4 out_color;
 void main(){ out_color=vec4(frag_color.xy,0,1); }",
                         frag
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
             ],

@@ -4,7 +4,7 @@ use std::backtrace::Backtrace;
 
 use crate::{
     BindTable, Buffer, BufferView, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2,
+    GraphicsPipeline, Image, ImageBox, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2,
     Viewport,
 };
 
@@ -364,9 +364,9 @@ pub struct BlitImage {
     pub dst_range: SubresourceRange,
     pub filter: Filter,
     /// Region in the source image.
-    pub src_region: Rect2D,
+    pub src_region: ImageBox,
     /// Region in the destination image.
-    pub dst_region: Rect2D,
+    pub dst_region: ImageBox,
 }
 
 #[repr(C)]

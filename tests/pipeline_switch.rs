@@ -89,11 +89,13 @@ fn pipeline_switch() {
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
                     spirv: vert,
+                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
                     stage: ShaderType::Fragment,
                     spirv: frag_red,
+                    entry_point: "main",
                     specialization: &[],
                 },
             ],
@@ -114,11 +116,13 @@ fn pipeline_switch() {
                 PipelineShaderInfo {
                     stage: ShaderType::Vertex,
                     spirv: vert,
+                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
                     stage: ShaderType::Fragment,
                     spirv: frag_green,
+                    entry_point: "main",
                     specialization: &[],
                 },
             ],

@@ -113,6 +113,7 @@ impl From<ImageViewType> for vk::ImageViewType {
     fn from(view_type: ImageViewType) -> Self {
         match view_type {
             ImageViewType::Type2D => vk::ImageViewType::TYPE_2D,
+            ImageViewType::Type3D => vk::ImageViewType::TYPE_3D,
             ImageViewType::Cube => vk::ImageViewType::CUBE,
         }
     }

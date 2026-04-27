@@ -94,11 +94,15 @@ impl CommandDispatchBackend {
     }
 }
 
-static COMMAND_DISPATCH: OnceLock<Mutex<CommandDispatchBackend>> = OnceLock::new();
+static COMMAND_DISPATCH: OnceLock<Mutex<Option<CommandDispatchBackend>>> = OnceLock::new();
 
 pub struct CommandDispatch;
 
 impl CommandDispatch {
+    fn backend_slot() -> &'static Mutex<Option<CommandDispatchBackend>> {
+        COMMAND_DISPATCH.get_or_init(|| Mutex::new(None))
+    }
+
     /// Initialize the global dispatch backend.
     pub fn init(ctx: &mut Context) -> Result<()> {
         Self::init_with_config(ctx, CommandDispatchConfig::default())
@@ -117,31 +121,62 @@ impl CommandDispatch {
 
     /// Initialize the global dispatch backend with configuration.
     pub fn init_with_config(ctx: &mut Context, config: CommandDispatchConfig) -> Result<()> {
-        COMMAND_DISPATCH
-            .set(Mutex::new(CommandDispatchBackend::new(ctx, config)))
-            .map_err(|_| GPUError::Unimplemented("CommandDispatch backend already initialized"))?;
+        let backend = Self::backend_slot();
+        let mut backend = backend
+            .lock()
+            .expect("CommandDispatch backend lock poisoned");
+        if backend.is_some() {
+            // The dispatch backend is process-global. Repeated renderer/bootstrap paths in the
+            // same process must reuse the first initialized backend instead of failing.
+            let _ = (ctx, config);
+            return Ok(());
+        }
+        *backend = Some(CommandDispatchBackend::new(ctx, config));
         Ok(())
     }
 
     /// Dispatch a command stream using the global backend.
     pub fn dispatch(stream: CommandStream<Executable>, submit: &SubmitInfo2) -> Result<()> {
-        let backend = COMMAND_DISPATCH.get().ok_or(GPUError::Unimplemented(
-            "CommandDispatch backend not initialized",
-        ))?;
+        let backend = Self::backend_slot();
         let mut backend = backend
             .lock()
             .expect("CommandDispatch backend lock poisoned");
-        backend.dispatch(stream, submit)
+        backend
+            .as_mut()
+            .ok_or(GPUError::Unimplemented(
+                "CommandDispatch backend not initialized",
+            ))?
+            .dispatch(stream, submit)
     }
 
     /// Process completed submissions and release command queues.
     pub fn tick() -> Result<usize> {
-        let backend = COMMAND_DISPATCH.get().ok_or(GPUError::Unimplemented(
-            "CommandDispatch backend not initialized",
-        ))?;
+        let backend = Self::backend_slot();
         let mut backend = backend
             .lock()
             .expect("CommandDispatch backend lock poisoned");
-        backend.tick()
+        backend
+            .as_mut()
+            .ok_or(GPUError::Unimplemented(
+                "CommandDispatch backend not initialized",
+            ))?
+            .tick()
+    }
+
+    /// Flush and release the global backend so a later context can reinitialize it.
+    pub fn shutdown() -> Result<()> {
+        let backend = Self::backend_slot();
+        let mut backend = backend
+            .lock()
+            .expect("CommandDispatch backend lock poisoned");
+        let Some(mut backend_state) = backend.take() else {
+            return Ok(());
+        };
+        let ctx = unsafe { backend_state.ctx.as_mut() };
+        for pending in backend_state.pending.drain(..) {
+            ctx.wait_fence(pending.fence)?;
+            ctx.destroy_command_queue(pending.queue);
+        }
+        Ok(())
     }
 }

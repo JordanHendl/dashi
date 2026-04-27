@@ -427,6 +427,18 @@ pub struct Rect2D {
 }
 
 #[repr(C)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub struct ImageBox {
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+    pub w: u32,
+    pub h: u32,
+    pub d: u32,
+}
+
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct FRect2D {
@@ -609,6 +621,7 @@ unsafe impl Pod for AspectMask {}
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ImageViewType {
     Type2D,
+    Type3D,
     Cube,
 }
 
@@ -1472,6 +1485,7 @@ pub struct GraphicsPipelineDetails {
     pub front_face: VertexOrdering,
     pub depth_test: Option<DepthInfo>,
     pub sample_count: SampleCount,
+    pub alpha_to_coverage: bool,
     pub min_sample_shading: f32,
     /// Pipeline states that will be configured dynamically at draw time.
     pub dynamic_states: Vec<DynamicState>,
@@ -1486,6 +1500,7 @@ impl Hash for GraphicsPipelineDetails {
         self.front_face.hash(state);
         self.depth_test.hash(state);
         self.sample_count.hash(state);
+        self.alpha_to_coverage.hash(state);
         hash_f32(self.min_sample_shading, state);
         self.dynamic_states.hash(state);
     }
@@ -1500,6 +1515,7 @@ impl Default for GraphicsPipelineDetails {
             depth_test: None,
             color_blend_states: vec![Default::default()],
             sample_count: SampleCount::S1,
+            alpha_to_coverage: false,
             min_sample_shading: 0.0,
             dynamic_states: vec![DynamicState::Viewport, DynamicState::Scissor],
             subpass: 0,

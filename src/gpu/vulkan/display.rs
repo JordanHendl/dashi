@@ -683,20 +683,20 @@ impl VulkanContext {
     }
 
     #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
-    fn make_window(&mut self, info: &WindowInfo) -> (minifb::Window, vk::SurfaceKHR) {
-        minifb_window::create_window(&self.entry, &self.instance, info).unwrap()
+    fn make_window(&mut self, info: &WindowInfo) -> Result<(minifb::Window, vk::SurfaceKHR), GPUError> {
+        minifb_window::create_window(&self.entry, &self.instance, info)
     }
 
     #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
         info: &WindowInfo,
-    ) -> (
+    ) -> Result<(
         winit::event_loop::EventLoop<()>,
         winit::window::Window,
         vk::SurfaceKHR,
-    ) {
-        winit_window::create_window(&self.entry, &self.instance, info).unwrap()
+    ), GPUError> {
+        winit_window::create_window(&self.entry, &self.instance, info)
     }
 
     #[cfg(not(feature = "dashi-openxr"))]
@@ -713,9 +713,9 @@ impl VulkanContext {
             return Err(GPUError::HeadlessDisplayNotSupported);
         }
         #[cfg(feature = "dashi-winit")]
-        let (event_loop, window, surface) = self.make_window(&info.window);
+        let (event_loop, window, surface) = self.make_window(&info.window)?;
         #[cfg(not(feature = "dashi-winit"))]
-        let (window, surface) = self.make_window(&info.window);
+        let (window, surface) = self.make_window(&info.window)?;
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
         let resources =

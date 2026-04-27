@@ -140,6 +140,7 @@ void main() {
 }",
                         vert
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
@@ -151,6 +152,7 @@ layout(location = 0) out vec4 out_color;
 void main() { out_color = vec4(frag_color.xy, 0, 1); }",
                         frag
                     ),
+                    entry_point: "main",
                     specialization: &[],
                 },
             ],

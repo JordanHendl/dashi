@@ -3,7 +3,7 @@ use crate::{
     cmd::{CommandStream, Executable},
     driver::{
         command::{BlitImage, CopyBuffer, CopyBufferImage},
-        state::StateTracker,
+        state::{Layout, StateTracker},
     },
     utils::{Handle, Pool},
     UsageBits,
@@ -166,6 +166,18 @@ fn debug_report_type_from_vk(obj_type: vk::ObjectType) -> Option<vk::DebugReport
         vk::ObjectType::PIPELINE_LAYOUT => Some(vk::DebugReportObjectTypeEXT::PIPELINE_LAYOUT),
         vk::ObjectType::PIPELINE => Some(vk::DebugReportObjectTypeEXT::PIPELINE),
         _ => None,
+    }
+}
+
+fn is_3d_image(info: &ImageInfo) -> bool {
+    info.dim[2] > 1
+}
+
+fn default_image_view_type(info: &ImageInfo) -> ImageViewType {
+    if is_3d_image(info) {
+        ImageViewType::Type3D
+    } else {
+        ImageViewType::Type2D
     }
 }
 
@@ -1374,11 +1386,12 @@ impl VulkanContext {
     }
 
     fn oneshot_transition_image_noview(&mut self, img: Handle<Image>, layout: vk::ImageLayout) {
+        let image_info = self.image_info(img);
         let tmp_view = ImageView {
             img,
             range: Default::default(),
             aspect: Default::default(),
-            view_type: ImageViewType::Type2D,
+            view_type: default_image_view_type(image_info),
         };
         let view_handle = self.get_or_create_image_view(&tmp_view).unwrap();
 
@@ -1634,21 +1647,43 @@ impl VulkanContext {
             .image_infos
             .get_ref(img.info_handle)
             .ok_or(GPUError::SlotError())?;
-        if info.view_type == ImageViewType::Cube {
-            if !img_info.info.cube_compatible {
-                return Err(GPUError::LibraryError(
-                    "Cube image views require cube_compatible ImageInfo".to_string(),
-                ));
+        let is_3d = is_3d_image(&img_info.info);
+        match info.view_type {
+            ImageViewType::Cube => {
+                if !img_info.info.cube_compatible {
+                    return Err(GPUError::LibraryError(
+                        "Cube image views require cube_compatible ImageInfo".to_string(),
+                    ));
+                }
+                if img_info.info.dim[0] != img_info.info.dim[1] || img_info.info.dim[2] != 1 {
+                    return Err(GPUError::LibraryError(
+                        "Cube image views require square 2D images".to_string(),
+                    ));
+                }
+                if info.range.layer_count % 6 != 0 {
+                    return Err(GPUError::LibraryError(
+                        "Cube image views require layer_count to be a multiple of 6".to_string(),
+                    ));
+                }
             }
-            if img_info.info.dim[0] != img_info.info.dim[1] || img_info.info.dim[2] != 1 {
-                return Err(GPUError::LibraryError(
-                    "Cube image views require square 2D images".to_string(),
-                ));
+            ImageViewType::Type3D => {
+                if !is_3d {
+                    return Err(GPUError::LibraryError(
+                        "3D image views require a 3D ImageInfo".to_string(),
+                    ));
+                }
+                if info.range.base_layer != 0 || info.range.layer_count != 1 {
+                    return Err(GPUError::LibraryError(
+                        "3D image views require base_layer=0 and layer_count=1".to_string(),
+                    ));
+                }
             }
-            if info.range.layer_count % 6 != 0 {
-                return Err(GPUError::LibraryError(
-                    "Cube image views require layer_count to be a multiple of 6".to_string(),
-                ));
+            ImageViewType::Type2D => {
+                if is_3d {
+                    return Err(GPUError::LibraryError(
+                        "3D images require ImageViewType::Type3D".to_string(),
+                    ));
+                }
             }
         }
         let aspect: vk::ImageAspectFlags = info.aspect.into();
@@ -1686,14 +1721,40 @@ impl VulkanContext {
     }
 
     pub fn make_image(&mut self, info: &ImageInfo) -> Result<Handle<Image>, GPUError> {
+        let is_3d = is_3d_image(info);
         let mut base_usage_flags = vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::SAMPLED;
 
+        if is_3d {
+            if info.layers != 1 {
+                return Err(GPUError::LibraryError(
+                    "3D images must use exactly one layer".to_string(),
+                ));
+            }
+            if info.cube_compatible {
+                return Err(GPUError::LibraryError(
+                    "3D images cannot be cube compatible".to_string(),
+                ));
+            }
+            if info.samples != SampleCount::S1 {
+                return Err(GPUError::LibraryError(
+                    "3D images must use SampleCount::S1".to_string(),
+                ));
+            }
+            if info.format == Format::D24S8 {
+                return Err(GPUError::LibraryError(
+                    "3D depth/stencil images are not supported".to_string(),
+                ));
+            }
+        }
+
         if info.format == Format::D24S8 {
             base_usage_flags = base_usage_flags | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
         } else {
-            base_usage_flags = base_usage_flags | vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            if !is_3d {
+                base_usage_flags = base_usage_flags | vk::ImageUsageFlags::COLOR_ATTACHMENT;
+            }
             if info.storage {
                 base_usage_flags = base_usage_flags | vk::ImageUsageFlags::STORAGE;
             }
@@ -1724,14 +1785,18 @@ impl VulkanContext {
                     .extent(vk::Extent3D {
                         width: info.dim[0] as u32,
                         height: info.dim[1] as u32,
-                        depth: 1,
+                        depth: info.dim[2] as u32,
                     })
-                    .array_layers(info.layers)
+                    .array_layers(if is_3d { 1 } else { info.layers })
                     .format(lib_to_vk_image_format(&info.format))
                     .mip_levels(info.mip_levels as u32)
                     .initial_layout(vk::ImageLayout::UNDEFINED)
                     .usage(base_usage_flags)
-                    .image_type(vk::ImageType::TYPE_2D)
+                    .image_type(if is_3d {
+                        vk::ImageType::TYPE_3D
+                    } else {
+                        vk::ImageType::TYPE_2D
+                    })
                     .samples(info.samples.into())
                     .tiling(vk::ImageTiling::OPTIMAL)
                     .flags(image_flags)
@@ -1894,38 +1959,72 @@ impl VulkanContext {
             return Ok(());
         }
 
-        let layer_byte_size = info.dim[0]
-            * info.dim[1]
-            * info.dim[2]
-            * channel_count(&info.format)
-            * bytes_per_channel(&info.format);
+        let initial_data = unsafe { info.initial_data.unwrap_unchecked() };
+        let total_mip_levels = info.mip_levels.max(1);
+        let level_byte_size = |level: u32| -> usize {
+            let dims = mip_dimensions(info.dim, level);
+            (dims[0]
+                * dims[1]
+                * dims[2]
+                * info.layers
+                * channel_count(&info.format)
+                * bytes_per_channel(&info.format)) as usize
+        };
+        let mut provided_mip_levels = 0u32;
+        let mut required_bytes = 0usize;
+        for level in 0..total_mip_levels {
+            required_bytes += level_byte_size(level);
+            if required_bytes == initial_data.len() {
+                provided_mip_levels = level + 1;
+                break;
+            }
+            if required_bytes > initial_data.len() {
+                break;
+            }
+        }
+        if provided_mip_levels == 0 {
+            return Err(GPUError::LibraryError(format!(
+                "Image '{}' initial data size {} does not match a valid mip prefix for dim {:?}, layers {}, format {:?}, mip_levels {}",
+                info.debug_name,
+                initial_data.len(),
+                info.dim,
+                info.layers,
+                info.format,
+                info.mip_levels
+            )));
+        }
         let staging = self.make_buffer(&BufferInfo {
             debug_name: "",
-            byte_size: (layer_byte_size * info.layers) as u32,
+            byte_size: initial_data.len() as u32,
             visibility: MemoryVisibility::CpuAndGpu,
-            initial_data: info.initial_data,
+            initial_data: Some(initial_data),
             ..Default::default()
         })?;
 
         let ctx_ptr = self as *mut _;
         self.gfx_pool.bind_context(ctx_ptr);
         let mut list = self.gfx_pool.begin("", false)?;
-        let mut cmd = CommandStream::new()
-            .begin()
-            .copy_buffer_to_image(&CopyBufferImage {
+        let mut cmd = CommandStream::new().begin();
+        let mut src_offset = 0u32;
+        for level in 0..provided_mip_levels {
+            let mip_byte_size = level_byte_size(level) as u32;
+            cmd = cmd.copy_buffer_to_image(&CopyBufferImage {
                 src: staging,
                 dst: image,
                 range: SubresourceRange {
-                    base_mip: 0,
+                    base_mip: level,
                     level_count: 1,
                     base_layer: 0,
                     layer_count: info.layers,
                 },
-                ..Default::default()
+                src_offset,
+                amount: mip_byte_size,
             });
+            src_offset += mip_byte_size;
+        }
 
-        if info.mip_levels > 1 && info.samples == SampleCount::S1 {
-            for i in 0..(info.mip_levels - 1) {
+        if total_mip_levels > provided_mip_levels && info.samples == SampleCount::S1 {
+            for i in (provided_mip_levels - 1)..(total_mip_levels - 1) {
                 let src_dims = mip_dimensions(info.dim, i);
                 let dst_dims = mip_dimensions(info.dim, i + 1);
                 cmd = cmd.blit_images(&BlitImage {
@@ -1944,17 +2043,21 @@ impl VulkanContext {
                         layer_count: info.layers,
                     },
                     filter: Filter::Linear,
-                    src_region: Rect2D {
+                    src_region: ImageBox {
                         x: 0,
                         y: 0,
+                        z: 0,
                         w: src_dims[0],
                         h: src_dims[1],
+                        d: src_dims[2],
                     },
-                    dst_region: Rect2D {
+                    dst_region: ImageBox {
                         x: 0,
                         y: 0,
+                        z: 0,
                         w: dst_dims[0],
                         h: dst_dims[1],
+                        d: dst_dims[2],
                     },
                 });
             }
@@ -2007,7 +2110,10 @@ impl VulkanContext {
             return;
         }
         if let Some(t) = self.gpu_timers.get_mut(frame) {
-            unsafe { t.begin(&self.device, list.cmd_buf) };
+            unsafe {
+                self.device.cmd_reset_query_pool(list.cmd_buf, t.pool, 0, 2);
+                t.begin(&self.device, list.cmd_buf);
+            };
         }
     }
 
@@ -2782,7 +2888,13 @@ impl VulkanContext {
             BindTableVariableType::Storage | BindTableVariableType::DynamicStorage => {
                 UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
             }
-            _ => UsageBits::empty(),
+            BindTableVariableType::SampledImage | BindTableVariableType::Image => {
+                UsageBits::SAMPLED
+            }
+            BindTableVariableType::StorageImage => {
+                UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
+            }
+            BindTableVariableType::Sampler => UsageBits::empty(),
         }
     }
 
@@ -2797,6 +2909,25 @@ impl VulkanContext {
             | ShaderResource::StorageBuffer(view) => Some((view.handle, usage)),
             ShaderResource::Dynamic(alloc) | ShaderResource::DynamicStorage(alloc) => {
                 Some((alloc.pool, usage))
+            }
+            _ => None,
+        }
+    }
+
+    fn image_usage_from_resource(
+        resource: &ShaderResource,
+        var_type: BindTableVariableType,
+    ) -> Option<(Handle<Image>, SubresourceRange, UsageBits, Layout)> {
+        let usage = Self::usage_bits_for_variable(var_type);
+        let layout = if usage.contains(UsageBits::SAMPLED) {
+            Layout::ShaderReadOnly
+        } else {
+            Layout::General
+        };
+
+        match resource {
+            ShaderResource::SampledImage(image_view, _) | ShaderResource::Image(image_view) => {
+                Some((image_view.img, image_view.range, usage, layout))
             }
             _ => None,
         }
@@ -2830,7 +2961,8 @@ impl VulkanContext {
                 reason: "bind table layout has conflicting bindings".to_string(),
             });
         };
-        let mut tracked_states = Vec::new();
+        let mut tracked_buffer_states = Vec::new();
+        let mut tracked_image_states = Vec::new();
         let total_resources: usize = bindings.iter().map(|binding| binding.resources.len()).sum();
         let mut write_descriptor_sets = Vec::with_capacity(total_resources);
         let mut buffer_infos = Vec::with_capacity(total_resources);
@@ -2881,7 +3013,7 @@ impl VulkanContext {
                         if let Some((buffer, usage)) =
                             Self::buffer_usage_from_resource(&res.resource, *expected_type)
                         {
-                            tracked_states.push((buffer, usage));
+                            tracked_buffer_states.push((buffer, usage));
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
@@ -2910,6 +3042,11 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::SampledImage(image_view, sampler) => {
+                        if let Some(image_state) =
+                            Self::image_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_image_states.push(image_state);
+                        }
                         let handle = self.get_or_create_image_view(image_view)?;
                         let image = self.image_views.get_ref(handle).unwrap();
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
@@ -2933,6 +3070,11 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::Image(image_view) => {
+                        if let Some(image_state) =
+                            Self::image_usage_from_resource(&res.resource, *expected_type)
+                        {
+                            tracked_image_states.push(image_state);
+                        }
                         let handle = self.get_or_create_image_view(image_view)?;
                         let image = self.image_views.get_ref(handle).unwrap();
                         let descriptor_type =
@@ -2982,7 +3124,7 @@ impl VulkanContext {
                         if let Some((buffer, usage)) =
                             Self::buffer_usage_from_resource(&res.resource, *expected_type)
                         {
-                            tracked_states.push((buffer, usage));
+                            tracked_buffer_states.push((buffer, usage));
                         }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
 
@@ -3008,7 +3150,7 @@ impl VulkanContext {
                         if let Some((buffer, usage)) =
                             Self::buffer_usage_from_resource(&res.resource, *expected_type)
                         {
-                            tracked_states.push((buffer, usage));
+                            tracked_buffer_states.push((buffer, usage));
                         }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
                         let buffer_info = vk::DescriptorBufferInfo::builder()
@@ -3033,7 +3175,7 @@ impl VulkanContext {
                         if let Some((buffer, usage)) =
                             Self::buffer_usage_from_resource(&res.resource, *expected_type)
                         {
-                            tracked_states.push((buffer, usage));
+                            tracked_buffer_states.push((buffer, usage));
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
@@ -3066,7 +3208,7 @@ impl VulkanContext {
                         if let Some((buffer, usage)) =
                             Self::buffer_usage_from_resource(&res.resource, *expected_type)
                         {
-                            tracked_states.push((buffer, usage));
+                            tracked_buffer_states.push((buffer, usage));
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
 
@@ -3102,7 +3244,8 @@ impl VulkanContext {
 
         self.bind_tables
             .with_mut(table_handle, |table| {
-                table.buffer_states = tracked_states;
+                table.buffer_states = tracked_buffer_states;
+                table.image_states = tracked_image_states;
             })
             .unwrap();
 
@@ -3132,6 +3275,7 @@ impl VulkanContext {
             set_id: info.set,
             layout: info.layout,
             buffer_states: Vec::new(),
+            image_states: Vec::new(),
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();
@@ -3777,6 +3921,7 @@ impl VulkanContext {
         // Step 6: Multisampling
         let multisampling = vk::PipelineMultisampleStateCreateInfo::builder()
             .sample_shading_enable(info.details.min_sample_shading > 0.0)
+            .alpha_to_coverage_enable(info.details.alpha_to_coverage)
             .rasterization_samples(info.details.sample_count.into())
             .min_sample_shading(info.details.min_sample_shading)
             .build();

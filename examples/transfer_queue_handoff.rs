@@ -84,6 +84,7 @@ fn main() -> Result<(), GPUError> {
                 "#,
                 comp
             ),
+            entry_point: "main",
             specialization: &[],
         },
     })?;

@@ -40,6 +40,7 @@ fn main() {
                     "#,
                     comp
                 ),
+                entry_point: "main",
                 specialization: &[],
             },
         })

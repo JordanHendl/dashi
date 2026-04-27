@@ -694,6 +694,7 @@ mod tests {
             .shader(PipelineShaderInfo {
                 stage: ShaderType::Vertex,
                 spirv: spirv_vert,
+                entry_point: "main",
                 specialization: &[],
             });
         assert!(!gpl_builder.shaders_spilled());
