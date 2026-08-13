@@ -12,8 +12,8 @@ fn volume_texture_compute_round_trip() {
     let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
 
     let voxels: Vec<u8> = vec![
-        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255,
-        0, 255, 255, 255, 255, 255, 255, 255, 32, 64, 128, 255,
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 0, 255,
+        255, 255, 255, 255, 255, 255, 32, 64, 128, 255,
     ];
 
     let src = ctx
@@ -174,7 +174,10 @@ void main() {
     ctx.wait(fence).unwrap();
     ctx.destroy_cmd_queue(list);
 
-    let result = ctx.map_buffer::<u8>(BufferView::new(readback)).unwrap().to_vec();
+    let result = ctx
+        .map_buffer::<u8>(BufferView::new(readback))
+        .unwrap()
+        .to_vec();
     ctx.unmap_buffer(readback).unwrap();
 
     assert_eq!(result, voxels);
@@ -233,7 +236,10 @@ fn volume_texture_generates_3d_mips() {
     ctx.wait(fence).unwrap();
     ctx.destroy_cmd_queue(list);
 
-    let result = ctx.map_buffer::<u8>(BufferView::new(readback)).unwrap().to_vec();
+    let result = ctx
+        .map_buffer::<u8>(BufferView::new(readback))
+        .unwrap()
+        .to_vec();
     ctx.unmap_buffer(readback).unwrap();
 
     assert_eq!(result, vec![255, 0, 0, 255]);

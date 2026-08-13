@@ -9,8 +9,9 @@ use crate::gpu::vulkan::Display as VulkanDisplay;
 use crate::gpu::webgpu::Context as WebGpuContext;
 use crate::gpu::{ContextFeatures, ContextInfo, VulkanContext};
 use crate::{
-    BindTable, BindTableLayout, Buffer, CommandQueue, ComputePipeline, ComputePipelineLayout,
-    DisplayStatus, Fence, QueueType, Result, SubmitInfo,
+    BindTable, BindTableLayout, Buffer, BufferStateRequirement, CommandQueue, ComputePipeline,
+    ComputePipelineLayout, DisplayStatus, Fence, ImageView, NativeImageDescriptor, QueueType,
+    Result, ShaderStageMask, SubmitInfo,
 };
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
@@ -164,6 +165,32 @@ impl Context {
         }
     }
 
+    pub fn override_bind_table_buffer_state(
+        &mut self,
+        table: crate::Handle<BindTable>,
+        requirement: BufferStateRequirement,
+    ) -> Result<()> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.override_bind_table_buffer_state(table, requirement),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_ctx) => Ok(()),
+        }
+    }
+
+    pub fn bind_table_buffer_requirements(
+        &self,
+        table: crate::Handle<BindTable>,
+        stages: ShaderStageMask,
+    ) -> Vec<BufferStateRequirement> {
+        match &self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.bind_table_buffer_requirements(table, stages),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_ctx) => Vec::new(),
+        }
+    }
+
     pub fn destroy_bind_table_layout(&mut self, handle: crate::Handle<BindTableLayout>) {
         match &mut self.backend {
             #[cfg(feature = "vulkan")]
@@ -276,6 +303,15 @@ impl Context {
             ContextBackend::Vulkan(ctx) => ctx.features(),
             #[cfg(feature = "webgpu")]
             ContextBackend::WebGpu(ctx) => ctx.features(),
+        }
+    }
+
+    pub fn native_image_descriptor(&mut self, image: ImageView) -> Result<NativeImageDescriptor> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.native_image_descriptor(image),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_ctx) => Ok(NativeImageDescriptor::default()),
         }
     }
 

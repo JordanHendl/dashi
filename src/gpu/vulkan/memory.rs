@@ -33,7 +33,7 @@ impl Clone for Buffer {
 #[derive(Debug)]
 pub(crate) struct BufferInfoRecord {
     pub(crate) info: BufferInfo<'static>,
-    debug_name: String,
+    _debug_name: String,
 }
 
 impl BufferInfoRecord {
@@ -50,7 +50,10 @@ impl BufferInfoRecord {
             initial_data: None,
         };
 
-        Self { info, debug_name }
+        Self {
+            info,
+            _debug_name: debug_name,
+        }
     }
 }
 
@@ -59,7 +62,7 @@ pub struct DynamicBuffer {
     pub(crate) handle: Handle<Buffer>,
     pub(crate) alloc: offset_allocator::Allocation,
     pub(crate) ptr: *mut u8,
-    pub(crate) size: u16,
+    pub(crate) size: u32,
 }
 
 impl Default for DynamicBuffer {
@@ -190,7 +193,7 @@ impl DynamicAllocator {
             handle: self.pool,
             alloc,
             ptr: unsafe { self.ptr.offset(alloc.offset as isize) },
-            size: self.min_alloc_size as u16,
+            size: self.min_alloc_size,
         })
     }
 }

@@ -7,7 +7,7 @@ use std::{thread, time::Duration};
 use super::XrSwapchainImage;
 use super::{
     DisplayInfo, DisplayStatus, Fence, GPUError, Image, ImageInfo, ImageInfoRecord, ImageView,
-    ImageViewType, SampleCount, Semaphore, VulkanContext, WindowBuffering, WindowInfo,
+    ImageViewType, SampleCount, Semaphore, VulkanContext, WindowBuffering, WindowMode,
 };
 
 #[cfg(feature = "dashi-openxr")]
@@ -19,14 +19,6 @@ use openxr as xr;
 use super::minifb_window;
 #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
 use super::winit_window;
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-#[cfg(all(
-    feature = "dashi-winit",
-    not(feature = "dashi-openxr"),
-    target_os = "windows"
-))]
-use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
 #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
 use winit::{
     dpi::PhysicalSize,
@@ -248,10 +240,7 @@ impl Display {
         target_os = "windows"
     ))]
     fn is_os_minimized(&self) -> bool {
-        match self.window.raw_window_handle() {
-            RawWindowHandle::Win32(handle) => unsafe { IsIconic(handle.hwnd as _) != 0 },
-            _ => false,
-        }
+        false
     }
 
     #[cfg(all(
@@ -662,40 +651,85 @@ impl VulkanContext {
     #[cfg(all(feature = "dashi-sdl2", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
-        info: &WindowInfo,
-    ) -> (std::cell::Cell<sdl2::video::Window>, vk::SurfaceKHR) {
+        info: &DisplayInfo,
+    ) -> Result<
+        (
+            std::cell::Cell<sdl2::video::Window>,
+            vk::SurfaceKHR,
+            [u32; 2],
+        ),
+        GPUError,
+    > {
+        if info.window_mode != WindowMode::Windowed {
+            return Err(GPUError::UnsupportedWindowMode {
+                backend: "SDL2",
+                mode: info.window_mode,
+            });
+        }
+        let window_info = &info.window;
         let mut window = std::cell::Cell::new(
             self.sdl_video
                 .as_ref()
-                .unwrap()
-                .window(&info.title, info.size[0], info.size[1])
+                .ok_or_else(|| {
+                    GPUError::LibraryError("SDL2 video subsystem is unavailable".into())
+                })?
+                .window(&window_info.title, window_info.size[0], window_info.size[1])
                 .vulkan()
                 .build()
-                .expect("Unable to create SDL2 Window!"),
+                .map_err(|err| {
+                    GPUError::LibraryError(format!("failed to create SDL2 window: {err}"))
+                })?,
         );
+        let actual_size = window.get_mut().size();
 
         let surface = window
             .get_mut()
             .vulkan_create_surface(vk::Handle::as_raw(self.instance.handle()) as usize)
-            .expect("Unable to create vulkan surface!");
+            .map_err(|err| {
+                GPUError::LibraryError(format!("failed to create SDL2 Vulkan surface: {err}"))
+            })?;
 
-        (window, vk::Handle::from_raw(surface))
+        Ok((
+            window,
+            vk::Handle::from_raw(surface),
+            [actual_size.0, actual_size.1],
+        ))
     }
 
     #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
-    fn make_window(&mut self, info: &WindowInfo) -> Result<(minifb::Window, vk::SurfaceKHR), GPUError> {
-        minifb_window::create_window(&self.entry, &self.instance, info)
+    fn make_window(
+        &mut self,
+        info: &DisplayInfo,
+    ) -> Result<(minifb::Window, vk::SurfaceKHR, [u32; 2]), GPUError> {
+        if info.window_mode != WindowMode::Windowed {
+            return Err(GPUError::UnsupportedWindowMode {
+                backend: "minifb",
+                mode: info.window_mode,
+            });
+        }
+        let (window, surface) =
+            minifb_window::create_window(&self.entry, &self.instance, &info.window)?;
+        let actual_size = window.get_size();
+        Ok((
+            window,
+            surface,
+            [actual_size.0 as u32, actual_size.1 as u32],
+        ))
     }
 
     #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
     fn make_window(
         &mut self,
-        info: &WindowInfo,
-    ) -> Result<(
-        winit::event_loop::EventLoop<()>,
-        winit::window::Window,
-        vk::SurfaceKHR,
-    ), GPUError> {
+        info: &DisplayInfo,
+    ) -> Result<
+        (
+            winit::event_loop::EventLoop<()>,
+            winit::window::Window,
+            vk::SurfaceKHR,
+            [u32; 2],
+        ),
+        GPUError,
+    > {
         winit_window::create_window(&self.entry, &self.instance, info)
     }
 
@@ -713,13 +747,19 @@ impl VulkanContext {
             return Err(GPUError::HeadlessDisplayNotSupported);
         }
         #[cfg(feature = "dashi-winit")]
-        let (event_loop, window, surface) = self.make_window(&info.window)?;
+        let (event_loop, window, surface, actual_size) = self.make_window(info)?;
         #[cfg(not(feature = "dashi-winit"))]
-        let (window, surface) = self.make_window(&info.window)?;
+        let (window, surface, actual_size) = self.make_window(info)?;
+
+        let mut effective_info = info.clone();
+        effective_info.window.size = actual_size;
+        if effective_info.window_mode == WindowMode::BorderlessFullscreen {
+            effective_info.window.resizable = false;
+        }
 
         let loader = ash::extensions::khr::Surface::new(&self.entry, &self.instance);
         let resources =
-            self.create_swapchain_resources(surface, &loader, info, info.window.size)?;
+            self.create_swapchain_resources(surface, &loader, &effective_info, actual_size)?;
 
         Ok(Display {
             window,
@@ -734,7 +774,7 @@ impl VulkanContext {
             semaphores: resources.semaphores,
             fences: resources.fences,
             views: resources.views,
-            info: info.clone(),
+            info: effective_info,
             extent: resources.extent,
             needs_rebuild: std::cell::Cell::new(false),
             closed: false,
@@ -766,18 +806,6 @@ impl VulkanContext {
             close_requested,
             minimized,
         );
-
-        if std::env::var_os("DASHI_TRACE_PREPARE").is_some() {
-            eprintln!(
-                "[dashi] prepare_display_from_state size={:?} extent={:?} needs_rebuild={} close_requested={} minimized={} action={:?}",
-                size,
-                [dsp.extent.width, dsp.extent.height],
-                dsp.needs_rebuild.get(),
-                close_requested,
-                minimized,
-                action
-            );
-        }
 
         if action.wait_for_restore {
             dsp.minimized = true;
@@ -860,6 +888,9 @@ impl VulkanContext {
         }
 
         let signal_sem_handle = dsp.semaphores[dsp.frame_idx as usize];
+        let fence = dsp.fences[dsp.frame_idx as usize];
+
+        self.wait(fence)?;
 
         let signal_sem = self.semaphores.get_ref(signal_sem_handle).unwrap();
         let acquire_result = unsafe {
@@ -867,7 +898,7 @@ impl VulkanContext {
                 &vk::AcquireNextImageInfoKHR::builder()
                     .swapchain(dsp.swapchain)
                     .semaphore(signal_sem.raw)
-                    .fence(vk::Fence::null())
+                    .fence(self.fences.get_ref(fence).unwrap().raw)
                     .timeout(std::u64::MAX)
                     .device_mask(0x1)
                     .build(),
@@ -881,6 +912,12 @@ impl VulkanContext {
             }
             Ok(result) => result,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
+                dsp.needs_rebuild.set(true);
+                return Err(GPUError::DisplayNeedsRebuild);
+            }
+            // Acquire uses an infinite timeout, so NOT_READY/TIMEOUT means the swapchain state
+            // is no longer making forward progress. Force a rebuild instead of spinning forever.
+            Err(vk::Result::NOT_READY | vk::Result::TIMEOUT) => {
                 dsp.needs_rebuild.set(true);
                 return Err(GPUError::DisplayNeedsRebuild);
             }
@@ -932,7 +969,11 @@ impl VulkanContext {
         };
 
         match present_result {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+                dsp.window.request_redraw();
+                Ok(())
+            }
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
                 dsp.needs_rebuild.set(true);
                 Err(GPUError::DisplayNeedsRebuild)

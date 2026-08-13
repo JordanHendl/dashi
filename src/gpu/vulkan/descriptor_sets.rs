@@ -1,5 +1,4 @@
 use super::*;
-use crate::gpu::driver::state::Layout;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -7,8 +6,18 @@ pub struct BindTableLayout {
     pub(super) pool: vk::DescriptorPool,
     pub(super) layout: vk::DescriptorSetLayout,
     pub(super) variables: Vec<BindTableVariable>,
+    pub(super) requirements: Vec<NormalizedBinding>,
     pub(super) update_after_bind: bool,
     pub(super) partially_bound: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BoundBufferRequirement {
+    pub(super) buffer: Handle<Buffer>,
+    pub(super) read_usage: UsageBits,
+    pub(super) write_usage: UsageBits,
+    pub(super) read_stages: ShaderStageMask,
+    pub(super) write_stages: ShaderStageMask,
 }
 
 #[allow(dead_code)]
@@ -17,11 +26,11 @@ pub struct BindTable {
     pub(super) set: vk::DescriptorSet,
     pub(super) set_id: u32,
     pub(super) layout: Handle<BindTableLayout>,
-    pub(super) buffer_states: Vec<(Handle<Buffer>, UsageBits)>,
-    pub(super) image_states: Vec<(Handle<Image>, SubresourceRange, UsageBits, Layout)>,
+    pub(super) buffer_states: Vec<BoundBufferRequirement>,
 }
 
 impl CommandQueue {
+    #[allow(dead_code)]
     pub(crate) fn bind_descriptor_set(
         &mut self,
         bind_point: vk::PipelineBindPoint,

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 
 use crate::structs::SubresourceRange;
@@ -16,6 +18,18 @@ pub type Access = ash::vk::AccessFlags;
 #[cfg(not(feature = "vulkan"))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Access;
+
+#[cfg(feature = "vulkan")]
+#[inline]
+fn merge_pipeline_stages(left: PipelineStage, right: PipelineStage) -> PipelineStage {
+    left | right
+}
+
+#[cfg(not(feature = "vulkan"))]
+#[inline]
+fn merge_pipeline_stages(_left: PipelineStage, _right: PipelineStage) -> PipelineStage {
+    PipelineStage
+}
 
 // --- New: backend-agnostic image layout + transition info ---
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -308,29 +322,73 @@ impl StateTracker {
         usage: UsageBits,
         queue: QueueType,
     ) -> Option<BufferBarrier> {
-        let previous = self.buffers.get(&buffer).copied().unwrap_or(BufferState {
-            usage: UsageBits::empty(),
-            queue,
-            stage: usage_to_stage(UsageBits::empty()),
-            access: usage_to_access(UsageBits::empty()),
-        });
-        let usage_changed = previous.usage != usage;
+        self.request_buffer_state_at_stage(buffer, usage, queue, usage_to_stage(usage))
+    }
+
+    pub fn preview_buffer_barrier(
+        &self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+        stage: PipelineStage,
+    ) -> Option<BufferBarrier> {
+        self.plan_buffer_state(buffer, usage, queue, stage).1
+    }
+
+    pub fn request_buffer_state_at_stage(
+        &mut self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+        stage: PipelineStage,
+    ) -> Option<BufferBarrier> {
+        let (next, barrier) = self.plan_buffer_state(buffer, usage, queue, stage);
+        self.buffers.insert(buffer, next);
+        barrier
+    }
+
+    fn plan_buffer_state(
+        &self,
+        buffer: Handle<Buffer>,
+        usage: UsageBits,
+        queue: QueueType,
+        stage: PipelineStage,
+    ) -> (BufferState, Option<BufferBarrier>) {
+        let Some(previous) = self.buffers.get(&buffer).copied() else {
+            return (
+                BufferState {
+                    usage,
+                    queue,
+                    stage,
+                    access: usage_to_access(usage),
+                },
+                None,
+            );
+        };
+
         let queue_changed = previous.queue != queue;
+        let write_hazard = usage_has_write(previous.usage) || usage_has_write(usage);
+        if !queue_changed && !write_hazard {
+            let merged_usage = previous.usage | usage;
+            return (
+                BufferState {
+                    usage: merged_usage,
+                    queue,
+                    stage: merge_pipeline_stages(previous.stage, stage),
+                    access: usage_to_access(merged_usage),
+                },
+                None,
+            );
+        }
 
-        let stage = usage_to_stage(usage);
-        let access = usage_to_access(usage);
-
-        self.buffers.insert(
-            buffer,
-            BufferState {
-                usage,
-                queue,
-                stage,
-                access,
-            },
-        );
-
-        if usage_changed || queue_changed {
+        let next = BufferState {
+            usage,
+            queue,
+            stage,
+            access: usage_to_access(usage),
+        };
+        (
+            next,
             Some(BufferBarrier {
                 buffer,
                 old_usage: previous.usage,
@@ -338,13 +396,11 @@ impl StateTracker {
                 old_stage: previous.stage,
                 new_stage: stage,
                 old_access: previous.access,
-                new_access: access,
+                new_access: next.access,
                 old_queue: previous.queue,
                 new_queue: queue,
-            })
-        } else {
-            None
-        }
+            }),
+        )
     }
 
     /// New: tell the tracker the current layout (e.g., after external/initial transitions).
@@ -365,6 +421,19 @@ impl StateTracker {
             .copied()
             .unwrap_or(Layout::Undefined)
     }
+}
+
+#[inline]
+fn usage_has_write(usage: UsageBits) -> bool {
+    usage.intersects(
+        UsageBits::RT_WRITE
+            | UsageBits::UAV_WRITE
+            | UsageBits::COPY_DST
+            | UsageBits::DEPTH_WRITE
+            | UsageBits::STORAGE_WRITE
+            | UsageBits::HOST_WRITE
+            | UsageBits::COMPUTE_SHADER,
+    )
 }
 
 #[cfg(feature = "vulkan")]
@@ -484,6 +553,12 @@ pub mod vulkan {
             vk::AccessFlags::INDIRECT_COMMAND_READ,
         ),
         (UsageBits::UNIFORM_READ, vk::AccessFlags::UNIFORM_READ),
+        (
+            UsageBits::COMPUTE_SHADER,
+            vk::AccessFlags::from_raw(
+                vk::AccessFlags::SHADER_READ.as_raw() | vk::AccessFlags::SHADER_WRITE.as_raw(),
+            ),
+        ),
         (UsageBits::STORAGE_READ, vk::AccessFlags::SHADER_READ),
         (UsageBits::STORAGE_WRITE, vk::AccessFlags::SHADER_WRITE),
         (UsageBits::HOST_READ, vk::AccessFlags::HOST_READ),
@@ -496,8 +571,8 @@ mod tests {
     #[cfg(feature = "vulkan")]
     use ash::vk;
 
-    use super::usage_to_access;
-    use crate::gpu::driver::types::UsageBits;
+    use super::{usage_to_access, StateTracker};
+    use crate::{gpu::driver::types::UsageBits, Buffer, Handle, QueueType};
 
     #[cfg(feature = "vulkan")]
     #[test]
@@ -515,6 +590,67 @@ mod tests {
 
         assert!(access.contains(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ));
         assert!(access.contains(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE));
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn compute_shader_usage_tracks_shader_read_write_without_host_aliasing() {
+        let access = usage_to_access(UsageBits::COMPUTE_SHADER);
+
+        assert!(access.contains(vk::AccessFlags::SHADER_READ));
+        assert!(access.contains(vk::AccessFlags::SHADER_WRITE));
+        assert!(!access.contains(vk::AccessFlags::HOST_WRITE));
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn read_only_buffer_uses_merge_without_a_barrier() {
+        let mut tracker = StateTracker::default();
+        let buffer = Handle::<Buffer>::new(1, 0);
+
+        assert!(tracker
+            .request_buffer_state_at_stage(
+                buffer,
+                UsageBits::UNIFORM_READ,
+                QueueType::Graphics,
+                vk::PipelineStageFlags::VERTEX_SHADER,
+            )
+            .is_none());
+        assert!(tracker
+            .request_buffer_state_at_stage(
+                buffer,
+                UsageBits::STORAGE_READ,
+                QueueType::Graphics,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            )
+            .is_none());
+    }
+
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn write_to_read_buffer_use_emits_an_exact_barrier() {
+        let mut tracker = StateTracker::default();
+        let buffer = Handle::<Buffer>::new(2, 0);
+
+        tracker.request_buffer_state_at_stage(
+            buffer,
+            UsageBits::STORAGE_WRITE,
+            QueueType::Graphics,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+        );
+        let barrier = tracker
+            .request_buffer_state_at_stage(
+                buffer,
+                UsageBits::STORAGE_READ,
+                QueueType::Graphics,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+            )
+            .expect("write-to-read use must synchronize");
+
+        assert_eq!(barrier.old_usage, UsageBits::STORAGE_WRITE);
+        assert_eq!(barrier.new_usage, UsageBits::STORAGE_READ);
+        assert_eq!(barrier.old_stage, vk::PipelineStageFlags::COMPUTE_SHADER);
+        assert_eq!(barrier.new_stage, vk::PipelineStageFlags::FRAGMENT_SHADER);
     }
 
     //    #[test]

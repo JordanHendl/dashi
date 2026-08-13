@@ -82,7 +82,11 @@ fn minifb_triangle() {
     println!("Using device {}", device);
 
     // The GPU context that holds all the data.
-    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo {
+        device,
+        ..Default::default()
+    })
+    .unwrap();
 
     const WIDTH: u32 = 1280;
     const HEIGHT: u32 = 1024;
@@ -182,7 +186,6 @@ void main() {
 "#,
                         vert
                     ),
-                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
@@ -196,7 +199,6 @@ void main() {
 "#,
                         frag
                     ),
-                    entry_point: "main",
                     specialization: &[],
                 },
             ],

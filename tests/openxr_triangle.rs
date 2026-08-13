@@ -46,7 +46,11 @@ impl Timer {
 fn openxr_triangle() {
     let device = SelectedDevice::default();
     println!("Using device {}", device);
-    let mut ctx = gpu::Context::new(&ContextInfo { device }).unwrap();
+    let mut ctx = gpu::Context::new(&ContextInfo {
+        device,
+        ..Default::default()
+    })
+    .unwrap();
     let mut display = ctx.make_xr_display(&XrDisplayInfo::default()).unwrap();
     let views = display.xr_view_configuration();
     let width = views[0].recommended_image_rect_width;
@@ -122,7 +126,6 @@ layout(binding = 0) uniform position_offset { vec2 pos; };
 void main(){frag_color=inPosition;gl_Position=vec4(inPosition+pos,0.0,1.0);}",
                         vert
                     ),
-                    entry_point: "main",
                     specialization: &[],
                 },
                 PipelineShaderInfo {
@@ -134,7 +137,6 @@ layout(location = 0) out vec4 out_color;
 void main(){ out_color=vec4(frag_color.xy,0,1); }",
                         frag
                     ),
-                    entry_point: "main",
                     specialization: &[],
                 },
             ],

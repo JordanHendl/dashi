@@ -15,7 +15,7 @@ pub struct Image {
 #[derive(Debug)]
 pub(crate) struct ImageInfoRecord {
     pub(crate) info: ImageInfo<'static>,
-    debug_name: String,
+    _debug_name: String,
 }
 
 impl ImageInfoRecord {
@@ -36,7 +36,10 @@ impl ImageInfoRecord {
             initial_data: None,
         };
 
-        Self { info, debug_name }
+        Self {
+            info,
+            _debug_name: debug_name,
+        }
     }
 }
 

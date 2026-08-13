@@ -1,4 +1,4 @@
-use super::structs::{Format, SampleCount, ShaderType};
+use super::structs::{Format, SampleCount, ShaderType, WindowMode};
 use ash::vk;
 use std::fmt;
 
@@ -28,6 +28,10 @@ pub enum GPUError {
     LibraryError(String),
     SlotError(),
     HeadlessDisplayNotSupported,
+    UnsupportedWindowMode {
+        backend: &'static str,
+        mode: WindowMode,
+    },
     DisplayNeedsRebuild,
     UnsupportedFormat(vk::Format),
     SwapchainConfigError(&'static str),
@@ -36,6 +40,11 @@ pub enum GPUError {
     InvalidBindTableBinding {
         binding: u32,
         reason: String,
+    },
+    BufferBarrierInsideRenderPass {
+        buffer: String,
+        old_usage: crate::UsageBits,
+        new_usage: crate::UsageBits,
     },
     MismatchedAttachmentFormat {
         context: String,
@@ -85,6 +94,11 @@ impl fmt::Display for GPUError {
             GPUError::LibraryError(msg) => write!(f, "Library failed to initialize. Error: {}", msg),
             GPUError::SlotError() => write!(f, "Slot Error"),
             GPUError::HeadlessDisplayNotSupported => write!(f, "Headless Display not supported"),
+            GPUError::UnsupportedWindowMode { backend, mode } => write!(
+                f,
+                "Window mode {:?} is not supported by the {} backend",
+                mode, backend
+            ),
             GPUError::DisplayNeedsRebuild => write!(f, "Display needs rebuild"),
             GPUError::UnsupportedFormat(format) => write!(f, "Format {:?} not supported", format),
             GPUError::SwapchainConfigError(msg) => {
@@ -96,6 +110,15 @@ impl fmt::Display for GPUError {
                 f,
                 "Invalid bind table update for binding {}: {}",
                 binding, reason
+            ),
+            GPUError::BufferBarrierInsideRenderPass {
+                buffer,
+                old_usage,
+                new_usage,
+            } => write!(
+                f,
+                "Buffer barrier for '{}' is required inside an active render pass ({:?} -> {:?}); prepare the buffer before beginning the render pass",
+                buffer, old_usage, new_usage
             ),
             GPUError::MismatchedAttachmentFormat {
                 context,
@@ -125,14 +148,14 @@ impl fmt::Display for GPUError {
 }
 
 impl From<anyhow::Error> for GPUError {
-    fn from(value: anyhow::Error) -> Self {
+    fn from(_value: anyhow::Error) -> Self {
         todo!()
     }
 }
 
 #[cfg(feature = "dashi-serde")]
 impl From<serde_yaml::Error> for GPUError {
-    fn from(value: serde_yaml::Error) -> Self {
+    fn from(_value: serde_yaml::Error) -> Self {
         todo!()
     }
 }

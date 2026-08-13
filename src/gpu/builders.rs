@@ -7,9 +7,9 @@ use crate::{
     AttachmentDescription, BindTable, BindTableLayout, BindTableLayoutInfo, ComputePipeline,
     ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
     DynamicState, GraphicsPipeline, GraphicsPipelineDetails, GraphicsPipelineInfo,
-    GraphicsPipelineLayout, GraphicsPipelineLayoutInfo, PipelineShaderInfo, RenderPass,
-    RenderPassInfo, SubpassDependency, SubpassDescription, VertexDescriptionInfo, Viewport,
-    WindowBuffering,
+    GraphicsPipelineLayout, GraphicsPipelineLayoutInfo, MonitorSelection, PipelineCacheInfo,
+    PipelineShaderInfo, RenderPass, RenderPassInfo, SubpassDependency, SubpassDescription,
+    VertexDescriptionInfo, Viewport, WindowBuffering, WindowMode,
 };
 use crate::{Context, GPUError};
 use smallvec::SmallVec;
@@ -107,6 +107,18 @@ impl DisplayBuilder {
     /// Choose double or triple buffering.
     pub fn buffering(mut self, buffering: WindowBuffering) -> Self {
         self.info.buffering = buffering;
+        self
+    }
+
+    /// Select the native window presentation mode.
+    pub fn window_mode(mut self, window_mode: WindowMode) -> Self {
+        self.info.window_mode = window_mode;
+        self
+    }
+
+    /// Select which monitor a fullscreen window should use.
+    pub fn monitor_selection(mut self, monitor_selection: MonitorSelection) -> Self {
+        self.info.monitor_selection = monitor_selection;
         self
     }
 
@@ -213,6 +225,7 @@ pub struct GraphicsPipelineBuilder {
     layout: Handle<GraphicsPipelineLayout>,
     render_pass: Handle<RenderPass>,
     subpass_id: u8,
+    cache: Option<PipelineCacheInfo>,
 }
 
 impl GraphicsPipelineBuilder {
@@ -223,6 +236,7 @@ impl GraphicsPipelineBuilder {
             layout: Handle::default(),
             render_pass: Handle::default(),
             subpass_id: 0,
+            cache: None,
         }
     }
 
@@ -244,6 +258,12 @@ impl GraphicsPipelineBuilder {
         self
     }
 
+    /// Specify pipeline cache metadata for this pipeline.
+    pub fn pipeline_cache(mut self, cache: PipelineCacheInfo) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
     /// Finalize and create the GraphicsPipeline.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<GraphicsPipeline>, GPUError> {
         let subpass_info = ctx
@@ -261,7 +281,10 @@ impl GraphicsPipelineBuilder {
             subpass_samples: subpass_info.samples,
             subpass_id: self.subpass_id,
         };
-        ctx.make_graphics_pipeline(&info)
+        match self.cache {
+            Some(cache) => ctx.make_graphics_pipeline(info.with_cache(cache)),
+            None => ctx.make_graphics_pipeline(&info),
+        }
     }
 }
 
@@ -308,6 +331,7 @@ impl<'a> ComputePipelineLayoutBuilder<'a> {
 pub struct ComputePipelineBuilder {
     debug_name: String,
     layout: Handle<ComputePipelineLayout>,
+    cache: Option<PipelineCacheInfo>,
 }
 
 impl ComputePipelineBuilder {
@@ -316,6 +340,7 @@ impl ComputePipelineBuilder {
         Self {
             debug_name: debug_name.into(),
             layout: Handle::default(),
+            cache: None,
         }
     }
 
@@ -325,13 +350,22 @@ impl ComputePipelineBuilder {
         self
     }
 
+    /// Specify pipeline cache metadata for this pipeline.
+    pub fn pipeline_cache(mut self, cache: PipelineCacheInfo) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
     /// Finalize and create the ComputePipeline.
     pub fn build(self, ctx: &mut Context) -> Result<Handle<ComputePipeline>, GPUError> {
         let info = ComputePipelineInfo {
             debug_name: &self.debug_name,
             layout: self.layout,
         };
-        ctx.make_compute_pipeline(&info)
+        match self.cache {
+            Some(cache) => ctx.make_compute_pipeline(info.with_cache(cache)),
+            None => ctx.make_compute_pipeline(&info),
+        }
     }
 }
 
@@ -469,6 +503,30 @@ mod tests {
     use crate::*;
     use serial_test::serial;
     use std::panic;
+
+    #[test]
+    fn display_info_defaults_to_windowed_system_default() {
+        let info = DisplayInfo::default();
+
+        assert_eq!(info.window_mode, WindowMode::Windowed);
+        assert_eq!(info.monitor_selection, MonitorSelection::SystemDefault);
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    #[test]
+    fn legacy_display_info_deserialization_uses_window_defaults() {
+        let info: DisplayInfo = serde_json::from_str(
+            r#"{
+                "window":{"title":"legacy","size":[640,360],"resizable":true},
+                "vsync":false,
+                "buffering":"Double"
+            }"#,
+        )
+        .expect("legacy display info should deserialize");
+
+        assert_eq!(info.window_mode, WindowMode::Windowed);
+        assert_eq!(info.monitor_selection, MonitorSelection::SystemDefault);
+    }
 
     #[test]
     #[serial]

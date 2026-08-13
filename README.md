@@ -83,6 +83,8 @@ list.end_drawing()?;
 
 Dashi now focuses on bind-table-based binding. Use `BindTableLayout`/`BindTable` for descriptor indexing and per-draw dynamic bindings; the [`bindless_triangle`](examples/bindless_triangle.rs) and [`hello_bindless`](examples/hello_bindless.rs) examples show how to author layouts and rebind individual table entries without rebuilding the table. Bind tables are created with update-after-bind + partially-bound descriptor flags enabled so you can refresh entries in-place; classic bind groups remain fixed at creation time and should only be used for legacy code paths.
 
+Shader toolchains can create layouts through `make_bind_table_layout_with_access` to supply backend-neutral read/write access and shader-stage visibility. Dashi uses that information for exact buffer synchronization and does not perform shader reflection itself. The legacy `make_bind_table_layout` API remains available and conservatively treats storage bindings as read/write.
+
 ### Window Backends
 
 Dashi ships with multiple window backends. The default `dashi-winit` feature

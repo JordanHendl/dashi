@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 mod error;
 use crate::{
     cmd::{CommandStream, Executable},
@@ -12,9 +14,12 @@ use ash::vk::Handle as VkHandle;
 use ash::*;
 pub use error::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     ffi::{c_char, c_void, CStr, CString},
+    fs,
+    hash::{Hash, Hasher},
     mem::ManuallyDrop,
+    path::PathBuf,
 };
 use vk_mem::Alloc;
 
@@ -57,6 +62,135 @@ pub use command_pool::CommandPool;
 pub const DEBUG_LAYER_NAMES: [*const c_char; 1] =
     [b"VK_LAYER_KHRONOS_validation\0".as_ptr() as *const c_char];
 
+pub const DEFAULT_APPLICATION_NAME: &str = "dashi-application";
+pub const DEFAULT_ENGINE_NAME: &str = "dashi";
+
+pub(super) fn shader_stage_mask_to_vk_shader_stages(
+    stages: ShaderStageMask,
+) -> vk::ShaderStageFlags {
+    let mut result = vk::ShaderStageFlags::empty();
+    let mappings = [
+        (ShaderStageMask::VERTEX, vk::ShaderStageFlags::VERTEX),
+        (
+            ShaderStageMask::TESSELLATION_CONTROL,
+            vk::ShaderStageFlags::TESSELLATION_CONTROL,
+        ),
+        (
+            ShaderStageMask::TESSELLATION_EVALUATION,
+            vk::ShaderStageFlags::TESSELLATION_EVALUATION,
+        ),
+        (ShaderStageMask::GEOMETRY, vk::ShaderStageFlags::GEOMETRY),
+        (ShaderStageMask::FRAGMENT, vk::ShaderStageFlags::FRAGMENT),
+        (ShaderStageMask::COMPUTE, vk::ShaderStageFlags::COMPUTE),
+        (ShaderStageMask::TASK, vk::ShaderStageFlags::TASK_EXT),
+        (ShaderStageMask::MESH, vk::ShaderStageFlags::MESH_EXT),
+        (
+            ShaderStageMask::RAY_GENERATION,
+            vk::ShaderStageFlags::RAYGEN_KHR,
+        ),
+        (ShaderStageMask::ANY_HIT, vk::ShaderStageFlags::ANY_HIT_KHR),
+        (
+            ShaderStageMask::CLOSEST_HIT,
+            vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+        ),
+        (ShaderStageMask::MISS, vk::ShaderStageFlags::MISS_KHR),
+        (
+            ShaderStageMask::INTERSECTION,
+            vk::ShaderStageFlags::INTERSECTION_KHR,
+        ),
+        (
+            ShaderStageMask::CALLABLE,
+            vk::ShaderStageFlags::CALLABLE_KHR,
+        ),
+    ];
+    for (stage, native) in mappings {
+        if stages.contains(stage) {
+            result |= native;
+        }
+    }
+    result
+}
+
+pub(super) fn shader_stage_mask_to_vk_pipeline_stages(
+    stages: ShaderStageMask,
+) -> vk::PipelineStageFlags {
+    let mut result = vk::PipelineStageFlags::empty();
+    let mappings = [
+        (
+            ShaderStageMask::VERTEX,
+            vk::PipelineStageFlags::VERTEX_SHADER,
+        ),
+        (
+            ShaderStageMask::TESSELLATION_CONTROL,
+            vk::PipelineStageFlags::TESSELLATION_CONTROL_SHADER,
+        ),
+        (
+            ShaderStageMask::TESSELLATION_EVALUATION,
+            vk::PipelineStageFlags::TESSELLATION_EVALUATION_SHADER,
+        ),
+        (
+            ShaderStageMask::GEOMETRY,
+            vk::PipelineStageFlags::GEOMETRY_SHADER,
+        ),
+        (
+            ShaderStageMask::FRAGMENT,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        ),
+        (
+            ShaderStageMask::COMPUTE,
+            vk::PipelineStageFlags::COMPUTE_SHADER,
+        ),
+        (
+            ShaderStageMask::TASK,
+            vk::PipelineStageFlags::TASK_SHADER_EXT,
+        ),
+        (
+            ShaderStageMask::MESH,
+            vk::PipelineStageFlags::MESH_SHADER_EXT,
+        ),
+        (
+            ShaderStageMask::ALL_RAY_TRACING,
+            vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+        ),
+    ];
+    for (stage, native) in mappings {
+        if stages.intersects(stage) {
+            result |= native;
+        }
+    }
+    if result.is_empty() {
+        vk::PipelineStageFlags::ALL_COMMANDS
+    } else {
+        result
+    }
+}
+
+pub(super) fn application_info_names(
+    application_name: Option<&str>,
+    engine_name: Option<&str>,
+) -> Result<(CString, CString)> {
+    let application_name = CString::new(application_name.unwrap_or(DEFAULT_APPLICATION_NAME))
+        .map_err(|_| {
+            GPUError::LibraryError("Vulkan application name contained an interior NUL".to_string())
+        })?;
+    let engine_name = CString::new(engine_name.unwrap_or(DEFAULT_ENGINE_NAME)).map_err(|_| {
+        GPUError::LibraryError("Vulkan engine name contained an interior NUL".to_string())
+    })?;
+
+    Ok((application_name, engine_name))
+}
+
+pub(super) fn make_application_info<'a>(
+    application_name: &'a CString,
+    engine_name: &'a CString,
+) -> vk::ApplicationInfo {
+    vk::ApplicationInfo::builder()
+        .application_name(application_name)
+        .engine_name(engine_name)
+        .api_version(vk::make_api_version(0, 1, 3, 0))
+        .build()
+}
+
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -76,7 +210,7 @@ unsafe extern "system" fn vulkan_debug_callback(
 #[derive(Debug)]
 pub struct DebugMessenger {
     raw_handle: u64,
-    callback_state: Box<DebugMessengerCallbackState>,
+    _callback_state: Box<DebugMessengerCallbackState>,
 }
 
 impl DebugMessenger {
@@ -217,6 +351,7 @@ pub struct RenderPass {
     pub(super) fb: vk::Framebuffer,
     pub(super) width: u32,
     pub(super) height: u32,
+    #[allow(dead_code)]
     pub(super) attachment_formats: Vec<Format>,
     pub(super) attachment_infos: Vec<ImagelessFramebufferAttachmentInfo>,
     pub(super) attachment_initial_layouts: Vec<vk::ImageLayout>,
@@ -265,6 +400,14 @@ pub struct Semaphore {
     raw: vk::Semaphore,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DescriptorBindCacheEntry {
+    table: Option<Handle<BindTable>>,
+    set_id: u32,
+    dynamic_offset: u32,
+    dynamic_offset_count: u8,
+}
+
 #[derive(Clone)]
 pub struct CommandQueue {
     cmd_buf: vk::CommandBuffer,
@@ -275,6 +418,10 @@ pub struct CommandQueue {
     curr_rp: Option<Handle<RenderPass>>,
     curr_subpass: Option<usize>,
     curr_pipeline: Option<Handle<GraphicsPipeline>>,
+    curr_compute_pipeline: Option<Handle<ComputePipeline>>,
+    graphics_descriptor_binds: [DescriptorBindCacheEntry; 4],
+    compute_descriptor_binds: [DescriptorBindCacheEntry; 4],
+    recorded_buffer_states: HashMap<Handle<Buffer>, (UsageBits, QueueType, vk::PipelineStageFlags)>,
     last_op_access: vk::AccessFlags,
     last_op_stage: vk::PipelineStageFlags,
     curr_attachments: Vec<(Handle<VkImageView>, vk::ImageLayout)>,
@@ -293,6 +440,10 @@ impl Default for CommandQueue {
             curr_rp: None,
             curr_subpass: None,
             curr_pipeline: None,
+            curr_compute_pipeline: None,
+            graphics_descriptor_binds: Default::default(),
+            compute_descriptor_binds: Default::default(),
+            recorded_buffer_states: HashMap::new(),
             last_op_access: vk::AccessFlags::TRANSFER_READ,
             last_op_stage: vk::PipelineStageFlags::ALL_COMMANDS,
             curr_attachments: Vec::new(),
@@ -356,6 +507,7 @@ pub struct VulkanContext {
     pub(super) debug_utils: Option<ash::extensions::ext::DebugUtils>,
     pub(super) debug_marker: Option<ash::extensions::ext::DebugMarker>,
     pub(super) debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
+    pipeline_cache_dir: Option<PathBuf>,
 }
 
 impl std::panic::UnwindSafe for VulkanContext {}
@@ -400,6 +552,65 @@ impl ResolvedBindTableBindings {
     }
 }
 
+struct PipelineCacheState {
+    handle: vk::PipelineCache,
+    path: Option<PathBuf>,
+}
+
+impl Default for PipelineCacheState {
+    fn default() -> Self {
+        Self {
+            handle: vk::PipelineCache::null(),
+            path: None,
+        }
+    }
+}
+
+fn sanitize_pipeline_cache_key(key: &str) -> String {
+    let mut sanitized = String::with_capacity(key.len().min(64));
+
+    for ch in key.chars() {
+        if sanitized.len() >= 64 {
+            break;
+        }
+
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            sanitized.push(ch);
+        } else if !sanitized.ends_with('_') {
+            sanitized.push('_');
+        }
+    }
+
+    let sanitized = sanitized.trim_matches('_');
+    if sanitized.is_empty() {
+        "pipeline".to_string()
+    } else {
+        sanitized.to_string()
+    }
+}
+
+fn pipeline_cache_file_name(
+    key: &str,
+    vendor_id: u32,
+    device_id: u32,
+    driver_version: u32,
+    pipeline_cache_uuid: &[u8],
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    "dashi-vulkan-pipeline-cache-v1".hash(&mut hasher);
+    key.hash(&mut hasher);
+    vendor_id.hash(&mut hasher);
+    device_id.hash(&mut hasher);
+    driver_version.hash(&mut hasher);
+    pipeline_cache_uuid.hash(&mut hasher);
+
+    format!(
+        "{}-{:016x}.vkpc",
+        sanitize_pipeline_cache_key(key),
+        hasher.finish()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,9 +633,152 @@ mod tests {
 
         vk::FALSE
     }
+
+    #[test]
+    fn application_info_names_use_defaults_and_custom_values() {
+        let (application_name, engine_name) = application_info_names(None, None).unwrap();
+        assert_eq!(application_name.to_str().unwrap(), DEFAULT_APPLICATION_NAME);
+        assert_eq!(engine_name.to_str().unwrap(), DEFAULT_ENGINE_NAME);
+
+        let (application_name, engine_name) =
+            application_info_names(Some("custom-app"), Some("custom-engine")).unwrap();
+        assert_eq!(application_name.to_str().unwrap(), "custom-app");
+        assert_eq!(engine_name.to_str().unwrap(), "custom-engine");
+    }
+
+    #[test]
+    fn application_info_names_reject_interior_nul_bytes() {
+        assert!(application_info_names(Some("bad\0app"), None).is_err());
+        assert!(application_info_names(None, Some("bad\0engine")).is_err());
+    }
+
+    #[test]
+    fn pipeline_cache_key_sanitizer_keeps_filenames_local() {
+        assert_eq!(
+            sanitize_pipeline_cache_key("../graphics:pipeline name"),
+            ".._graphics_pipeline_name"
+        );
+        assert_eq!(sanitize_pipeline_cache_key(""), "pipeline");
+    }
+
+    #[test]
+    fn pipeline_cache_file_name_changes_with_device_identity() {
+        let uuid = [1u8; 16];
+        let first = pipeline_cache_file_name("graphics:main", 1, 2, 3, &uuid);
+        let second = pipeline_cache_file_name("graphics:main", 1, 2, 4, &uuid);
+        assert_ne!(first, second);
+        assert!(first.ends_with(".vkpc"));
+    }
 }
 
 impl VulkanContext {
+    fn resolved_pipeline_cache_info(
+        &self,
+        explicit: Option<&PipelineCacheInfo>,
+        pipeline_kind: &str,
+        debug_name: &str,
+    ) -> Option<PipelineCacheInfo> {
+        explicit.cloned().or_else(|| {
+            self.pipeline_cache_dir
+                .as_ref()
+                .map(|cache_dir| PipelineCacheInfo {
+                    cache_dir: cache_dir.clone(),
+                    key: format!(
+                        "{}:{}",
+                        pipeline_kind,
+                        if debug_name.is_empty() {
+                            "unnamed"
+                        } else {
+                            debug_name
+                        }
+                    ),
+                })
+        })
+    }
+
+    fn create_pipeline_cache_handle(
+        &self,
+        initial_data: Option<&[u8]>,
+    ) -> Option<vk::PipelineCache> {
+        let mut create_info = vk::PipelineCacheCreateInfo::builder();
+        if let Some(data) = initial_data {
+            create_info = create_info.initial_data(data);
+        }
+
+        unsafe { self.device.create_pipeline_cache(&create_info, None).ok() }
+    }
+
+    fn open_pipeline_cache(&self, info: Option<&PipelineCacheInfo>) -> PipelineCacheState {
+        let Some(info) = info else {
+            return PipelineCacheState::default();
+        };
+
+        let path = info.cache_dir.join(pipeline_cache_file_name(
+            &info.key,
+            self.properties.vendor_id,
+            self.properties.device_id,
+            self.properties.driver_version,
+            &self.properties.pipeline_cache_uuid,
+        ));
+
+        let cached_data = fs::read(&path).ok().filter(|data| !data.is_empty());
+        let handle = cached_data
+            .as_deref()
+            .and_then(|data| self.create_pipeline_cache_handle(Some(data)))
+            .or_else(|| self.create_pipeline_cache_handle(None))
+            .unwrap_or_else(vk::PipelineCache::null);
+
+        PipelineCacheState {
+            handle,
+            path: Some(path),
+        }
+    }
+
+    fn save_pipeline_cache(&self, cache: &PipelineCacheState) {
+        if cache.handle == vk::PipelineCache::null() {
+            return;
+        }
+
+        let Some(path) = cache.path.as_ref() else {
+            return;
+        };
+
+        let Ok(data) = (unsafe { self.device.get_pipeline_cache_data(cache.handle) }) else {
+            return;
+        };
+
+        if data.is_empty() {
+            return;
+        }
+
+        let Some(parent) = path.parent() else {
+            return;
+        };
+
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+
+        let mut tmp_path = path.clone();
+        tmp_path.set_extension("vkpc.tmp");
+        if fs::write(&tmp_path, &data).is_err() {
+            return;
+        }
+
+        if fs::rename(&tmp_path, path).is_err() {
+            let _ = fs::remove_file(path);
+            let _ = fs::rename(&tmp_path, path);
+        }
+    }
+
+    fn close_pipeline_cache(&self, cache: PipelineCacheState) {
+        if cache.handle != vk::PipelineCache::null() {
+            unsafe {
+                self.device.destroy_pipeline_cache(cache.handle, None);
+            }
+        }
+    }
+
     fn init_core(
         info: &ContextInfo,
         windowed: bool,
@@ -450,10 +804,11 @@ impl VulkanContext {
         //     command-pool + allocator creation + queue setup + debug_utils
         //
         //     then return all of those out.
-        let app_info = vk::ApplicationInfo {
-            api_version: vk::make_api_version(0, 1, 3, 0),
-            ..Default::default()
-        };
+        let (application_name, engine_name) = application_info_names(
+            info.application_name.as_deref(),
+            info.engine_name.as_deref(),
+        )?;
+        let app_info = make_application_info(&application_name, &engine_name);
 
         // Create instance
         let entry = unsafe { Entry::load() }?;
@@ -654,6 +1009,11 @@ impl VulkanContext {
                 {
                     enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
                 }
+                if supports_vulkan12
+                    && vulkan12_features.shader_storage_image_array_non_uniform_indexing == vk::TRUE
+                {
+                    enabled_vulkan12.shader_storage_image_array_non_uniform_indexing = vk::TRUE;
+                }
 
                 if !supports_vulkan12 {
                     if descriptor_indexing.runtime_descriptor_array == vk::TRUE {
@@ -704,6 +1064,12 @@ impl VulkanContext {
                         enabled_descriptor_indexing
                             .shader_storage_buffer_array_non_uniform_indexing = vk::TRUE;
                     }
+                    if descriptor_indexing.shader_storage_image_array_non_uniform_indexing
+                        == vk::TRUE
+                    {
+                        enabled_descriptor_indexing
+                            .shader_storage_image_array_non_uniform_indexing = vk::TRUE;
+                    }
                 }
             }
 
@@ -726,6 +1092,8 @@ impl VulkanContext {
                     enabled_vulkan12.shader_uniform_buffer_array_non_uniform_indexing;
                 enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing =
                     enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing;
+                enabled_descriptor_indexing.shader_storage_image_array_non_uniform_indexing =
+                    enabled_vulkan12.shader_storage_image_array_non_uniform_indexing;
             }
 
             let descriptor_features_enabled = enabled_descriptor_indexing.runtime_descriptor_array
@@ -744,6 +1112,8 @@ impl VulkanContext {
                 || enabled_descriptor_indexing.shader_uniform_buffer_array_non_uniform_indexing
                     == vk::TRUE
                 || enabled_descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing
+                    == vk::TRUE
+                || enabled_descriptor_indexing.shader_storage_image_array_non_uniform_indexing
                     == vk::TRUE;
 
             let descriptor_features_enabled_v12 = enabled_vulkan12.runtime_descriptor_array
@@ -755,7 +1125,8 @@ impl VulkanContext {
                 || enabled_vulkan12.descriptor_binding_storage_image_update_after_bind == vk::TRUE
                 || enabled_vulkan12.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
                 || enabled_vulkan12.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE
-                || enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE;
+                || enabled_vulkan12.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE
+                || enabled_vulkan12.shader_storage_image_array_non_uniform_indexing == vk::TRUE;
 
             let mut f2 = vk::PhysicalDeviceFeatures2::builder().features(features);
             if !supports_vulkan12 && descriptor_features_enabled {
@@ -1023,6 +1394,7 @@ impl VulkanContext {
             debug_utils,
             debug_marker,
             debug_messenger,
+            pipeline_cache_dir: info.pipeline_cache_dir.clone(),
         };
         ctx.init_gpu_timers(1)?;
         Ok(ctx)
@@ -1182,6 +1554,7 @@ impl VulkanContext {
             debug_utils,
             debug_marker,
             debug_messenger,
+            pipeline_cache_dir: info.pipeline_cache_dir.clone(),
         };
         ctx.init_gpu_timers(1)?;
         Ok(ctx)
@@ -1317,8 +1690,8 @@ impl VulkanContext {
 
     pub fn record(
         &mut self,
-        stream: CommandStream<Executable>,
-        info: &CommandQueueInfo,
+        _stream: CommandStream<Executable>,
+        _info: &CommandQueueInfo,
     ) -> Result<CommandQueue> {
         todo!()
     }
@@ -1374,6 +1747,7 @@ impl VulkanContext {
         pool
     }
 
+    #[allow(dead_code)]
     fn oneshot_transition_image(&mut self, img: ImageView, layout: vk::ImageLayout) {
         let view_handle = self.get_or_create_image_view(&img).unwrap();
         let ctx_ptr = self as *mut _;
@@ -1843,13 +2217,46 @@ impl VulkanContext {
         &info.info
     }
 
+    pub fn native_image_descriptor(
+        &mut self,
+        view: ImageView,
+    ) -> Result<NativeImageDescriptor, GPUError> {
+        let info = *self.image_info(view.img);
+        let view_handle = self.get_or_create_image_view(&view)?;
+        let image = self.images.get_ref(view.img).ok_or(GPUError::SlotError())?;
+        let image_view = self
+            .image_views
+            .get_ref(view_handle)
+            .ok_or(GPUError::SlotError())?;
+
+        Ok(NativeImageDescriptor {
+            width: info.dim[0],
+            height: info.dim[1],
+            depth: info.dim[2],
+            layers: info.layers,
+            mip_levels: info.mip_levels,
+            format: info.format,
+            samples: info.samples,
+            backend: NativeImageBackend::Vulkan,
+            native_handle_count: 2,
+            native_handles: [
+                image.img.as_raw(),
+                image_view.view.as_raw(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        })
+    }
+
     pub fn flush_buffer(&mut self, buffer: BufferView) -> Result<()> {
         let buf = match self.buffers.get_ref(buffer.handle) {
             Some(it) => it,
             None => return Err(GPUError::SlotError()),
         };
-
-        let buffer_size = buf.size as u64;
 
         let info = self.allocator.get_allocation_info(&buf.alloc);
         self.allocator
@@ -2043,21 +2450,17 @@ impl VulkanContext {
                         layer_count: info.layers,
                     },
                     filter: Filter::Linear,
-                    src_region: ImageBox {
+                    src_region: Rect2D {
                         x: 0,
                         y: 0,
-                        z: 0,
                         w: src_dims[0],
                         h: src_dims[1],
-                        d: src_dims[2],
                     },
-                    dst_region: ImageBox {
+                    dst_region: Rect2D {
                         x: 0,
                         y: 0,
-                        z: 0,
                         w: dst_dims[0],
                         h: dst_dims[1],
-                        d: dst_dims[2],
                     },
                 });
             }
@@ -2154,9 +2557,25 @@ impl VulkanContext {
             ..Default::default()
         })?;
 
-        let min_alloc_size = info.allocation_size
-            + (info.allocation_size
-                % self.properties.limits.min_uniform_buffer_offset_alignment as u32);
+        let uniform_alignment = self.properties.limits.min_uniform_buffer_offset_alignment as u32;
+        let storage_alignment = self.properties.limits.min_storage_buffer_offset_alignment as u32;
+        let required_alignment = if info.usage.contains(BufferUsage::STORAGE) {
+            storage_alignment.max(1)
+        } else if info.usage.contains(BufferUsage::UNIFORM) {
+            uniform_alignment.max(1)
+        } else {
+            1
+        };
+        let min_alloc_size = if required_alignment <= 1 {
+            info.allocation_size
+        } else {
+            let remainder = info.allocation_size % required_alignment;
+            if remainder == 0 {
+                info.allocation_size
+            } else {
+                info.allocation_size + (required_alignment - remainder)
+            }
+        };
         return Ok(DynamicAllocator {
             allocator: std::sync::Arc::new(std::sync::Mutex::new(
                 offset_allocator::Allocator::new(info.byte_size, info.num_allocations),
@@ -2323,7 +2742,7 @@ impl VulkanContext {
 
         Ok(DebugMessenger {
             raw_handle: messenger.as_raw(),
-            callback_state,
+            _callback_state: callback_state,
         })
     }
 
@@ -2519,7 +2938,8 @@ impl VulkanContext {
     pub fn destroy_bind_table_layout(&mut self, handle: Handle<BindTableLayout>) {
         self.bind_table_layouts
             .with_mut(handle, |layout| unsafe {
-                self.device.destroy_descriptor_set_layout(layout.layout, None);
+                self.device
+                    .destroy_descriptor_set_layout(layout.layout, None);
                 self.device.destroy_descriptor_pool(layout.pool, None);
             })
             .unwrap();
@@ -2540,7 +2960,8 @@ impl VulkanContext {
     pub fn destroy_compute_pipeline_layout(&mut self, handle: Handle<ComputePipelineLayout>) {
         self.compute_pipeline_layouts
             .with_mut(handle, |layout| unsafe {
-                self.device.destroy_shader_module(layout.shader_stage.module, None);
+                self.device
+                    .destroy_shader_module(layout.shader_stage.module, None);
                 self.device.destroy_pipeline_layout(layout.layout, None);
             })
             .unwrap();
@@ -2667,6 +3088,57 @@ impl VulkanContext {
         &mut self,
         info: &BindTableLayoutInfo,
     ) -> Result<Handle<BindTableLayout>, GPUError> {
+        let Some(requirements) = normalize_bind_table_layout(info.shaders) else {
+            return Err(GPUError::InvalidBindTableBinding {
+                binding: u32::MAX,
+                reason: "layout contains conflicting bindings or invalid resource access"
+                    .to_string(),
+            });
+        };
+
+        let variables = info
+            .shaders
+            .iter()
+            .flat_map(|shader| shader.variables.iter().cloned())
+            .collect();
+        self.make_bind_table_layout_impl(info.debug_name, requirements, variables)
+    }
+
+    /// Creates a bind table layout with exact per-stage resource access.
+    ///
+    /// Reflection and shader toolchains should prefer this entry point. The
+    /// legacy layout API remains conservative for storage resources.
+    pub fn make_bind_table_layout_with_access(
+        &mut self,
+        info: &BindTableLayoutAccessInfo,
+    ) -> Result<Handle<BindTableLayout>, GPUError> {
+        let Some(requirements) = normalize_bind_table_access_layout(info.shaders) else {
+            return Err(GPUError::InvalidBindTableBinding {
+                binding: u32::MAX,
+                reason: "layout contains conflicting bindings or invalid resource access"
+                    .to_string(),
+            });
+        };
+
+        let variables = info
+            .shaders
+            .iter()
+            .flat_map(|shader| {
+                shader
+                    .variables
+                    .iter()
+                    .map(|variable| variable.variable.clone())
+            })
+            .collect();
+        self.make_bind_table_layout_impl(info.debug_name, requirements, variables)
+    }
+
+    fn make_bind_table_layout_impl(
+        &mut self,
+        debug_name: &str,
+        requirements: Vec<NormalizedBinding>,
+        variables: Vec<BindTableVariable>,
+    ) -> Result<Handle<BindTableLayout>, GPUError> {
         const MAX_DESCRIPTOR_SETS: u32 = 2048;
 
         let supports_partially_bound = self
@@ -2694,87 +3166,59 @@ impl VulkanContext {
         let mut flags = Vec::new();
         let mut bindings = Vec::new();
         let mut uses_update_after_bind = false;
-        let has_dynamic_bindings = info.shaders.iter().any(|shader_info| {
-            shader_info.variables.iter().any(|variable| {
-                matches!(
-                    variable.var_type,
-                    BindTableVariableType::DynamicUniform | BindTableVariableType::DynamicStorage
-                )
-            })
+        let has_dynamic_bindings = requirements.iter().any(|requirement| {
+            matches!(
+                requirement.var_type,
+                BindTableVariableType::DynamicUniform | BindTableVariableType::DynamicStorage
+            )
         });
         let allow_update_after_bind = allow_update_after_bind && !has_dynamic_bindings;
-        for shader_info in info.shaders.iter() {
-            for variable in shader_info.variables.iter() {
-                let descriptor_type = match variable.var_type {
-                    BindTableVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
-                    BindTableVariableType::DynamicUniform => {
-                        vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC
-                    }
-                    BindTableVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
-                    BindTableVariableType::SampledImage => {
-                        vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-                    }
-                    BindTableVariableType::Image => vk::DescriptorType::SAMPLED_IMAGE,
-                    BindTableVariableType::Sampler => vk::DescriptorType::SAMPLER,
-                    BindTableVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
-                    BindTableVariableType::DynamicStorage => {
-                        vk::DescriptorType::STORAGE_BUFFER_DYNAMIC
-                    }
-                };
+        for requirement in &requirements {
+            let descriptor_type = match requirement.var_type {
+                BindTableVariableType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                BindTableVariableType::DynamicUniform => vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC,
+                BindTableVariableType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                BindTableVariableType::SampledImage => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                BindTableVariableType::Image => vk::DescriptorType::SAMPLED_IMAGE,
+                BindTableVariableType::Sampler => vk::DescriptorType::SAMPLER,
+                BindTableVariableType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
+                BindTableVariableType::DynamicStorage => vk::DescriptorType::STORAGE_BUFFER_DYNAMIC,
+            };
 
-                let stage_flags = match shader_info.shader_type {
-                    ShaderType::Vertex => vk::ShaderStageFlags::VERTEX,
-                    ShaderType::TessellationControl => vk::ShaderStageFlags::TESSELLATION_CONTROL,
-                    ShaderType::TessellationEvaluation => {
-                        vk::ShaderStageFlags::TESSELLATION_EVALUATION
-                    }
-                    ShaderType::Geometry => vk::ShaderStageFlags::GEOMETRY,
-                    ShaderType::Fragment => vk::ShaderStageFlags::FRAGMENT,
-                    ShaderType::Compute => vk::ShaderStageFlags::COMPUTE,
-                    ShaderType::Task => vk::ShaderStageFlags::TASK_EXT,
-                    ShaderType::Mesh => vk::ShaderStageFlags::MESH_EXT,
-                    ShaderType::RayGeneration => vk::ShaderStageFlags::RAYGEN_KHR,
-                    ShaderType::AnyHit => vk::ShaderStageFlags::ANY_HIT_KHR,
-                    ShaderType::ClosestHit => vk::ShaderStageFlags::CLOSEST_HIT_KHR,
-                    ShaderType::Miss => vk::ShaderStageFlags::MISS_KHR,
-                    ShaderType::Intersection => vk::ShaderStageFlags::INTERSECTION_KHR,
-                    ShaderType::Callable => vk::ShaderStageFlags::CALLABLE_KHR,
-                    ShaderType::All => vk::ShaderStageFlags::ALL,
-                };
+            let stage_flags = shader_stage_mask_to_vk_shader_stages(requirement.stages);
 
-                let mut binding_flags = vk::DescriptorBindingFlags::empty();
-                if supports_partially_bound {
-                    binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
-                }
-                let binding_supports_uab = match variable.var_type {
-                    BindTableVariableType::Uniform => supports_uab,
-                    BindTableVariableType::Storage => supports_storage_uab,
-                    BindTableVariableType::SampledImage | BindTableVariableType::Image => {
-                        supports_sampled_uab
-                    }
-                    BindTableVariableType::StorageImage => supports_storage_image_uab,
-                    BindTableVariableType::Sampler
-                    | BindTableVariableType::DynamicUniform
-                    | BindTableVariableType::DynamicStorage => false,
-                };
-                let binding_supports_uab = allow_update_after_bind && binding_supports_uab;
-                if binding_supports_uab {
-                    binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
-                    uses_update_after_bind = true;
-                }
-
-                flags.push(binding_flags);
-                let layout_binding = vk::DescriptorSetLayoutBinding::builder()
-                    .binding(variable.binding)
-                    .descriptor_type(descriptor_type)
-                    .descriptor_count(variable.count) // Assuming one per binding
-                    .stage_flags(stage_flags)
-                    .build();
-
-                bindings.push(layout_binding);
+            let mut binding_flags = vk::DescriptorBindingFlags::empty();
+            if supports_partially_bound {
+                binding_flags |= vk::DescriptorBindingFlags::PARTIALLY_BOUND;
             }
+            let binding_supports_uab = match requirement.var_type {
+                BindTableVariableType::Uniform => supports_uab,
+                BindTableVariableType::Storage => supports_storage_uab,
+                BindTableVariableType::SampledImage | BindTableVariableType::Image => {
+                    supports_sampled_uab
+                }
+                BindTableVariableType::StorageImage => supports_storage_image_uab,
+                BindTableVariableType::Sampler
+                | BindTableVariableType::DynamicUniform
+                | BindTableVariableType::DynamicStorage => false,
+            };
+            let binding_supports_uab = allow_update_after_bind && binding_supports_uab;
+            if binding_supports_uab {
+                binding_flags |= vk::DescriptorBindingFlags::UPDATE_AFTER_BIND;
+                uses_update_after_bind = true;
+            }
+
+            flags.push(binding_flags);
+            let layout_binding = vk::DescriptorSetLayoutBinding::builder()
+                .binding(requirement.binding)
+                .descriptor_type(descriptor_type)
+                .descriptor_count(requirement.count)
+                .stage_flags(stage_flags)
+                .build();
+
+            bindings.push(layout_binding);
         }
-        let mut layout_binding_info =
+        let layout_binding_info =
             vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder().binding_flags(&flags);
 
         let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&bindings);
@@ -2816,14 +3260,10 @@ impl VulkanContext {
 
         self.set_name(
             descriptor_set_layout,
-            info.debug_name,
+            debug_name,
             vk::ObjectType::DESCRIPTOR_SET_LAYOUT,
         );
-        self.set_name(
-            descriptor_pool,
-            info.debug_name,
-            vk::ObjectType::DESCRIPTOR_POOL,
-        );
+        self.set_name(descriptor_pool, debug_name, vk::ObjectType::DESCRIPTOR_POOL);
 
         // Step 4: Return the BindTableLayout
         return Ok(self
@@ -2831,11 +3271,8 @@ impl VulkanContext {
             .insert(BindTableLayout {
                 pool: descriptor_pool,
                 layout: descriptor_set_layout,
-                variables: info
-                    .shaders
-                    .iter()
-                    .flat_map(|shader| shader.variables.iter().cloned())
-                    .collect(),
+                requirements,
+                variables,
                 update_after_bind: uses_update_after_bind,
                 partially_bound: supports_partially_bound,
             })
@@ -2849,7 +3286,7 @@ impl VulkanContext {
     ) -> bool {
         let bg1 = self.bind_table_layouts.get_ref(bg1).unwrap();
         let bg2 = self.bind_table_layouts.get_ref(bg2).unwrap();
-        bg1.variables == bg2.variables
+        bg1.requirements == bg2.requirements
     }
 
     pub fn bind_table_compatible(
@@ -2880,45 +3317,88 @@ impl VulkanContext {
         }
     }
 
-    fn usage_bits_for_variable(var_type: BindTableVariableType) -> UsageBits {
+    fn usage_bits_for_variable(
+        var_type: BindTableVariableType,
+        access: ShaderResourceAccess,
+    ) -> UsageBits {
         match var_type {
             BindTableVariableType::Uniform | BindTableVariableType::DynamicUniform => {
-                UsageBits::UNIFORM_READ
+                if access.contains(ShaderResourceAccess::READ) {
+                    UsageBits::UNIFORM_READ
+                } else {
+                    UsageBits::empty()
+                }
             }
             BindTableVariableType::Storage | BindTableVariableType::DynamicStorage => {
-                UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
+                let mut usage = UsageBits::empty();
+                if access.contains(ShaderResourceAccess::READ) {
+                    usage |= UsageBits::STORAGE_READ;
+                }
+                if access.contains(ShaderResourceAccess::WRITE) {
+                    usage |= UsageBits::STORAGE_WRITE;
+                }
+                usage
             }
             BindTableVariableType::SampledImage | BindTableVariableType::Image => {
                 UsageBits::SAMPLED
             }
             BindTableVariableType::StorageImage => {
-                UsageBits::STORAGE_READ | UsageBits::STORAGE_WRITE
+                let mut usage = UsageBits::empty();
+                if access.contains(ShaderResourceAccess::READ) {
+                    usage |= UsageBits::STORAGE_READ;
+                }
+                if access.contains(ShaderResourceAccess::WRITE) {
+                    usage |= UsageBits::STORAGE_WRITE;
+                }
+                usage
             }
             BindTableVariableType::Sampler => UsageBits::empty(),
         }
     }
 
-    fn buffer_usage_from_resource(
-        resource: &ShaderResource,
-        var_type: BindTableVariableType,
-    ) -> Option<(Handle<Buffer>, UsageBits)> {
-        let usage = Self::usage_bits_for_variable(var_type);
+    fn buffer_from_resource(resource: &ShaderResource) -> Option<Handle<Buffer>> {
         match resource {
             ShaderResource::Buffer(view)
             | ShaderResource::ConstBuffer(view)
-            | ShaderResource::StorageBuffer(view) => Some((view.handle, usage)),
+            | ShaderResource::StorageBuffer(view) => Some(view.handle),
             ShaderResource::Dynamic(alloc) | ShaderResource::DynamicStorage(alloc) => {
-                Some((alloc.pool, usage))
+                Some(alloc.pool)
             }
             _ => None,
         }
     }
 
+    fn track_buffer_requirement(
+        tracked: &mut Vec<BoundBufferRequirement>,
+        buffer: Handle<Buffer>,
+        requirement: NormalizedBinding,
+    ) {
+        let read_usage =
+            Self::usage_bits_for_variable(requirement.var_type, ShaderResourceAccess::READ);
+        let write_usage =
+            Self::usage_bits_for_variable(requirement.var_type, ShaderResourceAccess::WRITE);
+        if let Some(existing) = tracked.iter_mut().find(|item| item.buffer == buffer) {
+            existing.read_usage |= read_usage;
+            existing.write_usage |= write_usage;
+            existing.read_stages |= requirement.read_stages;
+            existing.write_stages |= requirement.write_stages;
+        } else {
+            tracked.push(BoundBufferRequirement {
+                buffer,
+                read_usage,
+                write_usage,
+                read_stages: requirement.read_stages,
+                write_stages: requirement.write_stages,
+            });
+        }
+    }
+
+    #[allow(dead_code)]
     fn image_usage_from_resource(
         resource: &ShaderResource,
         var_type: BindTableVariableType,
     ) -> Option<(Handle<Image>, SubresourceRange, UsageBits, Layout)> {
-        let usage = Self::usage_bits_for_variable(var_type);
+        let usage = Self::usage_bits_for_variable(var_type, ShaderResourceAccess::READ_WRITE);
         let layout = if usage.contains(UsageBits::SAMPLED) {
             Layout::ShaderReadOnly
         } else {
@@ -2945,6 +3425,85 @@ impl VulkanContext {
         self.write_bind_table_bindings(info.table, info.bindings)
     }
 
+    pub fn override_bind_table_buffer_state(
+        &mut self,
+        table_handle: Handle<BindTable>,
+        requirement: BufferStateRequirement,
+    ) -> Result<()> {
+        let read_usage = requirement.usage & (UsageBits::UNIFORM_READ | UsageBits::STORAGE_READ);
+        let write_usage = requirement.usage & UsageBits::STORAGE_WRITE;
+        self.bind_tables
+            .with_mut(table_handle, |table| {
+                if let Some(existing) = table
+                    .buffer_states
+                    .iter_mut()
+                    .find(|tracked| tracked.buffer == requirement.buffer)
+                {
+                    existing.read_usage = read_usage;
+                    existing.write_usage = write_usage;
+                    existing.read_stages = if read_usage.is_empty() {
+                        ShaderStageMask::NONE
+                    } else {
+                        requirement.stages
+                    };
+                    existing.write_stages = if write_usage.is_empty() {
+                        ShaderStageMask::NONE
+                    } else {
+                        requirement.stages
+                    };
+                } else {
+                    table.buffer_states.push(BoundBufferRequirement {
+                        buffer: requirement.buffer,
+                        read_usage,
+                        write_usage,
+                        read_stages: if read_usage.is_empty() {
+                            ShaderStageMask::NONE
+                        } else {
+                            requirement.stages
+                        },
+                        write_stages: if write_usage.is_empty() {
+                            ShaderStageMask::NONE
+                        } else {
+                            requirement.stages
+                        },
+                    });
+                }
+            })
+            .ok_or(GPUError::SlotError())?;
+        Ok(())
+    }
+
+    pub fn bind_table_buffer_requirements(
+        &self,
+        table_handle: Handle<BindTable>,
+        stage_filter: ShaderStageMask,
+    ) -> Vec<BufferStateRequirement> {
+        let Some(table) = self.bind_tables.get_ref(table_handle) else {
+            return Vec::new();
+        };
+        table
+            .buffer_states
+            .iter()
+            .filter_map(|requirement| {
+                let read_stages = requirement.read_stages & stage_filter;
+                let write_stages = requirement.write_stages & stage_filter;
+                let mut usage = UsageBits::empty();
+                if !read_stages.is_empty() {
+                    usage |= requirement.read_usage;
+                }
+                if !write_stages.is_empty() {
+                    usage |= requirement.write_usage;
+                }
+                let stages = read_stages | write_stages;
+                (!usage.is_empty() && !stages.is_empty()).then_some(BufferStateRequirement {
+                    buffer: requirement.buffer,
+                    usage,
+                    stages,
+                })
+            })
+            .collect()
+    }
+
     fn write_bind_table_bindings(
         &mut self,
         table_handle: Handle<BindTable>,
@@ -2954,15 +3513,17 @@ impl VulkanContext {
             let table = self.bind_tables.get_ref(table_handle).unwrap();
             (table.set, table.layout)
         };
-        let layout = self.bind_table_layouts.get_ref(layout_handle).unwrap();
-        let Some(requirements) = layout_binding_requirements(&layout.variables) else {
+        let (layout_variables, normalized_requirements) = {
+            let layout = self.bind_table_layouts.get_ref(layout_handle).unwrap();
+            (layout.variables.clone(), layout.requirements.clone())
+        };
+        let Some(requirements) = layout_binding_requirements(&layout_variables) else {
             return Err(GPUError::InvalidBindTableBinding {
                 binding: u32::MAX,
                 reason: "bind table layout has conflicting bindings".to_string(),
             });
         };
         let mut tracked_buffer_states = Vec::new();
-        let mut tracked_image_states = Vec::new();
         let total_resources: usize = bindings.iter().map(|binding| binding.resources.len()).sum();
         let mut write_descriptor_sets = Vec::with_capacity(total_resources);
         let mut buffer_infos = Vec::with_capacity(total_resources);
@@ -2977,6 +3538,10 @@ impl VulkanContext {
                     reason: "binding is not part of the bind table layout".to_string(),
                 });
             };
+            let normalized_requirement = *normalized_requirements
+                .iter()
+                .find(|requirement| requirement.binding == binding_info.binding)
+                .expect("validated bind table binding must have a normalized requirement");
 
             let slots = seen_slots.entry(binding_info.binding).or_default();
             for res in binding_info.resources {
@@ -3010,10 +3575,12 @@ impl VulkanContext {
 
                 match &res.resource {
                     ShaderResource::Buffer(view) => {
-                        if let Some((buffer, usage)) =
-                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_buffer_states.push((buffer, usage));
+                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
+                            Self::track_buffer_requirement(
+                                &mut tracked_buffer_states,
+                                buffer,
+                                normalized_requirement,
+                            );
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
@@ -3042,11 +3609,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::SampledImage(image_view, sampler) => {
-                        if let Some(image_state) =
-                            Self::image_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_image_states.push(image_state);
-                        }
                         let handle = self.get_or_create_image_view(image_view)?;
                         let image = self.image_views.get_ref(handle).unwrap();
                         let sampler = self.samplers.get_ref(*sampler).unwrap();
@@ -3070,11 +3632,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::Image(image_view) => {
-                        if let Some(image_state) =
-                            Self::image_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_image_states.push(image_state);
-                        }
                         let handle = self.get_or_create_image_view(image_view)?;
                         let image = self.image_views.get_ref(handle).unwrap();
                         let descriptor_type =
@@ -3121,10 +3678,12 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::Dynamic(alloc) => {
-                        if let Some((buffer, usage)) =
-                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_buffer_states.push((buffer, usage));
+                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
+                            Self::track_buffer_requirement(
+                                &mut tracked_buffer_states,
+                                buffer,
+                                normalized_requirement,
+                            );
                         }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
 
@@ -3147,10 +3706,12 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::DynamicStorage(alloc) => {
-                        if let Some((buffer, usage)) =
-                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_buffer_states.push((buffer, usage));
+                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
+                            Self::track_buffer_requirement(
+                                &mut tracked_buffer_states,
+                                buffer,
+                                normalized_requirement,
+                            );
                         }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
                         let buffer_info = vk::DescriptorBufferInfo::builder()
@@ -3172,10 +3733,12 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::StorageBuffer(view) => {
-                        if let Some((buffer, usage)) =
-                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_buffer_states.push((buffer, usage));
+                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
+                            Self::track_buffer_requirement(
+                                &mut tracked_buffer_states,
+                                buffer,
+                                normalized_requirement,
+                            );
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
@@ -3205,10 +3768,12 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(view) => {
-                        if let Some((buffer, usage)) =
-                            Self::buffer_usage_from_resource(&res.resource, *expected_type)
-                        {
-                            tracked_buffer_states.push((buffer, usage));
+                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
+                            Self::track_buffer_requirement(
+                                &mut tracked_buffer_states,
+                                buffer,
+                                normalized_requirement,
+                            );
                         }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
 
@@ -3245,7 +3810,6 @@ impl VulkanContext {
         self.bind_tables
             .with_mut(table_handle, |table| {
                 table.buffer_states = tracked_buffer_states;
-                table.image_states = tracked_image_states;
             })
             .unwrap();
 
@@ -3275,7 +3839,6 @@ impl VulkanContext {
             set_id: info.set,
             layout: info.layout,
             buffer_states: Vec::new(),
-            image_states: Vec::new(),
         };
 
         let table = self.bind_tables.insert(bind_table).unwrap();
@@ -3788,13 +4351,12 @@ impl VulkanContext {
         &mut self,
         info: &ComputePipelineLayoutInfo,
     ) -> Result<Handle<ComputePipelineLayout>, GPUError> {
-        let entry_point = std::sync::Arc::new(CString::new(info.shader.entry_point).map_err(
-            |_| {
+        let entry_point =
+            std::sync::Arc::new(CString::new(info.shader.entry_point).map_err(|_| {
                 GPUError::LibraryError(
                     "compute shader entry point contained an interior NUL".to_string(),
                 )
-            },
-        )?);
+            })?);
         let shader_stage = vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::COMPUTE) // HAS to be compute.
             .module(self.create_shader_module(info.shader.spirv).unwrap())
@@ -3842,13 +4404,12 @@ impl VulkanContext {
                     return Err(GPUError::UnsupportedShaderStage(other));
                 }
             };
-            let entry_point = std::sync::Arc::new(CString::new(shader_info.entry_point).map_err(
-                |_| {
+            let entry_point =
+                std::sync::Arc::new(CString::new(shader_info.entry_point).map_err(|_| {
                     GPUError::LibraryError(
                         "graphics shader entry point contained an interior NUL".to_string(),
                     )
-                },
-            )?);
+                })?);
 
             shader_stages.push(
                 vk::PipelineShaderStageCreateInfo::builder()
@@ -3990,10 +4551,14 @@ impl VulkanContext {
     /// - Swapchain acquisition order is respected.
     /// - XR session state is valid.
     /// - Synchronization primitives are handled during presentation.
-    pub fn make_compute_pipeline(
+    pub fn make_compute_pipeline<'a, I>(
         &mut self,
-        info: &ComputePipelineInfo,
-    ) -> Result<Handle<ComputePipeline>, GPUError> {
+        request: I,
+    ) -> Result<Handle<ComputePipeline>, GPUError>
+    where
+        I: ComputePipelineInfoRequest<'a>,
+    {
+        let info = request.compute_pipeline_info();
         let layout = self.compute_pipeline_layouts.get_ref(info.layout).unwrap();
 
         let pipeline_info = vk::ComputePipelineCreateInfo::builder()
@@ -4001,11 +4566,27 @@ impl VulkanContext {
             .stage(layout.shader_stage)
             .build();
 
-        let compute_pipelines = unsafe {
+        let pipeline_cache_info = self.resolved_pipeline_cache_info(
+            request.pipeline_cache_info(),
+            "compute",
+            info.debug_name,
+        );
+        let pipeline_cache = self.open_pipeline_cache(pipeline_cache_info.as_ref());
+        let compute_pipelines_result = unsafe {
             self.device
-                .create_compute_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-                .unwrap()
+                .create_compute_pipelines(pipeline_cache.handle, &[pipeline_info], None)
         };
+        let compute_pipelines = match compute_pipelines_result {
+            Ok(pipelines) => {
+                self.save_pipeline_cache(&pipeline_cache);
+                pipelines
+            }
+            Err(err) => {
+                self.close_pipeline_cache(pipeline_cache);
+                return Err(err.into());
+            }
+        };
+        self.close_pipeline_cache(pipeline_cache);
 
         self.set_name(
             compute_pipelines[0],
@@ -4030,10 +4611,14 @@ impl VulkanContext {
     /// - Swapchain acquisition order is respected.
     /// - XR session state is valid.
     /// - Synchronization primitives are handled during presentation.
-    pub fn make_graphics_pipeline(
+    pub fn make_graphics_pipeline<'a, I>(
         &mut self,
-        info: &GraphicsPipelineInfo,
-    ) -> Result<Handle<GraphicsPipeline>, GPUError> {
+        request: I,
+    ) -> Result<Handle<GraphicsPipeline>, GPUError>
+    where
+        I: GraphicsPipelineInfoRequest<'a>,
+    {
+        let info = request.graphics_pipeline_info();
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
         let subpass_index = info.subpass_id as usize;
         let expected_subpass = &info.subpass_samples;
@@ -4254,9 +4839,15 @@ impl VulkanContext {
 
         let pipeline_info = pipeline_builder.build();
 
+        let pipeline_cache_info = self.resolved_pipeline_cache_info(
+            request.pipeline_cache_info(),
+            "graphics",
+            info.debug_name,
+        );
+        let pipeline_cache = self.open_pipeline_cache(pipeline_cache_info.as_ref());
         let graphics_pipelines_result = unsafe {
             self.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .create_graphics_pipelines(pipeline_cache.handle, &[pipeline_info], None)
         };
 
         let mut subpass_samples = vec![SubpassSampleInfo::default(); target_subpass + 1];
@@ -4284,7 +4875,17 @@ impl VulkanContext {
             })
             .unwrap();
 
-        let graphics_pipelines = graphics_pipelines_result?;
+        let graphics_pipelines = match graphics_pipelines_result {
+            Ok(pipelines) => {
+                self.save_pipeline_cache(&pipeline_cache);
+                pipelines
+            }
+            Err(err) => {
+                self.close_pipeline_cache(pipeline_cache);
+                return Err(err.into());
+            }
+        };
+        self.close_pipeline_cache(pipeline_cache);
 
         self.set_name(
             graphics_pipelines[0],

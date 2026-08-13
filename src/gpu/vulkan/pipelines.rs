@@ -21,6 +21,7 @@ pub struct GraphicsPipelineLayout {
     pub(super) dynamic_states: Vec<vk::DynamicState>,
     pub(super) layout: vk::PipelineLayout,
     pub(super) sample_count: SampleCount,
+    #[allow(dead_code)]
     pub(super) min_sample_shading: f32,
 }
 
@@ -37,8 +38,11 @@ pub struct GraphicsPipeline {
     pub(super) layout: Handle<GraphicsPipelineLayout>,
     pub(super) subpass: u8,
     pub(super) subpass_formats: SubpassAttachmentFormats,
+    #[allow(dead_code)]
     pub(super) attachment_formats: Vec<Format>,
+    #[allow(dead_code)]
     pub(super) depth_format: Option<Format>,
+    #[allow(dead_code)]
     pub(super) sample_count: SampleCount,
     pub(super) subpass_samples: SubpassSampleInfo,
 }

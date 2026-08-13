@@ -8,8 +8,8 @@ use crate::gpu::driver::command::{
 pub use crate::gpu::driver::command::{Scope, SyncPoint};
 use crate::gpu::driver::types::Handle;
 use crate::{
-    Buffer, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, Result, SubmitInfo2, UsageBits,
-    Viewport,
+    Buffer, BufferStateRequirement, Fence, GraphicsPipeline, Image, QueueType, ResourceUse, Result,
+    SubmitInfo2, UsageBits, Viewport,
 };
 
 /// Generic command buffer with type-state tracking.
@@ -209,6 +209,11 @@ impl CommandStream<Recording> {
         self
     }
 
+    pub fn prepare_buffer_requirement(mut self, requirement: BufferStateRequirement) -> Self {
+        self.enc.prepare_buffer_requirement(requirement, None);
+        self
+    }
+
     pub fn prepare_buffer_for(&mut self, buffer: Handle<Buffer>, usage: ResourceUse) {
         self.enc.prepare_buffer_for(buffer, usage);
     }
@@ -299,8 +304,18 @@ impl CommandStream<Recording> {
 }
 
 impl CommandStream<Compute> {
+    pub fn sync(mut self, point: SyncPoint, scope: Scope) -> Self {
+        self.enc.sync_point(point, scope);
+        self
+    }
+
     pub fn prepare_buffer(mut self, buffer: Handle<Buffer>, usage: UsageBits) -> Self {
         self.enc.prepare_buffer(buffer, usage, None);
+        self
+    }
+
+    pub fn prepare_buffer_requirement(mut self, requirement: BufferStateRequirement) -> Self {
+        self.enc.prepare_buffer_requirement(requirement, None);
         self
     }
 

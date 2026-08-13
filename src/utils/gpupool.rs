@@ -182,6 +182,7 @@ impl<T> GPUPool<T> {
 
     pub fn get_mut_ref(&mut self, item: Handle<T>) -> Option<&mut T> {
         self.mark_dirty(item.slot);
+        #[allow(deprecated)]
         self.pool.get_mut_ref(item)
     }
 
@@ -350,6 +351,7 @@ impl DynamicGPUPool {
 
     pub fn get_mut_ref<T>(&mut self, item: Handle<T>) -> Option<&mut T> {
         self.mark_dirty(item.slot);
+        #[allow(deprecated)]
         self.pool.get_mut_ref(item)
     }
 

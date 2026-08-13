@@ -1,4 +1,4 @@
-use super::{GPUError, DEBUG_LAYER_NAMES};
+use super::{application_info_names, make_application_info, GPUError, DEBUG_LAYER_NAMES};
 use crate::gpu::device_selector::{DeviceInfo, DeviceSelector, DeviceType, SelectedDevice};
 use ash::*;
 use std::ffi::{c_char, CStr};
@@ -52,10 +52,8 @@ impl DeviceSelector {
     /// A Vulkan instance must be creatable on the running platform; otherwise
     /// an error is returned.
     pub fn new() -> Result<DeviceSelector, GPUError> {
-        let app_info = vk::ApplicationInfo {
-            api_version: vk::make_api_version(0, 1, 3, 0),
-            ..Default::default()
-        };
+        let (application_name, engine_name) = application_info_names(None, None)?;
+        let app_info = make_application_info(&application_name, &engine_name);
 
         let entry = unsafe { Entry::load() }?;
         let enable_validation = std::env::var("DASHI_VALIDATION")
@@ -131,6 +129,8 @@ impl DeviceSelector {
                     && descriptor_indexing.descriptor_binding_uniform_buffer_update_after_bind > 0
                     && descriptor_indexing.shader_storage_buffer_array_non_uniform_indexing > 0
                     && descriptor_indexing.descriptor_binding_storage_buffer_update_after_bind > 0
+                    && descriptor_indexing.shader_storage_image_array_non_uniform_indexing > 0
+                    && descriptor_indexing.descriptor_binding_storage_image_update_after_bind > 0
                 {
                     info.bind_table_capable = true;
                 }

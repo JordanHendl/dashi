@@ -1,11 +1,13 @@
+#![allow(dead_code)]
+
 use bytemuck::{Pod, Zeroable};
 use core::convert::TryInto;
 use std::backtrace::Backtrace;
 
 use crate::{
-    BindTable, Buffer, BufferView, ClearValue, ComputePipeline, DynamicBuffer, Fence, Filter,
-    GraphicsPipeline, Image, ImageBox, ImageView, QueueType, Rect2D, RenderPass, Result, SubmitInfo2,
-    Viewport,
+    BindTable, Buffer, BufferStateRequirement, BufferView, ClearValue, ComputePipeline,
+    DynamicBuffer, Fence, Filter, GraphicsPipeline, Image, ImageView, QueueType, Rect2D,
+    RenderPass, Result, ShaderStageMask, SubmitInfo2, Viewport,
 };
 
 use super::{
@@ -85,6 +87,7 @@ pub enum SyncPoint {
     TransferToCompute = 4,
     ComputeToTransfer = 5,
     GraphicsToTransfer = 6,
+    ComputeToCompute = 7,
 }
 
 #[repr(u8)]
@@ -111,6 +114,7 @@ impl SyncPoint {
             4 => Some(SyncPoint::TransferToCompute),
             5 => Some(SyncPoint::ComputeToTransfer),
             6 => Some(SyncPoint::GraphicsToTransfer),
+            7 => Some(SyncPoint::ComputeToCompute),
             _ => None,
         }
     }
@@ -364,9 +368,9 @@ pub struct BlitImage {
     pub dst_range: SubresourceRange,
     pub filter: Filter,
     /// Region in the source image.
-    pub src_region: ImageBox,
+    pub src_region: Rect2D,
     /// Region in the destination image.
-    pub dst_region: ImageBox,
+    pub dst_region: Rect2D,
 }
 
 #[repr(C)]
@@ -403,6 +407,7 @@ pub struct TransitionImage {
 pub struct PrepareBuffer {
     pub buffer: Handle<Buffer>,
     pub usage: UsageBits,
+    pub stages: ShaderStageMask,
     /// Queue that should own the buffer after the transition; the
     /// [`crate::gpu::cmd::CommandStream`] helpers default this to the
     /// stream's queue type.
@@ -613,7 +618,7 @@ impl CommandEncoder {
     }
 
     /// Copy data between images, emitting required barriers.
-    pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, range: SubresourceRange) {
+    pub fn copy_image(&mut self, src: Handle<Image>, dst: Handle<Image>, _range: SubresourceRange) {
         let payload = CopyImage { src, dst };
         self.push(Op::CopyImage, &payload);
     }
@@ -654,6 +659,21 @@ impl CommandEncoder {
         let cmd = PrepareBuffer {
             buffer,
             usage,
+            stages: ShaderStageMask::NONE,
+            queue: queue.unwrap_or(self.queue),
+        };
+        self.push(Op::PrepareBuffer, &cmd);
+    }
+
+    pub fn prepare_buffer_requirement(
+        &mut self,
+        requirement: BufferStateRequirement,
+        queue: Option<QueueType>,
+    ) {
+        let cmd = PrepareBuffer {
+            buffer: requirement.buffer,
+            usage: requirement.usage,
+            stages: requirement.stages,
             queue: queue.unwrap_or(self.queue),
         };
         self.push(Op::PrepareBuffer, &cmd);
@@ -756,7 +776,18 @@ impl CommandEncoder {
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => {
                     let payload = cmd.payload::<PrepareBuffer>();
-                    self.prepare_buffer(payload.buffer, payload.usage, Some(payload.queue));
+                    if payload.stages.is_empty() {
+                        self.prepare_buffer(payload.buffer, payload.usage, Some(payload.queue));
+                    } else {
+                        self.prepare_buffer_requirement(
+                            BufferStateRequirement {
+                                buffer: payload.buffer,
+                                usage: payload.usage,
+                                stages: payload.stages,
+                            },
+                            Some(payload.queue),
+                        );
+                    }
                 }
                 Op::TransitionImage => self.transition_image(cmd.payload()),
                 Op::BeginRenderPass => self.begin_render_pass(cmd.payload()),
@@ -855,21 +886,21 @@ impl CommandEncoder {
         for (index, cmd) in self.iter().enumerate() {
             if let Some(expected) = debug_expected_payload_size(cmd.op) {
                 assert_eq!(
-                    cmd.bytes().len(),
-                    expected,
-                    "command stream '{}' is malformed at command {}: op={:?} actual_len={} expected_len={}",
-                    label,
-                    index + 1,
-                    cmd.op,
-                    cmd.bytes().len(),
-                    expected
-                );
+          cmd.bytes().len(),
+          expected,
+          "command stream '{}' is malformed at command {}: op={:?} actual_len={} expected_len={}",
+          label,
+          index + 1,
+          cmd.op,
+          cmd.bytes().len(),
+          expected
+        );
             }
         }
     }
 
     /// Iterate over recorded commands.
-    pub fn iter(&self) -> CommandIter {
+    pub fn iter(&self) -> CommandIter<'_> {
         CommandIter {
             data: &self.data,
             side: &self.side,

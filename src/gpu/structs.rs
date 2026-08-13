@@ -9,6 +9,7 @@ use std::collections::hash_map::{DefaultHasher, Entry};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
@@ -26,6 +27,7 @@ fn hash_f32<H: Hasher>(value: f32, state: &mut H) {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct DebugMessageSeverity: u32 {
         const VERBOSE = 0x1;
@@ -36,6 +38,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct DebugMessageType: u32 {
         const GENERAL = 0x1;
@@ -57,6 +60,7 @@ impl Default for ContextProfiles {
     }
 }
 
+#[allow(improper_ctypes_definitions)]
 pub type DebugMessengerCallback = unsafe extern "system" fn(
     severity: DebugMessageSeverity,
     message_type: DebugMessageType,
@@ -85,6 +89,7 @@ impl Default for DebugMessengerCreateInfo {
     }
 }
 
+#[allow(improper_ctypes_definitions)]
 unsafe extern "system" fn dummy_debug_callback(
     _severity: DebugMessageSeverity,
     _message_type: DebugMessageType,
@@ -149,6 +154,7 @@ pub enum Format {
     #[default]
     RGBA8,
     RGBA8Unorm,
+    RGBA16F,
     RGBA32F,
     D24S8,
 }
@@ -311,6 +317,7 @@ impl XrSwapchainImage {
         self.raw_handle
     }
 
+    #[allow(dead_code)]
     pub(crate) fn from_raw(raw_handle: u64) -> Self {
         Self { raw_handle }
     }
@@ -472,6 +479,9 @@ pub enum WebSurfaceInfo {
 pub struct ContextInfo {
     pub device: SelectedDevice,
     pub profiles: ContextProfiles,
+    pub pipeline_cache_dir: Option<PathBuf>,
+    pub application_name: Option<String>,
+    pub engine_name: Option<String>,
     #[cfg(feature = "webgpu")]
     pub web_surface: Option<WebSurfaceInfo>,
 }
@@ -481,6 +491,9 @@ impl Default for ContextInfo {
         Self {
             device: SelectedDevice::default(),
             profiles: ContextProfiles::default(),
+            pipeline_cache_dir: None,
+            application_name: None,
+            engine_name: None,
             #[cfg(feature = "webgpu")]
             web_surface: None,
         }
@@ -643,6 +656,46 @@ impl Default for ImageView {
             range: Default::default(),
             aspect: Default::default(),
             view_type: ImageViewType::Type2D,
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeImageBackend {
+    #[default]
+    None = 0,
+    Vulkan = 1,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeImageDescriptor {
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub layers: u32,
+    pub mip_levels: u32,
+    pub format: Format,
+    pub samples: SampleCount,
+    pub backend: NativeImageBackend,
+    pub native_handle_count: u32,
+    pub native_handles: [u64; 8],
+}
+
+impl Default for NativeImageDescriptor {
+    fn default() -> Self {
+        Self {
+            width: 0,
+            height: 0,
+            depth: 0,
+            layers: 0,
+            mip_levels: 0,
+            format: Format::RGBA8,
+            samples: SampleCount::S1,
+            backend: NativeImageBackend::None,
+            native_handle_count: 0,
+            native_handles: [0; 8],
         }
     }
 }
@@ -824,6 +877,64 @@ pub enum BindTableVariableType {
     StorageImage,
 }
 
+bitflags! {
+  /// Access promised by a shader for a bound resource.
+  ///
+  /// This is deliberately backend-neutral. Shader compilers may populate it
+  /// from reflection, while hand-authored access-qualified layouts state the
+  /// contract explicitly. Legacy layouts use conservative defaults.
+  #[repr(transparent)]
+  #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+  #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+  pub struct ShaderResourceAccess: u8 {
+    const NONE = 0;
+    const READ = 1 << 0;
+    const WRITE = 1 << 1;
+    const READ_WRITE = Self::READ.bits() | Self::WRITE.bits();
+  }
+}
+
+bitflags! {
+  /// Backend-neutral shader-stage visibility used by resource requirements.
+  #[repr(transparent)]
+  #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+  #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+  pub struct ShaderStageMask: u32 {
+    const NONE = 0;
+    const VERTEX = 1 << 0;
+    const TESSELLATION_CONTROL = 1 << 1;
+    const TESSELLATION_EVALUATION = 1 << 2;
+    const GEOMETRY = 1 << 3;
+    const FRAGMENT = 1 << 4;
+    const COMPUTE = 1 << 5;
+    const TASK = 1 << 6;
+    const MESH = 1 << 7;
+    const RAY_GENERATION = 1 << 8;
+    const ANY_HIT = 1 << 9;
+    const CLOSEST_HIT = 1 << 10;
+    const MISS = 1 << 11;
+    const INTERSECTION = 1 << 12;
+    const CALLABLE = 1 << 13;
+
+    const ALL_GRAPHICS = Self::VERTEX.bits()
+      | Self::TESSELLATION_CONTROL.bits()
+      | Self::TESSELLATION_EVALUATION.bits()
+      | Self::GEOMETRY.bits()
+      | Self::FRAGMENT.bits()
+      | Self::TASK.bits()
+      | Self::MESH.bits();
+    const ALL_RAY_TRACING = Self::RAY_GENERATION.bits()
+      | Self::ANY_HIT.bits()
+      | Self::CLOSEST_HIT.bits()
+      | Self::MISS.bits()
+      | Self::INTERSECTION.bits()
+      | Self::CALLABLE.bits();
+    const ALL = Self::ALL_GRAPHICS.bits()
+      | Self::COMPUTE.bits()
+      | Self::ALL_RAY_TRACING.bits();
+  }
+}
+
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub enum ShaderType {
@@ -844,6 +955,28 @@ pub enum ShaderType {
     All,
 }
 
+impl ShaderType {
+    pub const fn stage_mask(self) -> ShaderStageMask {
+        match self {
+            ShaderType::Vertex => ShaderStageMask::VERTEX,
+            ShaderType::TessellationControl => ShaderStageMask::TESSELLATION_CONTROL,
+            ShaderType::TessellationEvaluation => ShaderStageMask::TESSELLATION_EVALUATION,
+            ShaderType::Geometry => ShaderStageMask::GEOMETRY,
+            ShaderType::Fragment => ShaderStageMask::FRAGMENT,
+            ShaderType::Compute => ShaderStageMask::COMPUTE,
+            ShaderType::Task => ShaderStageMask::TASK,
+            ShaderType::Mesh => ShaderStageMask::MESH,
+            ShaderType::RayGeneration => ShaderStageMask::RAY_GENERATION,
+            ShaderType::AnyHit => ShaderStageMask::ANY_HIT,
+            ShaderType::ClosestHit => ShaderStageMask::CLOSEST_HIT,
+            ShaderType::Miss => ShaderStageMask::MISS,
+            ShaderType::Intersection => ShaderStageMask::INTERSECTION,
+            ShaderType::Callable => ShaderStageMask::CALLABLE,
+            ShaderType::All => ShaderStageMask::ALL,
+        }
+    }
+}
+
 #[derive(Hash, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
 pub struct BindTableVariable {
@@ -862,6 +995,25 @@ impl Default for BindTableVariable {
     }
 }
 
+/// A binding declaration with an explicit shader access contract.
+///
+/// This wrapper keeps the legacy [`BindTableVariable`] API source-compatible.
+/// Layouts created through the legacy API conservatively treat storage
+/// resources as read/write, while reflected callers can opt into exact access.
+#[derive(Hash, Clone, Debug, Eq, PartialEq)]
+pub struct BindTableVariableAccess {
+    pub variable: BindTableVariable,
+    pub access: ShaderResourceAccess,
+}
+
+/// Exact state requested for a buffer by one or more shader bindings.
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferStateRequirement {
+    pub buffer: Handle<Buffer>,
+    pub usage: crate::UsageBits,
+    pub stages: ShaderStageMask,
+}
+
 #[derive(Hash, Clone, Debug)]
 pub struct ShaderInfo<'a> {
     pub shader_type: ShaderType,
@@ -872,6 +1024,19 @@ pub struct ShaderInfo<'a> {
 pub struct BindTableLayoutInfo<'a> {
     pub debug_name: &'a str,
     pub shaders: &'a [ShaderInfo<'a>],
+}
+
+#[derive(Hash, Clone, Debug)]
+pub struct ShaderAccessInfo<'a> {
+    pub shader_type: ShaderType,
+    pub variables: &'a [BindTableVariableAccess],
+}
+
+/// Access-qualified bind table layout information.
+#[derive(Clone, Debug)]
+pub struct BindTableLayoutAccessInfo<'a> {
+    pub debug_name: &'a str,
+    pub shaders: &'a [ShaderAccessInfo<'a>],
 }
 
 impl Hash for BindTableLayoutInfo<'_> {
@@ -889,63 +1054,116 @@ impl<'a> Default for BindTableLayoutInfo<'a> {
     }
 }
 
-#[inline]
-fn stage_bit(s: ShaderType) -> u32 {
-    match s {
-        ShaderType::Vertex => 1 << 0,
-        ShaderType::TessellationControl => 1 << 1,
-        ShaderType::TessellationEvaluation => 1 << 2,
-        ShaderType::Geometry => 1 << 3,
-        ShaderType::Fragment => 1 << 4,
-        ShaderType::Compute => 1 << 5,
-        ShaderType::Task => 1 << 6,
-        ShaderType::Mesh => 1 << 7,
-        ShaderType::RayGeneration => 1 << 8,
-        ShaderType::AnyHit => 1 << 9,
-        ShaderType::ClosestHit => 1 << 10,
-        ShaderType::Miss => 1 << 11,
-        ShaderType::Intersection => 1 << 12,
-        ShaderType::Callable => 1 << 13,
-        ShaderType::All => u32::MAX,
+/// Internal normalized key so layout hashes are independent of declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct NormalizedBinding {
+    pub(crate) binding: u32,
+    pub(crate) var_type: BindTableVariableType,
+    pub(crate) count: u32,
+    pub(crate) stages: ShaderStageMask,
+    pub(crate) read_stages: ShaderStageMask,
+    pub(crate) write_stages: ShaderStageMask,
+}
+
+fn allowed_access(var_type: BindTableVariableType) -> ShaderResourceAccess {
+    match var_type {
+        BindTableVariableType::Uniform
+        | BindTableVariableType::DynamicUniform
+        | BindTableVariableType::SampledImage
+        | BindTableVariableType::Image => ShaderResourceAccess::READ,
+        BindTableVariableType::DynamicStorage
+        | BindTableVariableType::Storage
+        | BindTableVariableType::StorageImage => ShaderResourceAccess::READ_WRITE,
+        BindTableVariableType::Sampler => ShaderResourceAccess::NONE,
     }
 }
 
-/// Internal normalized key so layout hashes are independent of declaration order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct NormalizedBinding {
-    binding: u32,
-    var_ty: u8,
-    count: u32,
-    stages: u32, // aggregated bitmask across all shaders that reference this binding
+fn access_is_valid(var_type: BindTableVariableType, access: ShaderResourceAccess) -> bool {
+    if var_type == BindTableVariableType::Sampler {
+        access.is_empty()
+    } else {
+        !access.is_empty() && allowed_access(var_type).contains(access)
+    }
 }
 
-fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
-    // Aggregate by (binding, var_ty, count)
-    let mut agg: BTreeMap<(u32, u8, u32), u32> = BTreeMap::new();
+pub(crate) fn conservative_resource_access(
+    var_type: BindTableVariableType,
+) -> ShaderResourceAccess {
+    allowed_access(var_type)
+}
 
-    for sh in shaders {
-        let bit = stage_bit(sh.shader_type);
-        for v in sh.variables {
-            let k = (v.binding, v.var_type.clone() as u8, v.count);
-            agg.entry(k)
-                .and_modify(|stages| *stages |= bit)
-                .or_insert(bit);
+fn merge_normalized_binding(
+    normalized: &mut BTreeMap<u32, NormalizedBinding>,
+    variable: &BindTableVariable,
+    access: ShaderResourceAccess,
+    stages: ShaderStageMask,
+) -> Option<()> {
+    if !access_is_valid(variable.var_type, access) {
+        return None;
+    }
+
+    let requirement = normalized
+        .entry(variable.binding)
+        .or_insert(NormalizedBinding {
+            binding: variable.binding,
+            var_type: variable.var_type,
+            count: variable.count,
+            stages: ShaderStageMask::NONE,
+            read_stages: ShaderStageMask::NONE,
+            write_stages: ShaderStageMask::NONE,
+        });
+
+    if requirement.var_type != variable.var_type || requirement.count != variable.count {
+        return None;
+    }
+
+    requirement.stages |= stages;
+    if access.contains(ShaderResourceAccess::READ) {
+        requirement.read_stages |= stages;
+    }
+    if access.contains(ShaderResourceAccess::WRITE) {
+        requirement.write_stages |= stages;
+    }
+    Some(())
+}
+
+pub(crate) fn normalize_bind_table_layout(
+    shaders: &[ShaderInfo<'_>],
+) -> Option<Vec<NormalizedBinding>> {
+    let mut normalized = BTreeMap::<u32, NormalizedBinding>::new();
+
+    for shader in shaders {
+        let stages = shader.shader_type.stage_mask();
+        for variable in shader.variables {
+            merge_normalized_binding(
+                &mut normalized,
+                variable,
+                conservative_resource_access(variable.var_type),
+                stages,
+            )?;
         }
     }
 
-    // Normalize into a sorted vector (BTreeMap already sorted by key)
-    let norm: Vec<NormalizedBinding> = agg
-        .into_iter()
-        .map(|((binding, var_ty, count), stages)| NormalizedBinding {
-            binding,
-            var_ty,
-            count,
-            stages,
-        })
-        .collect();
+    Some(normalized.into_values().collect())
+}
 
-    // Hash the normalized list
-    hash64(&norm)
+pub(crate) fn normalize_bind_table_access_layout(
+    shaders: &[ShaderAccessInfo<'_>],
+) -> Option<Vec<NormalizedBinding>> {
+    let mut normalized = BTreeMap::<u32, NormalizedBinding>::new();
+
+    for shader in shaders {
+        let stages = shader.shader_type.stage_mask();
+        for variable in shader.variables {
+            merge_normalized_binding(&mut normalized, &variable.variable, variable.access, stages)?;
+        }
+    }
+
+    Some(normalized.into_values().collect())
+}
+
+fn hash_from_shaders(shaders: &[ShaderInfo<'_>]) -> u64 {
+    hash64(&normalize_bind_table_layout(shaders).unwrap_or_default())
 }
 
 /// Stable, order-independent hash for a BindTableLayoutInfo (ignores `debug_name`).
@@ -1040,6 +1258,75 @@ pub(crate) fn indexed_bindings_compatible_with_layout(
 #[cfg(test)]
 mod layout_validation_tests {
     use super::*;
+
+    #[test]
+    fn legacy_storage_layouts_remain_conservatively_read_write() {
+        let variables = [BindTableVariable {
+            var_type: BindTableVariableType::Storage,
+            binding: 3,
+            count: 1,
+        }];
+        let shaders = [ShaderInfo {
+            shader_type: ShaderType::Fragment,
+            variables: &variables,
+        }];
+
+        let normalized = normalize_bind_table_layout(&shaders).expect("valid layout");
+        assert_eq!(normalized[0].read_stages, ShaderStageMask::FRAGMENT);
+        assert_eq!(normalized[0].write_stages, ShaderStageMask::FRAGMENT);
+    }
+
+    #[test]
+    fn access_layout_preserves_stage_local_read_and_write_contracts() {
+        let vertex_variables = [BindTableVariableAccess {
+            variable: BindTableVariable {
+                var_type: BindTableVariableType::Storage,
+                binding: 3,
+                count: 1,
+            },
+            access: ShaderResourceAccess::READ,
+        }];
+        let fragment_variables = [BindTableVariableAccess {
+            variable: vertex_variables[0].variable.clone(),
+            access: ShaderResourceAccess::WRITE,
+        }];
+        let shaders = [
+            ShaderAccessInfo {
+                shader_type: ShaderType::Vertex,
+                variables: &vertex_variables,
+            },
+            ShaderAccessInfo {
+                shader_type: ShaderType::Fragment,
+                variables: &fragment_variables,
+            },
+        ];
+
+        let normalized = normalize_bind_table_access_layout(&shaders).expect("valid layout");
+        assert_eq!(
+            normalized[0].stages,
+            ShaderStageMask::VERTEX | ShaderStageMask::FRAGMENT
+        );
+        assert_eq!(normalized[0].read_stages, ShaderStageMask::VERTEX);
+        assert_eq!(normalized[0].write_stages, ShaderStageMask::FRAGMENT);
+    }
+
+    #[test]
+    fn access_layout_rejects_writes_to_uniform_bindings() {
+        let variables = [BindTableVariableAccess {
+            variable: BindTableVariable {
+                var_type: BindTableVariableType::Uniform,
+                binding: 0,
+                count: 1,
+            },
+            access: ShaderResourceAccess::WRITE,
+        }];
+        let shaders = [ShaderAccessInfo {
+            shader_type: ShaderType::Compute,
+            variables: &variables,
+        }];
+
+        assert!(normalize_bind_table_access_layout(&shaders).is_none());
+    }
 
     #[test]
     fn accepts_matching_bind_table_bindings() {
@@ -1623,15 +1910,8 @@ impl Serialize for ClearValue {
 #[cfg(feature = "dashi-serde")]
 impl<'de> Deserialize<'de> for ClearValue {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::{
-            de::{Error, MapAccess, Visitor},
-            Deserialize,
-        };
+        use serde::de::{Error, MapAccess, Visitor};
         use std::fmt;
-        #[derive(Deserialize)]
-        struct Tag {
-            kind: String,
-        }
         struct V;
         impl<'de> Visitor<'de> for V {
             type Value = ClearValue;
@@ -1641,8 +1921,6 @@ impl<'de> Deserialize<'de> for ClearValue {
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut kind: Option<String> = None;
                 let mut value_f: Option<[f32; 4]> = None;
-                let mut value_i: Option<[i32; 4]> = None;
-                let mut value_u: Option<[u32; 4]> = None;
                 let mut depth: Option<f32> = None;
                 let mut stencil: Option<u32> = None;
                 while let Some(k) = map.next_key::<String>()? {
@@ -1880,16 +2158,71 @@ impl Hash for GraphicsPipelineLayoutInfo<'_> {
     }
 }
 
-pub struct ComputePipelineInfo<'a> {
-    pub debug_name: &'a str,
-    pub layout: Handle<ComputePipelineLayout>,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct RenderPassSubpassInfo {
     pub color_formats: Vec<Format>,
     pub depth_format: Option<Format>,
     pub samples: SubpassSampleInfo,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub struct PipelineCacheInfo {
+    pub cache_dir: PathBuf,
+    pub key: String,
+}
+
+pub struct ComputePipelineInfo<'a> {
+    pub debug_name: &'a str,
+    pub layout: Handle<ComputePipelineLayout>,
+}
+
+pub struct CachedComputePipelineInfo<'a> {
+    pub info: ComputePipelineInfo<'a>,
+    pub cache: PipelineCacheInfo,
+}
+
+pub trait ComputePipelineInfoRequest<'a> {
+    fn compute_pipeline_info(&self) -> &ComputePipelineInfo<'a>;
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        None
+    }
+}
+
+impl<'a> ComputePipelineInfo<'a> {
+    pub fn with_cache(self, cache: PipelineCacheInfo) -> CachedComputePipelineInfo<'a> {
+        CachedComputePipelineInfo { info: self, cache }
+    }
+}
+
+impl<'a> ComputePipelineInfoRequest<'a> for ComputePipelineInfo<'a> {
+    fn compute_pipeline_info(&self) -> &ComputePipelineInfo<'a> {
+        self
+    }
+}
+
+impl<'a> ComputePipelineInfoRequest<'a> for CachedComputePipelineInfo<'a> {
+    fn compute_pipeline_info(&self) -> &ComputePipelineInfo<'a> {
+        &self.info
+    }
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        Some(&self.cache)
+    }
+}
+
+impl<'a, T> ComputePipelineInfoRequest<'a> for &T
+where
+    T: ComputePipelineInfoRequest<'a> + ?Sized,
+{
+    fn compute_pipeline_info(&self) -> &ComputePipelineInfo<'a> {
+        (**self).compute_pipeline_info()
+    }
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        (**self).pipeline_cache_info()
+    }
 }
 
 pub struct GraphicsPipelineInfo<'a> {
@@ -1899,6 +2232,54 @@ pub struct GraphicsPipelineInfo<'a> {
     pub depth_format: Option<Format>,
     pub subpass_samples: SubpassSampleInfo,
     pub subpass_id: u8,
+}
+
+pub struct CachedGraphicsPipelineInfo<'a> {
+    pub info: GraphicsPipelineInfo<'a>,
+    pub cache: PipelineCacheInfo,
+}
+
+pub trait GraphicsPipelineInfoRequest<'a> {
+    fn graphics_pipeline_info(&self) -> &GraphicsPipelineInfo<'a>;
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        None
+    }
+}
+
+impl<'a> GraphicsPipelineInfo<'a> {
+    pub fn with_cache(self, cache: PipelineCacheInfo) -> CachedGraphicsPipelineInfo<'a> {
+        CachedGraphicsPipelineInfo { info: self, cache }
+    }
+}
+
+impl<'a> GraphicsPipelineInfoRequest<'a> for GraphicsPipelineInfo<'a> {
+    fn graphics_pipeline_info(&self) -> &GraphicsPipelineInfo<'a> {
+        self
+    }
+}
+
+impl<'a> GraphicsPipelineInfoRequest<'a> for CachedGraphicsPipelineInfo<'a> {
+    fn graphics_pipeline_info(&self) -> &GraphicsPipelineInfo<'a> {
+        &self.info
+    }
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        Some(&self.cache)
+    }
+}
+
+impl<'a, T> GraphicsPipelineInfoRequest<'a> for &T
+where
+    T: GraphicsPipelineInfoRequest<'a> + ?Sized,
+{
+    fn graphics_pipeline_info(&self) -> &GraphicsPipelineInfo<'a> {
+        (**self).graphics_pipeline_info()
+    }
+
+    fn pipeline_cache_info(&self) -> Option<&PipelineCacheInfo> {
+        (**self).pipeline_cache_info()
+    }
 }
 
 impl Hash for ComputePipelineInfo<'_> {
@@ -1928,6 +2309,24 @@ impl<'a> Default for GraphicsPipelineInfo<'a> {
             subpass_id: 0,
         }
     }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum WindowMode {
+    #[default]
+    Windowed = 0,
+    BorderlessFullscreen = 1,
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "dashi-serde", derive(Serialize, Deserialize))]
+pub enum MonitorSelection {
+    #[default]
+    SystemDefault = 0,
+    Primary = 1,
 }
 
 #[derive(Debug, Clone)]
@@ -1961,6 +2360,10 @@ pub struct DisplayInfo {
     pub window: WindowInfo,
     pub vsync: bool,
     pub buffering: WindowBuffering,
+    #[cfg_attr(feature = "dashi-serde", serde(default))]
+    pub window_mode: WindowMode,
+    #[cfg_attr(feature = "dashi-serde", serde(default))]
+    pub monitor_selection: MonitorSelection,
 }
 
 impl Hash for DisplayInfo {
@@ -1968,6 +2371,8 @@ impl Hash for DisplayInfo {
         self.window.hash(state);
         self.vsync.hash(state);
         self.buffering.hash(state);
+        self.window_mode.hash(state);
+        self.monitor_selection.hash(state);
     }
 }
 
@@ -1977,6 +2382,8 @@ impl Default for DisplayInfo {
             window: Default::default(),
             vsync: true,
             buffering: WindowBuffering::Double,
+            window_mode: WindowMode::Windowed,
+            monitor_selection: MonitorSelection::SystemDefault,
         }
     }
 }

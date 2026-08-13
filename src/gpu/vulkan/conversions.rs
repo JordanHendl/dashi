@@ -203,6 +203,7 @@ pub(super) fn convert_rect2d_to_vulkan(rect: Rect2D) -> vk::Rect2D {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn convert_barrier_point_vk(pt: BarrierPoint) -> vk::PipelineStageFlags {
     match pt {
         BarrierPoint::DrawEnd => vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
@@ -215,6 +216,7 @@ pub(super) fn convert_barrier_point_vk(pt: BarrierPoint) -> vk::PipelineStageFla
 pub(super) fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
     match fmt {
         Format::RGB8 => vk::Format::R8G8B8_SRGB,
+        Format::RGBA16F => vk::Format::R16G16B16A16_SFLOAT,
         Format::RGBA32F => vk::Format::R32G32B32A32_SFLOAT,
         Format::RGBA8 => vk::Format::R8G8B8A8_SRGB,
         Format::BGRA8 => vk::Format::B8G8R8A8_SRGB,
@@ -229,6 +231,7 @@ pub(super) fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
 pub(super) fn vk_to_lib_image_format(fmt: vk::Format) -> Result<Format, GPUError> {
     match fmt {
         vk::Format::R8G8B8_SRGB => Ok(Format::RGB8),
+        vk::Format::R16G16B16A16_SFLOAT => Ok(Format::RGBA16F),
         vk::Format::R32G32B32A32_SFLOAT => Ok(Format::RGBA32F),
         vk::Format::R8G8B8A8_SRGB => Ok(Format::RGBA8),
         vk::Format::B8G8R8A8_SRGB => Ok(Format::BGRA8),
@@ -247,6 +250,7 @@ pub fn channel_count(fmt: &Format) -> u32 {
         | Format::BGRA8Unorm
         | Format::RGBA8
         | Format::RGBA8Unorm
+        | Format::RGBA16F
         | Format::RGBA32F => 4,
         Format::D24S8 => 4,
         Format::R8Sint | Format::R8Uint => 1,
@@ -263,6 +267,7 @@ pub fn bytes_per_channel(fmt: &Format) -> u32 {
         | Format::RGBA8Unorm
         | Format::R8Sint
         | Format::R8Uint => 1,
+        Format::RGBA16F => 2,
         Format::RGBA32F => 4,
         Format::D24S8 => 3,
     }

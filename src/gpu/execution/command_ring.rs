@@ -71,30 +71,15 @@ impl CommandRing {
     where
         T: FnMut(&mut CommandQueue),
     {
-        let trace = std::env::var_os("MESHI_TRACE_COMMAND_RING").is_some();
-        let slot = self.curr as usize;
-        let mut wait_ms = 0.0;
         if let Some(fence) = self.fences[self.curr as usize].as_mut() {
-            let wait_start = std::time::Instant::now();
             unsafe {
                 self.ctx.as_mut().wait_fence(fence.clone())?;
             }
-            wait_ms = wait_start.elapsed().as_secs_f64() * 1000.0;
             self.fences[self.curr as usize] = None;
         }
 
-        let reset_start = std::time::Instant::now();
         self.cmds[self.curr as usize].reset()?;
-        let reset_ms = reset_start.elapsed().as_secs_f64() * 1000.0;
-        let record_start = std::time::Instant::now();
         record_func(&mut self.cmds[self.curr as usize]);
-        let record_ms = record_start.elapsed().as_secs_f64() * 1000.0;
-        if trace {
-            eprintln!(
-                "[meshi-command-ring] slot={} wait_ms={:.3} reset_ms={:.3} record_ms={:.3}",
-                slot, wait_ms, reset_ms, record_ms
-            );
-        }
         Ok(())
     }
 
@@ -111,6 +96,24 @@ impl CommandRing {
         self.fences[self.curr as usize] = Some(fence);
         self.advance();
         Ok(fence)
+    }
+
+    /// Returns whether the slot can be reused without blocking. If the slot fence has already
+    /// completed, this clears it and reports the slot as available.
+    pub fn slot_available(&mut self, idx: usize) -> Result<bool> {
+        if idx >= self.fences.len() {
+            return Ok(false);
+        }
+
+        let Some(fence) = self.fences[idx].clone() else {
+            return Ok(true);
+        };
+
+        let signaled = unsafe { self.ctx.as_mut().poll_fence(fence)? };
+        if signaled {
+            self.fences[idx] = None;
+        }
+        Ok(signaled)
     }
 
     /// Poll a single in-flight slot and clear its fence when the GPU work completes.
