@@ -19,20 +19,31 @@ jobs:
           override: true
           profile: minimal
           cache: true
-      - name: Install llvmpipe Vulkan driver
+      - name: Install llvmpipe Vulkan driver and X11 test runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers xvfb x11-xserver-utils
       - name: Run tests
         run: |
           set -euo pipefail
           cargo test --all --locked | tee test-results.txt
+      - name: Run borderless-primary X11 integration test
+        run: |
+          set -euo pipefail
+          xvfb-run -a -s "-screen 0 1920x1080x24" sh -c '
+            xrandr --output screen --primary
+            WINIT_UNIX_BACKEND=x11 cargo test --locked --test winit_window_controls \
+              borderless_primary_uses_primary_physical_extent_without_exclusive_mode \
+              -- --ignored --exact --nocapture
+          ' | tee x11-test-results.txt
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: test-results.txt
+          path: |
+            test-results.txt
+            x11-test-results.txt
 
   windows-check:
     runs-on: windows-latest

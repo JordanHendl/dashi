@@ -1,28 +1,38 @@
 #![cfg(all(
-    target_os = "windows",
+    any(target_os = "windows", target_os = "linux"),
     feature = "dashi-winit",
     not(feature = "dashi-openxr")
 ))]
 
+#[cfg(target_os = "windows")]
 mod common;
 
+#[cfg(target_os = "windows")]
 use common::ValidationContext;
-use dashi::{ContextInfo, DisplayBuilder, DisplayStatus, MonitorSelection, WindowMode};
+use dashi::{Context, ContextInfo, DisplayBuilder, DisplayStatus, MonitorSelection, WindowMode};
+#[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use serial_test::serial;
+#[cfg(target_os = "windows")]
 use std::mem::size_of;
+#[cfg(target_os = "windows")]
 use std::thread;
+#[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::RECT;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, ShowWindowAsync, GWL_STYLE, MONITORINFOF_PRIMARY, SW_RESTORE,
     WS_CAPTION, WS_THICKFRAME,
 };
 use winit::window::Fullscreen;
 
+#[cfg(target_os = "windows")]
 fn wait_for_status<F>(
     ctx: &mut ValidationContext,
     display: &mut dashi::Display,
@@ -48,6 +58,7 @@ where
     }
 }
 
+#[cfg(target_os = "windows")]
 fn hwnd_from_window(window: &winit::window::Window) -> isize {
     match window.raw_window_handle() {
         RawWindowHandle::Win32(handle) => handle.hwnd as isize,
@@ -55,6 +66,7 @@ fn hwnd_from_window(window: &winit::window::Window) -> isize {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn rect_bounds(rect: RECT) -> [i32; 4] {
     [rect.left, rect.top, rect.right, rect.bottom]
 }
@@ -62,6 +74,7 @@ fn rect_bounds(rect: RECT) -> [i32; 4] {
 #[test]
 #[ignore]
 #[serial]
+#[cfg(target_os = "windows")]
 fn prepare_display_handles_resize_and_minimize() {
     let mut ctx = ValidationContext::windowed(&ContextInfo::default()).expect("windowed context");
     let mut display = DisplayBuilder::new()
@@ -113,20 +126,35 @@ fn prepare_display_handles_resize_and_minimize() {
 #[ignore]
 #[serial]
 fn borderless_primary_uses_primary_physical_extent_without_exclusive_mode() {
-    let mut ctx = ValidationContext::windowed(&ContextInfo::default()).expect("windowed context");
+    #[cfg(target_os = "windows")]
+    {
+        let mut ctx =
+            ValidationContext::windowed(&ContextInfo::default()).expect("windowed context");
+        assert_borderless_primary_extent(&mut ctx);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut ctx = Context::new(&ContextInfo::default()).expect("windowed context");
+        assert_borderless_primary_extent(&mut ctx);
+        ctx.destroy();
+    }
+}
+
+fn assert_borderless_primary_extent(ctx: &mut Context) {
     let mut display = DisplayBuilder::new()
         .title("borderless_primary")
         .size(320, 180)
         .resizable(true)
         .window_mode(WindowMode::BorderlessFullscreen)
         .monitor_selection(MonitorSelection::Primary)
-        .build(&mut ctx)
+        .build(ctx)
         .expect("borderless primary display");
 
     let window = display.winit_window();
     let primary = window
         .primary_monitor()
-        .expect("Windows should identify a primary monitor");
+        .expect("the window system should identify a primary monitor");
     let primary_size = primary.size();
     let physical_extent = [primary_size.width, primary_size.height];
     assert_ne!(physical_extent, [320, 180]);
@@ -140,64 +168,69 @@ fn borderless_primary_uses_primary_physical_extent_without_exclusive_mode() {
         Some(Fullscreen::Borderless(Some(_)))
     ));
 
-    let hwnd = hwnd_from_window(window);
-    let style = unsafe { GetWindowLongPtrW(hwnd as _, GWL_STYLE) } as u32;
-    assert_eq!(
-        style & WS_CAPTION,
-        0,
-        "borderless window must not have a caption"
-    );
-    assert_eq!(
-        style & WS_THICKFRAME,
-        0,
-        "borderless window must not have a resize border"
-    );
-
-    let monitor = unsafe { MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTONULL) };
-    assert!(!monitor.is_null(), "borderless window must be on a monitor");
-    let mut monitor_info = MONITORINFO {
-        cbSize: size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
-    assert_ne!(
-        unsafe { GetMonitorInfoW(monitor, &mut monitor_info) },
-        0,
-        "primary monitor information must be queryable"
-    );
-    assert_ne!(
-        monitor_info.dwFlags & MONITORINFOF_PRIMARY,
-        0,
-        "borderless window must use the operating system primary monitor"
-    );
-
-    let mut window_rect = RECT::default();
-    assert_ne!(
-        unsafe { GetWindowRect(hwnd as _, &mut window_rect) },
-        0,
-        "borderless window bounds must be queryable"
-    );
-    let window_bounds = rect_bounds(window_rect);
-    let monitor_bounds = rect_bounds(monitor_info.rcMonitor);
-    let work_bounds = rect_bounds(monitor_info.rcWork);
-    assert_eq!(
-        window_bounds, monitor_bounds,
-        "borderless window must cover the monitor's complete physical bounds"
-    );
-    if monitor_bounds != work_bounds {
-        assert_ne!(
-            window_bounds, work_bounds,
-            "borderless window must include the taskbar area"
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = hwnd_from_window(window);
+        let style = unsafe { GetWindowLongPtrW(hwnd as _, GWL_STYLE) } as u32;
+        assert_eq!(
+            style & WS_CAPTION,
+            0,
+            "borderless window must not have a caption"
         );
+        assert_eq!(
+            style & WS_THICKFRAME,
+            0,
+            "borderless window must not have a resize border"
+        );
+
+        let monitor = unsafe { MonitorFromWindow(hwnd as _, MONITOR_DEFAULTTONULL) };
+        assert!(!monitor.is_null(), "borderless window must be on a monitor");
+        let mut monitor_info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        assert_ne!(
+            unsafe { GetMonitorInfoW(monitor, &mut monitor_info) },
+            0,
+            "primary monitor information must be queryable"
+        );
+        assert_ne!(
+            monitor_info.dwFlags & MONITORINFOF_PRIMARY,
+            0,
+            "borderless window must use the operating system primary monitor"
+        );
+
+        let mut window_rect = RECT::default();
+        assert_ne!(
+            unsafe { GetWindowRect(hwnd as _, &mut window_rect) },
+            0,
+            "borderless window bounds must be queryable"
+        );
+        let window_bounds = rect_bounds(window_rect);
+        let monitor_bounds = rect_bounds(monitor_info.rcMonitor);
+        let work_bounds = rect_bounds(monitor_info.rcWork);
+        assert_eq!(
+            window_bounds, monitor_bounds,
+            "borderless window must cover the monitor's complete physical bounds"
+        );
+        if monitor_bounds != work_bounds {
+            assert_ne!(
+                window_bounds, work_bounds,
+                "borderless window must include the taskbar area"
+            );
+        }
     }
 
     let status = ctx
         .prepare_display(&mut display)
         .expect("prepare borderless display");
-    assert!(matches!(
+    assert_eq!(
         status,
-        DisplayStatus::Ready { size } | DisplayStatus::Resized { size }
-            if size == physical_extent
-    ));
+        DisplayStatus::Ready {
+            size: physical_extent
+        },
+        "the initial swapchain must already match the primary monitor extent"
+    );
 
     ctx.destroy_display(display);
 }
