@@ -542,6 +542,8 @@ pub struct ContextFeatures {
     pub update_after_bind: bool,
     /// Indicates support for partially bound descriptor arrays.
     pub partially_bound: bool,
+    /// Indicates that indexed indirect draws may use a non-zero first instance.
+    pub draw_indirect_first_instance: bool,
 }
 
 #[cfg(not(feature = "webgpu"))]

@@ -467,6 +467,7 @@ pub struct VulkanContext {
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
     pub(super) descriptor_indexing_features: vk::PhysicalDeviceDescriptorIndexingFeatures,
+    pub(super) enabled_features: vk::PhysicalDeviceFeatures,
     pub(super) profiles: ContextProfiles,
     pub(super) gfx_pool: CommandPool,
     pub(super) compute_pool: Option<CommandPool>,
@@ -611,6 +612,20 @@ fn pipeline_cache_file_name(
     )
 }
 
+fn select_enabled_core_features(
+    supported: vk::PhysicalDeviceFeatures,
+    enable_bindless_profile: bool,
+) -> vk::PhysicalDeviceFeatures {
+    let mut features = vk::PhysicalDeviceFeatures::builder()
+        .shader_clip_distance(true)
+        .multi_draw_indirect(true)
+        .draw_indirect_first_instance(supported.draw_indirect_first_instance == vk::TRUE);
+    if enable_bindless_profile && supported.fragment_stores_and_atomics == vk::TRUE {
+        features = features.fragment_stores_and_atomics(true);
+    }
+    features.build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,6 +683,20 @@ mod tests {
         let second = pipeline_cache_file_name("graphics:main", 1, 2, 4, &uuid);
         assert_ne!(first, second);
         assert!(first.ends_with(".vkpc"));
+    }
+
+    #[test]
+    fn indirect_first_instance_is_enabled_only_when_supported() {
+        let unsupported =
+            select_enabled_core_features(vk::PhysicalDeviceFeatures::default(), false);
+        assert_eq!(unsupported.draw_indirect_first_instance, vk::FALSE);
+
+        let supported = vk::PhysicalDeviceFeatures {
+            draw_indirect_first_instance: vk::TRUE,
+            ..Default::default()
+        };
+        let enabled = select_enabled_core_features(supported, false);
+        assert_eq!(enabled.draw_indirect_first_instance, vk::TRUE);
     }
 }
 
@@ -791,6 +820,7 @@ impl VulkanContext {
             ash::Device,
             ash::vk::PhysicalDeviceProperties,
             vk::PhysicalDeviceDescriptorIndexingFeatures,
+            vk::PhysicalDeviceFeatures,
             vk_mem::Allocator,
             Queue,
             Option<Queue>,
@@ -930,13 +960,7 @@ impl VulkanContext {
 
         let supported_features = unsafe { instance.get_physical_device_features(pdevice) };
         let enable_bindless_profile = info.profiles.contains(ContextProfiles::BINDLESS);
-        let mut features = vk::PhysicalDeviceFeatures::builder()
-            .shader_clip_distance(true)
-            .multi_draw_indirect(true);
-        if enable_bindless_profile && supported_features.fragment_stores_and_atomics == vk::TRUE {
-            features = features.fragment_stores_and_atomics(true);
-        }
-        let features = features.build();
+        let features = select_enabled_core_features(supported_features, enable_bindless_profile);
         let mut enabled_descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
         let mut enabled_vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
@@ -1240,6 +1264,7 @@ impl VulkanContext {
             device,
             device_prop,
             enabled_descriptor_indexing,
+            features,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1272,6 +1297,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            enabled_features,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1356,6 +1382,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            enabled_features,
             profiles: info.profiles,
             gfx_pool,
             compute_pool,
@@ -1427,6 +1454,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            enabled_features,
             allocator,
             gfx_queue,
             compute_queue,
@@ -1516,6 +1544,7 @@ impl VulkanContext {
             device,
             properties,
             descriptor_indexing_features,
+            enabled_features,
             profiles: info.profiles,
             gfx_pool,
             compute_pool,
@@ -1593,6 +1622,8 @@ impl VulkanContext {
         ContextFeatures {
             update_after_bind,
             partially_bound,
+            draw_indirect_first_instance: self.enabled_features.draw_indirect_first_instance
+                == vk::TRUE,
         }
     }
 
