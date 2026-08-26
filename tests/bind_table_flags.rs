@@ -114,3 +114,78 @@ fn bind_table_updates_validate_variable_types() {
     ctx.destroy_dynamic_allocator(allocator);
     ctx.destroy_dynamic_allocator(allocator_b);
 }
+
+#[test]
+#[serial]
+fn partial_bind_table_updates_preserve_untouched_buffer_requirements() {
+    let mut ctx = ValidationContext::headless(&Default::default()).unwrap();
+
+    let layout = ctx
+        .make_bind_table_layout(&BindTableLayoutInfo {
+            debug_name: "partial_bind_table_updates",
+            shaders: &[ShaderInfo {
+                shader_type: ShaderType::Compute,
+                variables: &[BindTableVariable {
+                    var_type: BindTableVariableType::Storage,
+                    binding: 0,
+                    count: 2,
+                }],
+            }],
+        })
+        .unwrap();
+    let make_buffer = |ctx: &mut ValidationContext, name| {
+        ctx.make_buffer(&BufferInfo {
+            debug_name: name,
+            byte_size: 64,
+            visibility: MemoryVisibility::Gpu,
+            usage: BufferUsage::STORAGE,
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    let first = make_buffer(&mut ctx, "partial_bind_table_updates_first");
+    let replaced = make_buffer(&mut ctx, "partial_bind_table_updates_replaced");
+    let replacement = make_buffer(&mut ctx, "partial_bind_table_updates_replacement");
+
+    let table = ctx
+        .make_bind_table(&BindTableInfo {
+            debug_name: "partial_bind_table_updates",
+            layout,
+            bindings: &[IndexedBindingInfo {
+                resources: &[
+                    IndexedResource {
+                        resource: ShaderResource::StorageBuffer(BufferView::new(first)),
+                        slot: 0,
+                    },
+                    IndexedResource {
+                        resource: ShaderResource::StorageBuffer(BufferView::new(replaced)),
+                        slot: 1,
+                    },
+                ],
+                binding: 0,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+
+    ctx.update_bind_table(&BindTableUpdateInfo {
+        table,
+        bindings: &[IndexedBindingInfo {
+            resources: &[IndexedResource {
+                resource: ShaderResource::StorageBuffer(BufferView::new(replacement)),
+                slot: 1,
+            }],
+            binding: 0,
+        }],
+    })
+    .unwrap();
+
+    let requirements = ctx.bind_table_buffer_requirements(table, ShaderStageMask::COMPUTE);
+    assert!(requirements.iter().any(|item| item.buffer == first));
+    assert!(requirements.iter().any(|item| item.buffer == replacement));
+    assert!(!requirements.iter().any(|item| item.buffer == replaced));
+
+    ctx.destroy_buffer(first);
+    ctx.destroy_buffer(replaced);
+    ctx.destroy_buffer(replacement);
+}

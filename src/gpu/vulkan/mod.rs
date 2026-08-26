@@ -3399,28 +3399,37 @@ impl VulkanContext {
         }
     }
 
-    fn track_buffer_requirement(
-        tracked: &mut Vec<BoundBufferRequirement>,
+    fn buffer_requirement(
         buffer: Handle<Buffer>,
         requirement: NormalizedBinding,
-    ) {
+    ) -> BoundBufferRequirement {
         let read_usage =
             Self::usage_bits_for_variable(requirement.var_type, ShaderResourceAccess::READ);
         let write_usage =
             Self::usage_bits_for_variable(requirement.var_type, ShaderResourceAccess::WRITE);
-        if let Some(existing) = tracked.iter_mut().find(|item| item.buffer == buffer) {
-            existing.read_usage |= read_usage;
-            existing.write_usage |= write_usage;
+        BoundBufferRequirement {
+            buffer,
+            read_usage,
+            write_usage,
+            read_stages: requirement.read_stages,
+            write_stages: requirement.write_stages,
+        }
+    }
+
+    fn merge_buffer_requirement(
+        tracked: &mut Vec<BoundBufferRequirement>,
+        requirement: BoundBufferRequirement,
+    ) {
+        if let Some(existing) = tracked
+            .iter_mut()
+            .find(|item| item.buffer == requirement.buffer)
+        {
+            existing.read_usage |= requirement.read_usage;
+            existing.write_usage |= requirement.write_usage;
             existing.read_stages |= requirement.read_stages;
             existing.write_stages |= requirement.write_stages;
         } else {
-            tracked.push(BoundBufferRequirement {
-                buffer,
-                read_usage,
-                write_usage,
-                read_stages: requirement.read_stages,
-                write_stages: requirement.write_stages,
-            });
+            tracked.push(requirement);
         }
     }
 
@@ -3554,7 +3563,7 @@ impl VulkanContext {
                 reason: "bind table layout has conflicting bindings".to_string(),
             });
         };
-        let mut tracked_buffer_states = Vec::new();
+        let mut bound_buffer_updates = Vec::new();
         let total_resources: usize = bindings.iter().map(|binding| binding.resources.len()).sum();
         let mut write_descriptor_sets = Vec::with_capacity(total_resources);
         let mut buffer_infos = Vec::with_capacity(total_resources);
@@ -3604,15 +3613,12 @@ impl VulkanContext {
                     });
                 }
 
+                let bound_buffer = Self::buffer_from_resource(&res.resource)
+                    .map(|buffer| Self::buffer_requirement(buffer, normalized_requirement));
+                bound_buffer_updates.push(((binding_info.binding, res.slot), bound_buffer));
+
                 match &res.resource {
                     ShaderResource::Buffer(view) => {
-                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
-                            Self::track_buffer_requirement(
-                                &mut tracked_buffer_states,
-                                buffer,
-                                normalized_requirement,
-                            );
-                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
                         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -3709,13 +3715,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::Dynamic(alloc) => {
-                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
-                            Self::track_buffer_requirement(
-                                &mut tracked_buffer_states,
-                                buffer,
-                                normalized_requirement,
-                            );
-                        }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
 
                         let buffer_info = vk::DescriptorBufferInfo::builder()
@@ -3737,13 +3736,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::DynamicStorage(alloc) => {
-                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
-                            Self::track_buffer_requirement(
-                                &mut tracked_buffer_states,
-                                buffer,
-                                normalized_requirement,
-                            );
-                        }
                         let buffer = self.buffers.get_ref(alloc.pool).unwrap();
                         let buffer_info = vk::DescriptorBufferInfo::builder()
                             .buffer(buffer.buf)
@@ -3764,13 +3756,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::StorageBuffer(view) => {
-                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
-                            Self::track_buffer_requirement(
-                                &mut tracked_buffer_states,
-                                buffer,
-                                normalized_requirement,
-                            );
-                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
                         let buffer_size = buffer.size as u64;
                         let available = buffer_size.saturating_sub(view.offset.min(buffer_size));
@@ -3799,13 +3784,6 @@ impl VulkanContext {
                         write_descriptor_sets.push(write_descriptor_set);
                     }
                     ShaderResource::ConstBuffer(view) => {
-                        if let Some(buffer) = Self::buffer_from_resource(&res.resource) {
-                            Self::track_buffer_requirement(
-                                &mut tracked_buffer_states,
-                                buffer,
-                                normalized_requirement,
-                            );
-                        }
                         let buffer = self.buffers.get_ref(view.handle).unwrap();
 
                         let size = if view.size == 0 {
@@ -3840,7 +3818,19 @@ impl VulkanContext {
 
         self.bind_tables
             .with_mut(table_handle, |table| {
-                table.buffer_states = tracked_buffer_states;
+                for (key, requirement) in bound_buffer_updates {
+                    if let Some(requirement) = requirement {
+                        table.bound_buffers.insert(key, requirement);
+                    } else {
+                        table.bound_buffers.remove(&key);
+                    }
+                }
+
+                let mut buffer_states = Vec::new();
+                for requirement in table.bound_buffers.values() {
+                    Self::merge_buffer_requirement(&mut buffer_states, *requirement);
+                }
+                table.buffer_states = buffer_states;
             })
             .unwrap();
 
@@ -3869,6 +3859,7 @@ impl VulkanContext {
             set: descriptor_set,
             set_id: info.set,
             layout: info.layout,
+            bound_buffers: HashMap::new(),
             buffer_states: Vec::new(),
         };
 

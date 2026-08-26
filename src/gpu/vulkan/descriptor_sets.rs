@@ -26,6 +26,7 @@ pub struct BindTable {
     pub(super) set: vk::DescriptorSet,
     pub(super) set_id: u32,
     pub(super) layout: Handle<BindTableLayout>,
+    pub(super) bound_buffers: HashMap<(u32, u32), BoundBufferRequirement>,
     pub(super) buffer_states: Vec<BoundBufferRequirement>,
 }
 
