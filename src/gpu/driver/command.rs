@@ -135,9 +135,9 @@ impl Scope {
 pub struct BeginRenderPass {
     pub viewport: Viewport,
     pub render_pass: Handle<RenderPass>,
-    pub color_attachments: [Option<ImageView>; 4],
+    pub color_attachments: [Option<ImageView>; 8],
     pub depth_attachment: Option<ImageView>,
-    pub clear_values: [Option<ClearValue>; 4],
+    pub clear_values: [Option<ClearValue>; 8],
     pub depth_clear: Option<ClearValue>,
 }
 

@@ -2040,7 +2040,7 @@ impl Hash for RenderPassAttachmentInfo {
 
 #[derive(Clone, Debug, Default)]
 pub struct RenderPassSubpassTargets {
-    pub color_attachments: [Option<RenderPassAttachmentInfo>; 4],
+    pub color_attachments: [Option<RenderPassAttachmentInfo>; 8],
     pub depth_attachment: Option<RenderPassAttachmentInfo>,
 }
 

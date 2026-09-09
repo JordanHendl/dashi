@@ -185,8 +185,33 @@ impl From<SamplerInfo> for vk::SamplerCreateInfo {
                 vk::FALSE
             },
             mipmap_mode: info.mipmap_mode.into(),
+            // Normalized samplers must be able to address every mip in the view.
+            // Vulkan requires an exact zero LOD range for unnormalized coordinates.
+            max_lod: if info.unnormalized_coordinates { 0.0 } else { vk::LOD_CLAMP_NONE },
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod sampler_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_sampler_does_not_clamp_mip_selection_to_zero() {
+        let sampler: vk::SamplerCreateInfo = SamplerInfo::default().into();
+        assert_eq!(sampler.min_lod, 0.0);
+        assert_eq!(sampler.max_lod, vk::LOD_CLAMP_NONE);
+    }
+
+    #[test]
+    fn unnormalized_sampler_retains_required_zero_lod_range() {
+        let sampler: vk::SamplerCreateInfo = SamplerInfo {
+            unnormalized_coordinates: true,
+            ..Default::default()
+        }.into();
+        assert_eq!(sampler.min_lod, 0.0);
+        assert_eq!(sampler.max_lod, 0.0);
     }
 }
 

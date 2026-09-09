@@ -619,6 +619,7 @@ fn select_enabled_core_features(
     let mut features = vk::PhysicalDeviceFeatures::builder()
         .shader_clip_distance(true)
         .multi_draw_indirect(true)
+        .sample_rate_shading(supported.sample_rate_shading == vk::TRUE)
         .draw_indirect_first_instance(supported.draw_indirect_first_instance == vk::TRUE);
     if enable_bindless_profile && supported.fragment_stores_and_atomics == vk::TRUE {
         features = features.fragment_stores_and_atomics(true);
@@ -697,6 +698,13 @@ mod tests {
         };
         let enabled = select_enabled_core_features(supported, false);
         assert_eq!(enabled.draw_indirect_first_instance, vk::TRUE);
+    }
+
+    #[test]
+    fn sample_rate_shading_is_enabled_only_when_supported() {
+        assert_eq!(select_enabled_core_features(vk::PhysicalDeviceFeatures::default(), false).sample_rate_shading, vk::FALSE);
+        let supported = vk::PhysicalDeviceFeatures { sample_rate_shading: vk::TRUE, ..Default::default() };
+        assert_eq!(select_enabled_core_features(supported, false).sample_rate_shading, vk::TRUE);
     }
 }
 
