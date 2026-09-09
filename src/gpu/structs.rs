@@ -544,6 +544,8 @@ pub struct ContextFeatures {
     pub partially_bound: bool,
     /// Indicates that indexed indirect draws may use a non-zero first instance.
     pub draw_indirect_first_instance: bool,
+    /// Fragment shaders may use sample-rate inputs such as SampleId.
+    pub sample_rate_shading: bool,
 }
 
 #[cfg(not(feature = "webgpu"))]

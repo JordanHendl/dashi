@@ -1628,6 +1628,7 @@ impl VulkanContext {
         let partially_bound = descriptor_features.descriptor_binding_partially_bound == vk::TRUE;
 
         ContextFeatures {
+            sample_rate_shading: self.enabled_features.sample_rate_shading == vk::TRUE,
             update_after_bind,
             partially_bound,
             draw_indirect_first_instance: self.enabled_features.draw_indirect_first_instance
