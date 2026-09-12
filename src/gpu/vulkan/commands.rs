@@ -475,6 +475,12 @@ impl CommandQueue {
             let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
 
             let queue = (*self.ctx).queue(self.queue_type);
+            let fence = (*self.ctx)
+                .fences
+                .get_ref(self.fence)
+                .ok_or(GPUError::SlotError())?
+                .raw;
+            (*self.ctx).device.reset_fences(&[fence])?;
             (*self.ctx).device.queue_submit(
                 queue,
                 &[vk::SubmitInfo::builder()

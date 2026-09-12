@@ -1682,7 +1682,7 @@ impl VulkanContext {
         }
     }
 
-    /// Block until `fence` signals and reset it for reuse.
+    /// Block until `fence` signals without consuming its completion state.
     ///
     /// The fence must have been obtained from [`Self::submit`]. This call
     /// ensures the associated GPU work is complete before the fence is
@@ -1694,19 +1694,14 @@ impl VulkanContext {
                 .wait_for_fences(&[fence.raw], true, std::u64::MAX)
         }?;
 
-        unsafe { self.device.reset_fences(&[fence.raw]) }?;
-
         Ok(())
     }
 
-    /// Return `true` once `fence` has signaled and reset it for reuse.
+    /// Return whether `fence` has signaled without consuming its completion state.
     pub fn poll_fence(&mut self, fence: Handle<Fence>) -> Result<bool> {
         let fence = self.fences.get_ref(fence).unwrap();
         match unsafe { self.device.get_fence_status(fence.raw) } {
-            Ok(true) => {
-                unsafe { self.device.reset_fences(&[fence.raw]) }?;
-                Ok(true)
-            }
+            Ok(true) => Ok(true),
             Ok(false) => Ok(false),
             Err(err) => Err(err.into()),
         }
@@ -1988,6 +1983,10 @@ impl VulkanContext {
         let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
         let queue = self.queue(cmd.queue_type);
         unsafe {
+            // A fence can have several observers (for example a command ring and
+            // a compute readback). Only the next submission consumes its signal.
+            self.device
+                .reset_fences(&[self.fences.get_ref(cmd.fence).unwrap().raw])?;
             self.device.queue_submit(
                 queue,
                 &[vk::SubmitInfo::builder()
