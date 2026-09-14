@@ -394,7 +394,13 @@ pub struct SamplerInfo {
     pub border_color: BorderColor,
     pub unnormalized_coordinates: bool,
     pub compare_enable: bool,
+    #[cfg_attr(feature = "dashi-serde", serde(default = "default_sampler_compare_op"))]
+    pub compare_op: CompareOp,
     pub mipmap_mode: SamplerMipmapMode,
+}
+
+fn default_sampler_compare_op() -> CompareOp {
+    CompareOp::LessOrEqual
 }
 
 // Implementing Default for SamplerInfo
@@ -411,6 +417,7 @@ impl Default for SamplerInfo {
             border_color: BorderColor::OpaqueBlack, // Default to opaque black border color
             unnormalized_coordinates: false, // Use normalized texture coordinates by default
             compare_enable: false, // Disable comparison by default
+            compare_op: default_sampler_compare_op(),
             mipmap_mode: SamplerMipmapMode::Linear, // Default to Linear mipmap filtering
         }
     }

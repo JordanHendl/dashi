@@ -185,6 +185,7 @@ impl From<SamplerInfo> for vk::SamplerCreateInfo {
                 vk::FALSE
             },
             mipmap_mode: info.mipmap_mode.into(),
+            compare_op: info.compare_op.into(),
             // Normalized samplers must be able to address every mip in the view.
             // Vulkan requires an exact zero LOD range for unnormalized coordinates.
             max_lod: if info.unnormalized_coordinates { 0.0 } else { vk::LOD_CLAMP_NONE },
@@ -196,6 +197,31 @@ impl From<SamplerInfo> for vk::SamplerCreateInfo {
 #[cfg(test)]
 mod sampler_tests {
     use super::*;
+
+    #[test]
+    fn comparison_sampler_preserves_operation_and_enablement() {
+        for op in [CompareOp::LessOrEqual, CompareOp::Greater, CompareOp::Always] {
+            let info: vk::SamplerCreateInfo = SamplerInfo {
+                compare_enable: true,
+                compare_op: op,
+                ..Default::default()
+            }.into();
+            assert_eq!(info.compare_enable, vk::TRUE);
+            assert_eq!(info.compare_op, vk::CompareOp::from(op));
+        }
+        let ordinary: vk::SamplerCreateInfo = SamplerInfo::default().into();
+        assert_eq!(ordinary.compare_enable, vk::FALSE);
+    }
+
+    #[cfg(feature = "dashi-serde")]
+    #[test]
+    fn legacy_sampler_settings_supply_less_or_equal_comparison() {
+        let mut value = serde_json::to_value(SamplerInfo::default()).unwrap();
+        value.as_object_mut().unwrap().remove("compare_op");
+        let info: SamplerInfo = serde_json::from_value(value).unwrap();
+        let vk_info: vk::SamplerCreateInfo = info.into();
+        assert_eq!(vk_info.compare_op, vk::CompareOp::LESS_OR_EQUAL);
+    }
 
     #[test]
     fn normalized_sampler_does_not_clamp_mip_selection_to_zero() {
