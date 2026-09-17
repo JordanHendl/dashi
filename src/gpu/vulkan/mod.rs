@@ -2573,8 +2573,8 @@ impl VulkanContext {
 
     /// Return the elapsed GPU time for `frame` in milliseconds.
     ///
-    /// Only valid once the associated command list has been submitted and
-    /// the GPU has finished executing it (e.g. by waiting on the fence).
+    /// Poll without waiting for GPU execution. Returns `None` until both queries
+    /// are available. Callers requiring a result must wait for their submission first.
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         if !self.gpu_timers_enabled() {
             return None;
