@@ -2434,8 +2434,14 @@ impl CommandSink for CommandQueue {
 
     fn gpu_timer_begin(&mut self, cmd: &crate::gpu::driver::command::GpuTimerBegin) -> Result<()> {
         let ctx = self.ctx;
-        if !ctx.is_null() {
-            unsafe { (*ctx).gpu_timer_begin(self, cmd.frame as usize) };
+        if !ctx.is_null() && unsafe { (*ctx).gpu_timers_enabled() } {
+            // CommandTape resets these queries before executing the tape. A timer
+            // may begin inside a render pass, where resetting queries is invalid.
+            unsafe {
+                if let Some(timer) = (&mut (*ctx).gpu_timers).get_mut(cmd.frame as usize) {
+                    timer.begin(&(*ctx).device, self.cmd_buf);
+                }
+            }
         }
         Ok(())
     }
