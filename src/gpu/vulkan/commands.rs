@@ -1176,7 +1176,8 @@ impl CommandSink for CommandQueue {
             )?;
             let updated_attachment_infos = attachment_infos;
             unsafe {
-                ctx.device.destroy_framebuffer(fb, None);
+                ctx.device
+                    .destroy_framebuffer(fb, ctx.allocation_callbacks.as_deref());
             }
             {
                 ctx.render_passes
@@ -1446,7 +1447,8 @@ impl CommandSink for CommandQueue {
             )?;
             let updated_attachment_infos = attachment_infos;
             unsafe {
-                ctx.device.destroy_framebuffer(fb, None);
+                ctx.device
+                    .destroy_framebuffer(fb, ctx.allocation_callbacks.as_deref());
             }
             {
                 ctx.render_passes

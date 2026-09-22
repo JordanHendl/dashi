@@ -311,7 +311,10 @@ impl VulkanContext {
         views: &mut Vec<vk::ImageView>,
     ) {
         for view in views.drain(..) {
-            unsafe { self.device.destroy_image_view(view, None) };
+            unsafe {
+                self.device
+                    .destroy_image_view(view, self.allocation_callbacks.as_deref())
+            };
         }
 
         for handle in handles.drain(..) {
@@ -327,7 +330,10 @@ impl VulkanContext {
         self.release_swapchain_images(&mut dsp.images, &mut dsp.views);
 
         if dsp.swapchain != vk::SwapchainKHR::null() {
-            unsafe { dsp.sc_loader.destroy_swapchain(dsp.swapchain, None) };
+            unsafe {
+                dsp.sc_loader
+                    .destroy_swapchain(dsp.swapchain, self.allocation_callbacks.as_deref())
+            };
             dsp.swapchain = vk::SwapchainKHR::null();
         }
 
@@ -488,7 +494,7 @@ impl VulkanContext {
                         .subresource_range(sub_range)
                         .view_type(vk::ImageViewType::TYPE_2D)
                         .build(),
-                    None,
+                    self.allocation_callbacks.as_deref(),
                 )
             } {
                 Ok(view) => view,
@@ -537,7 +543,7 @@ impl VulkanContext {
                     .pre_transform(config.pre_transform)
                     .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
                     .build(),
-                None,
+                self.allocation_callbacks.as_deref(),
             )?
         };
 
@@ -549,7 +555,9 @@ impl VulkanContext {
             Ok(semaphores) => semaphores,
             Err(err) => {
                 self.release_swapchain_images(&mut images, &mut views);
-                unsafe { sc_loader.destroy_swapchain(swapchain, None) };
+                unsafe {
+                    sc_loader.destroy_swapchain(swapchain, self.allocation_callbacks.as_deref())
+                };
                 return Err(err);
             }
         };
@@ -566,7 +574,9 @@ impl VulkanContext {
                         self.destroy_fence(fence);
                     }
                     self.release_swapchain_images(&mut images, &mut views);
-                    unsafe { sc_loader.destroy_swapchain(swapchain, None) };
+                    unsafe {
+                        sc_loader.destroy_swapchain(swapchain, self.allocation_callbacks.as_deref())
+                    };
                     return Err(err);
                 }
             }
@@ -580,7 +590,7 @@ impl VulkanContext {
                 self.destroy_fence(fence);
             }
             self.release_swapchain_images(&mut images, &mut views);
-            unsafe { sc_loader.destroy_swapchain(swapchain, None) };
+            unsafe { sc_loader.destroy_swapchain(swapchain, self.allocation_callbacks.as_deref()) };
             return Err(err);
         }
 
@@ -633,7 +643,10 @@ impl VulkanContext {
     /// - The context must still be alive.
     pub fn destroy_display(&mut self, mut dsp: Display) {
         self.destroy_swapchain_resources(&mut dsp);
-        unsafe { dsp.loader.destroy_surface(dsp.surface, None) };
+        unsafe {
+            dsp.loader
+                .destroy_surface(dsp.surface, self.allocation_callbacks.as_deref())
+        };
     }
 
     #[cfg(feature = "dashi-openxr")]
@@ -707,8 +720,12 @@ impl VulkanContext {
                 mode: info.window_mode,
             });
         }
-        let (window, surface) =
-            minifb_window::create_window(&self.entry, &self.instance, &info.window)?;
+        let (window, surface) = minifb_window::create_window(
+            &self.entry,
+            &self.instance,
+            &info.window,
+            self.allocation_callbacks.as_deref(),
+        )?;
         let actual_size = window.get_size();
         Ok((
             window,
@@ -730,7 +747,12 @@ impl VulkanContext {
         ),
         GPUError,
     > {
-        winit_window::create_window(&self.entry, &self.instance, info)
+        winit_window::create_window(
+            &self.entry,
+            &self.instance,
+            info,
+            self.allocation_callbacks.as_deref(),
+        )
     }
 
     #[cfg(not(feature = "dashi-openxr"))]

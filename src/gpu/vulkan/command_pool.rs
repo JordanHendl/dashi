@@ -18,6 +18,7 @@ use crate::Context;
 pub struct CommandPool {
     device: Device,
     raw: vk::CommandPool,
+    allocation_callbacks: Option<vk::AllocationCallbacks>,
     queue_type: QueueType,
     free_primary: Vec<vk::CommandBuffer>,
     free_secondary: Vec<vk::CommandBuffer>,
@@ -31,16 +32,22 @@ unsafe impl Send for CommandPool {}
 
 impl CommandPool {
     /// Create a new command pool for the specified queue type.
-    pub(super) fn new(device: &Device, family: u32, queue_type: QueueType) -> Result<Self> {
+    pub(super) fn new(
+        device: &Device,
+        family: u32,
+        queue_type: QueueType,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
+    ) -> Result<Self> {
         let ci = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(family)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .build();
-        let raw = unsafe { device.create_command_pool(&ci, None)? };
+        let raw = unsafe { device.create_command_pool(&ci, allocation_callbacks)? };
 
         Ok(Self {
             device: device.clone(),
             raw,
+            allocation_callbacks: allocation_callbacks.copied(),
             queue_type,
             free_primary: Vec::new(),
             free_secondary: Vec::new(),
@@ -117,9 +124,10 @@ impl CommandPool {
         unsafe {
             (*ctx).set_name(cmd_buf, debug_name, vk::ObjectType::COMMAND_BUFFER);
 
-            let f = self
-                .device
-                .create_fence(&vk::FenceCreateInfo::builder().build(), None)?;
+            let f = self.device.create_fence(
+                &vk::FenceCreateInfo::builder().build(),
+                self.allocation_callbacks.as_ref(),
+            )?;
             (*ctx).set_name(
                 f,
                 format!("{}.fence", debug_name).as_str(),
@@ -186,7 +194,8 @@ impl CommandPool {
     pub fn destroy(&mut self) {
         self.assert_owner();
         unsafe {
-            self.device.destroy_command_pool(self.raw, None);
+            self.device
+                .destroy_command_pool(self.raw, self.allocation_callbacks.as_ref());
         }
         self.raw = vk::CommandPool::null();
         self.free_primary.clear();

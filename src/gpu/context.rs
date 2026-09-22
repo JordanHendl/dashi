@@ -7,7 +7,7 @@ use super::execution::CommandRing;
 use crate::gpu::vulkan::Display as VulkanDisplay;
 #[cfg(feature = "webgpu")]
 use crate::gpu::webgpu::Context as WebGpuContext;
-use crate::gpu::{ContextFeatures, ContextInfo, VulkanContext};
+use crate::gpu::{ContextFeatures, ContextInfo, GpuMemoryStats, VulkanContext};
 use crate::{
     BindTable, BindTableLayout, Buffer, BufferStateRequirement, CommandQueue, ComputePipeline,
     ComputePipelineLayout, DisplayStatus, Fence, ImageView, NativeImageDescriptor, QueueType,
@@ -30,6 +30,16 @@ pub struct Context {
 
 #[cfg(any(feature = "vulkan", feature = "webgpu"))]
 impl Context {
+    /// Returns VMA allocation statistics for Vulkan contexts. Other backends
+    /// return `None` because they cannot report the same allocation scope.
+    pub fn gpu_memory_stats(&self) -> Result<Option<GpuMemoryStats>> {
+        match &self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.gpu_memory_stats().map(Some),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => Ok(None),
+        }
+    }
     /// Construct a [`Context`] with windowing support.
     pub fn new(info: &ContextInfo) -> Result<Self> {
         #[cfg(feature = "webgpu")]

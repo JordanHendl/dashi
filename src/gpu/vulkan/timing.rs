@@ -7,20 +7,27 @@ pub struct GpuTimer {
 }
 
 impl GpuTimer {
-    pub(super) fn new(device: &ash::Device) -> Result<Self, GPUError> {
+    pub(super) fn new(
+        device: &ash::Device,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
+    ) -> Result<Self, GPUError> {
         let info = vk::QueryPoolCreateInfo::builder()
             .query_count(2)
             .query_type(vk::QueryType::TIMESTAMP)
             .build();
-        let pool = unsafe { device.create_query_pool(&info, None)? };
+        let pool = unsafe { device.create_query_pool(&info, allocation_callbacks)? };
         Ok(Self {
             pool,
             state: TimerState::Uninitialized,
         })
     }
 
-    pub(super) unsafe fn destroy(&self, device: &ash::Device) {
-        device.destroy_query_pool(self.pool, None);
+    pub(super) unsafe fn destroy(
+        &self,
+        device: &ash::Device,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
+    ) {
+        device.destroy_query_pool(self.pool, allocation_callbacks);
     }
 
     pub(super) unsafe fn begin(&mut self, device: &ash::Device, cmd: vk::CommandBuffer) {

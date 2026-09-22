@@ -146,6 +146,7 @@ pub(super) fn create_window(
     entry: &Entry,
     instance: &Instance,
     info: &DisplayInfo,
+    allocation_callbacks: Option<&vk::AllocationCallbacks>,
 ) -> Result<
     (
         EventLoop<()>,
@@ -245,7 +246,8 @@ pub(super) fn create_window(
     window.request_redraw();
     let _ = window.focus_window();
 
-    let surface = unsafe { ash_window::create_surface(entry, instance, &window, None)? };
+    let surface =
+        unsafe { ash_window::create_surface(entry, instance, &window, allocation_callbacks)? };
 
     Ok((
         event_loop,

@@ -460,6 +460,16 @@ pub(super) struct Queue {
     family: u32,
 }
 
+#[derive(Default)]
+struct GpuAllocationActivity {
+    created: u64,
+    freed: u64,
+    bytes_created: u64,
+    bytes_freed: u64,
+    local_bytes: u64,
+    peak_local_bytes: u64,
+}
+
 pub struct VulkanContext {
     pub(super) entry: ash::Entry,
     pub(super) instance: ash::Instance,
@@ -473,6 +483,8 @@ pub struct VulkanContext {
     pub(super) compute_pool: Option<CommandPool>,
     pub(super) transfer_pool: Option<CommandPool>,
     pub(super) allocator: ManuallyDrop<vk_mem::Allocator>,
+    pub(super) allocation_callbacks: Option<Box<vk::AllocationCallbacks>>,
+    allocation_activity: GpuAllocationActivity,
     pub(super) gfx_queue: Queue,
     pub(super) compute_queue: Option<Queue>,
     pub(super) transfer_queue: Option<Queue>,
@@ -517,7 +529,8 @@ impl Drop for VulkanContext {
     fn drop(&mut self) {
         if let (Some(utils), Some(messenger)) = (&self.debug_utils, self.debug_messenger) {
             unsafe {
-                utils.destroy_debug_utils_messenger(messenger, None);
+                utils
+                    .destroy_debug_utils_messenger(messenger, self.allocation_callbacks.as_deref());
             }
         }
     }
@@ -702,13 +715,83 @@ mod tests {
 
     #[test]
     fn sample_rate_shading_is_enabled_only_when_supported() {
-        assert_eq!(select_enabled_core_features(vk::PhysicalDeviceFeatures::default(), false).sample_rate_shading, vk::FALSE);
-        let supported = vk::PhysicalDeviceFeatures { sample_rate_shading: vk::TRUE, ..Default::default() };
-        assert_eq!(select_enabled_core_features(supported, false).sample_rate_shading, vk::TRUE);
+        assert_eq!(
+            select_enabled_core_features(vk::PhysicalDeviceFeatures::default(), false)
+                .sample_rate_shading,
+            vk::FALSE
+        );
+        let supported = vk::PhysicalDeviceFeatures {
+            sample_rate_shading: vk::TRUE,
+            ..Default::default()
+        };
+        assert_eq!(
+            select_enabled_core_features(supported, false).sample_rate_shading,
+            vk::TRUE
+        );
     }
 }
 
 impl VulkanContext {
+    fn allocation_size_and_locality(&self, allocation: &vk_mem::Allocation) -> (u64, bool) {
+        let info = self.allocator.get_allocation_info(allocation);
+        let properties = unsafe { self.allocator.get_memory_properties() };
+        let heap_index = properties.memory_types[info.memory_type as usize].heap_index as usize;
+        let local = properties.memory_heaps[heap_index]
+            .flags
+            .contains(vk::MemoryHeapFlags::DEVICE_LOCAL);
+        (info.size, local)
+    }
+
+    fn record_gpu_allocation(&mut self, allocation: &vk_mem::Allocation) {
+        let (size, local) = self.allocation_size_and_locality(allocation);
+        let activity = &mut self.allocation_activity;
+        activity.created += 1;
+        activity.bytes_created += size;
+        if local {
+            activity.local_bytes += size;
+            activity.peak_local_bytes = activity.peak_local_bytes.max(activity.local_bytes);
+        }
+    }
+
+    fn record_gpu_free(&mut self, size: u64, local: bool) {
+        let activity = &mut self.allocation_activity;
+        activity.freed += 1;
+        activity.bytes_freed += size;
+        if local {
+            activity.local_bytes = activity.local_bytes.saturating_sub(size);
+        }
+    }
+
+    pub fn gpu_memory_stats(&self) -> Result<GpuMemoryStats> {
+        let properties = unsafe { self.allocator.get_memory_properties() };
+        let budgets = self.allocator.get_heap_budgets()?;
+        let heaps = budgets
+            .iter()
+            .enumerate()
+            .map(|(index, budget)| {
+                let heap = properties.memory_heaps[index];
+                GpuMemoryHeapStats {
+                    capacity_bytes: heap.size,
+                    device_local: heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL),
+                    allocation_count: budget.statistics.allocationCount as u64,
+                    allocation_bytes: budget.statistics.allocationBytes,
+                    block_count: budget.statistics.blockCount as u64,
+                    block_bytes: budget.statistics.blockBytes,
+                }
+            })
+            .collect();
+        let activity = &self.allocation_activity;
+        Ok(GpuMemoryStats {
+            dedicated_device: self.properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU,
+            heaps,
+            allocations_created: activity.created,
+            allocations_freed: activity.freed,
+            bytes_created: activity.bytes_created,
+            bytes_freed: activity.bytes_freed,
+            peak_device_local_bytes: activity.peak_local_bytes,
+        })
+    }
+
     fn resolved_pipeline_cache_info(
         &self,
         explicit: Option<&PipelineCacheInfo>,
@@ -742,7 +825,11 @@ impl VulkanContext {
             create_info = create_info.initial_data(data);
         }
 
-        unsafe { self.device.create_pipeline_cache(&create_info, None).ok() }
+        unsafe {
+            self.device
+                .create_pipeline_cache(&create_info, self.allocation_callbacks.as_deref())
+                .ok()
+        }
     }
 
     fn open_pipeline_cache(&self, info: Option<&PipelineCacheInfo>) -> PipelineCacheState {
@@ -811,7 +898,8 @@ impl VulkanContext {
     fn close_pipeline_cache(&self, cache: PipelineCacheState) {
         if cache.handle != vk::PipelineCache::null() {
             unsafe {
-                self.device.destroy_pipeline_cache(cache.handle, None);
+                self.device
+                    .destroy_pipeline_cache(cache.handle, self.allocation_callbacks.as_deref());
             }
         }
     }
@@ -820,6 +908,7 @@ impl VulkanContext {
         info: &ContextInfo,
         windowed: bool,
         enable_validation: bool,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
     ) -> Result<
         (
             ash::Entry,
@@ -890,7 +979,7 @@ impl VulkanContext {
                     .enabled_extension_names(&inst_exts)
                     .enabled_layer_names(&inst_layers)
                     .build(),
-                None,
+                allocation_callbacks,
             )
         }?;
 
@@ -1246,7 +1335,8 @@ impl VulkanContext {
             device_ci = device_ci.enabled_features(&features);
         }
 
-        let device = unsafe { instance.create_device(pdevice, &device_ci.build(), None) }?;
+        let device =
+            unsafe { instance.create_device(pdevice, &device_ci.build(), allocation_callbacks) }?;
 
         gfx_queue.queue = unsafe { device.get_device_queue(gfx_family, 0) };
         if let Some(ref mut q) = compute_queue {
@@ -1256,9 +1346,11 @@ impl VulkanContext {
             q.queue = unsafe { device.get_device_queue(transfer_family, 0) };
         }
 
-        let allocator = vk_mem::Allocator::new(vk_mem::AllocatorCreateInfo::new(
-            &instance, &device, pdevice,
-        ))?;
+        let mut allocator_info = vk_mem::AllocatorCreateInfo::new(&instance, &device, pdevice);
+        if let Some(callbacks) = allocation_callbacks {
+            allocator_info = allocator_info.allocation_callback(callbacks);
+        }
+        let allocator = vk_mem::Allocator::new(allocator_info)?;
 
         let debug_marker_enabled = extensions_to_enable.iter().any(|ext| {
             let ext_name = unsafe { CStr::from_ptr(*ext) };
@@ -1298,6 +1390,7 @@ impl VulkanContext {
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
+        let allocation_callbacks = info.vulkan_allocation_callbacks.map(Box::new);
         let (
             entry,
             instance,
@@ -1312,7 +1405,12 @@ impl VulkanContext {
             transfer_queue,
             debug_utils_supported,
             debug_marker_enabled,
-        ) = Self::init_core(info, false, enable_validation)?;
+        ) = Self::init_core(
+            info,
+            false,
+            enable_validation,
+            allocation_callbacks.as_deref(),
+        )?;
 
         let (debug_utils, debug_messenger) = if debug_utils_supported {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
@@ -1332,7 +1430,10 @@ impl VulkanContext {
                     .pfn_user_callback(Some(vulkan_debug_callback));
                 Some(unsafe {
                     debug_utils
-                        .create_debug_utils_messenger(&messenger_ci, None)
+                        .create_debug_utils_messenger(
+                            &messenger_ci,
+                            allocation_callbacks.as_deref(),
+                        )
                         .unwrap()
                 })
             } else {
@@ -1348,12 +1449,18 @@ impl VulkanContext {
             None
         };
 
-        let gfx_pool = CommandPool::new(&device, gfx_queue.family, QueueType::Graphics)?;
+        let gfx_pool = CommandPool::new(
+            &device,
+            gfx_queue.family,
+            QueueType::Graphics,
+            allocation_callbacks.as_deref(),
+        )?;
         let compute_pool = if compute_queue.is_some() {
             Some(CommandPool::new(
                 &device,
                 compute_queue.as_ref().unwrap().family,
                 QueueType::Compute,
+                allocation_callbacks.as_deref(),
             )?)
         } else {
             None
@@ -1363,6 +1470,7 @@ impl VulkanContext {
                 &device,
                 transfer_queue.as_ref().unwrap().family,
                 QueueType::Transfer,
+                allocation_callbacks.as_deref(),
             )?)
         } else {
             None
@@ -1380,8 +1488,11 @@ impl VulkanContext {
                 || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
                     == vk::TRUE);
 
-        let empty_set_layout =
-            Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
+        let empty_set_layout = Self::create_empty_set_layout(
+            &device,
+            supports_update_after_bind_layouts,
+            allocation_callbacks.as_deref(),
+        )?;
 
         let mut ctx = VulkanContext {
             entry,
@@ -1396,6 +1507,8 @@ impl VulkanContext {
             compute_pool,
             transfer_pool,
             allocator: ManuallyDrop::new(allocator),
+            allocation_callbacks,
+            allocation_activity: GpuAllocationActivity::default(),
             gfx_queue,
             compute_queue,
             transfer_queue,
@@ -1455,6 +1568,7 @@ impl VulkanContext {
         let enable_validation = std::env::var("DASHI_VALIDATION")
             .map(|v| v == "1")
             .unwrap_or(false);
+        let allocation_callbacks = info.vulkan_allocation_callbacks.map(Box::new);
         let (
             entry,
             instance,
@@ -1469,7 +1583,12 @@ impl VulkanContext {
             transfer_queue,
             debug_utils_supported,
             debug_marker_enabled,
-        ) = Self::init_core(info, true, enable_validation)?;
+        ) = Self::init_core(
+            info,
+            true,
+            enable_validation,
+            allocation_callbacks.as_deref(),
+        )?;
 
         let (debug_utils, debug_messenger) = if debug_utils_supported {
             let debug_utils = ash::extensions::ext::DebugUtils::new(&entry, &instance);
@@ -1489,7 +1608,10 @@ impl VulkanContext {
                     .pfn_user_callback(Some(vulkan_debug_callback));
                 Some(unsafe {
                     debug_utils
-                        .create_debug_utils_messenger(&messenger_ci, None)
+                        .create_debug_utils_messenger(
+                            &messenger_ci,
+                            allocation_callbacks.as_deref(),
+                        )
                         .unwrap()
                 })
             } else {
@@ -1510,12 +1632,18 @@ impl VulkanContext {
         #[cfg(feature = "dashi-sdl2")]
         let sdl_video = sdl_context.video().unwrap();
 
-        let gfx_pool = CommandPool::new(&device, gfx_queue.family, QueueType::Graphics)?;
+        let gfx_pool = CommandPool::new(
+            &device,
+            gfx_queue.family,
+            QueueType::Graphics,
+            allocation_callbacks.as_deref(),
+        )?;
         let compute_pool = if compute_queue.is_some() {
             Some(CommandPool::new(
                 &device,
                 compute_queue.as_ref().unwrap().family,
                 QueueType::Compute,
+                allocation_callbacks.as_deref(),
             )?)
         } else {
             None
@@ -1525,6 +1653,7 @@ impl VulkanContext {
                 &device,
                 transfer_queue.as_ref().unwrap().family,
                 QueueType::Transfer,
+                allocation_callbacks.as_deref(),
             )?)
         } else {
             None
@@ -1542,8 +1671,11 @@ impl VulkanContext {
                 || descriptor_indexing_features.descriptor_binding_storage_image_update_after_bind
                     == vk::TRUE);
 
-        let empty_set_layout =
-            Self::create_empty_set_layout(&device, supports_update_after_bind_layouts)?;
+        let empty_set_layout = Self::create_empty_set_layout(
+            &device,
+            supports_update_after_bind_layouts,
+            allocation_callbacks.as_deref(),
+        )?;
 
         let mut ctx = VulkanContext {
             entry,
@@ -1558,6 +1690,8 @@ impl VulkanContext {
             compute_pool,
             transfer_pool,
             allocator: ManuallyDrop::new(allocator),
+            allocation_callbacks,
+            allocation_activity: GpuAllocationActivity::default(),
             gfx_queue,
             compute_queue,
             transfer_queue,
@@ -1749,7 +1883,12 @@ impl VulkanContext {
                     .family
             }
         };
-        CommandPool::new(&self.device, family, ty)
+        CommandPool::new(
+            &self.device,
+            family,
+            ty,
+            self.allocation_callbacks.as_deref(),
+        )
     }
 
     /// Retrieve a mutable reference to a queue's command pool.
@@ -2016,8 +2155,10 @@ impl VulkanContext {
             .semaphores
             .insert(Semaphore {
                 raw: unsafe {
-                    self.device
-                        .create_semaphore(&vk::SemaphoreCreateInfo::builder().build(), None)
+                    self.device.create_semaphore(
+                        &vk::SemaphoreCreateInfo::builder().build(),
+                        self.allocation_callbacks.as_deref(),
+                    )
                 }?,
             })
             .unwrap())
@@ -2038,7 +2179,10 @@ impl VulkanContext {
 
     pub fn make_sampler(&mut self, info: &SamplerInfo) -> Result<Handle<Sampler>, GPUError> {
         let new_info: vk::SamplerCreateInfo = (*info).into();
-        let sampler = unsafe { self.device.create_sampler(&new_info, None) }?;
+        let sampler = unsafe {
+            self.device
+                .create_sampler(&new_info, self.allocation_callbacks.as_deref())
+        }?;
 
         if let Some(h) = self.samplers.insert(Sampler { sampler }) {
             return Ok(h);
@@ -2224,6 +2368,7 @@ impl VulkanContext {
         }?;
 
         self.set_name(image, info.debug_name, vk::ObjectType::IMAGE);
+        self.record_gpu_allocation(&allocation);
 
         let info_handle = self
             .image_infos
@@ -2524,14 +2669,17 @@ impl VulkanContext {
     /// Existing timers are destroyed and replaced with the new set.
     pub fn init_gpu_timers(&mut self, count: usize) -> Result<()> {
         for timer in self.gpu_timers.drain(..) {
-            unsafe { timer.destroy(&self.device) };
+            unsafe { timer.destroy(&self.device, self.allocation_callbacks.as_deref()) };
         }
         if !self.gpu_timers_enabled() {
             return Ok(());
         }
         let mut timers = Vec::with_capacity(count);
         for _ in 0..count {
-            timers.push(GpuTimer::new(&self.device)?);
+            timers.push(GpuTimer::new(
+                &self.device,
+                self.allocation_callbacks.as_deref(),
+            )?);
         }
         self.gpu_timers = timers;
         Ok(())
@@ -2709,6 +2857,7 @@ impl VulkanContext {
             )?;
 
             self.set_name(buffer, info.debug_name, vk::ObjectType::BUFFER);
+            self.record_gpu_allocation(&allocation);
             let info_handle = self
                 .buffer_infos
                 .insert(BufferInfoRecord::new(info))
@@ -2775,7 +2924,7 @@ impl VulkanContext {
 
         let messenger = unsafe {
             debug_utils
-                .create_debug_utils_messenger(&messenger_info, None)
+                .create_debug_utils_messenger(&messenger_info, self.allocation_callbacks.as_deref())
                 .map_err(GPUError::from)?
         };
 
@@ -2788,7 +2937,12 @@ impl VulkanContext {
     /// Destroys a debug messenger created via [`create_debug_messenger`].
     pub fn destroy_debug_messenger(&self, messenger: DebugMessenger) {
         if let Some(utils) = &self.debug_utils {
-            unsafe { utils.destroy_debug_utils_messenger(messenger.raw(), None) };
+            unsafe {
+                utils.destroy_debug_utils_messenger(
+                    messenger.raw(),
+                    self.allocation_callbacks.as_deref(),
+                )
+            };
         }
     }
 
@@ -2814,41 +2968,63 @@ impl VulkanContext {
 
         if let Some(messenger) = self.debug_messenger.take() {
             if let Some(utils) = &self.debug_utils {
-                unsafe { utils.destroy_debug_utils_messenger(messenger, None) };
+                unsafe {
+                    utils.destroy_debug_utils_messenger(
+                        messenger,
+                        self.allocation_callbacks.as_deref(),
+                    )
+                };
             }
         }
 
         unsafe {
-            self.device
-                .destroy_descriptor_set_layout(self.empty_set_layout, None);
+            self.device.destroy_descriptor_set_layout(
+                self.empty_set_layout,
+                self.allocation_callbacks.as_deref(),
+            );
         }
 
         // Bind table layouts
         self.bind_table_layouts
             .for_each_occupied_mut(|layout| unsafe {
+                self.device.destroy_descriptor_set_layout(
+                    layout.layout,
+                    self.allocation_callbacks.as_deref(),
+                );
                 self.device
-                    .destroy_descriptor_set_layout(layout.layout, None);
-                self.device.destroy_descriptor_pool(layout.pool, None);
+                    .destroy_descriptor_pool(layout.pool, self.allocation_callbacks.as_deref());
             });
 
         // Semaphores
         self.semaphores.for_each_occupied_mut(|s| {
-            unsafe { self.device.destroy_semaphore(s.raw, None) };
+            unsafe {
+                self.device
+                    .destroy_semaphore(s.raw, self.allocation_callbacks.as_deref())
+            };
         });
 
         // Fences
         self.fences.for_each_occupied_mut(|f| {
-            unsafe { self.device.destroy_fence(f.raw, None) };
+            unsafe {
+                self.device
+                    .destroy_fence(f.raw, self.allocation_callbacks.as_deref())
+            };
         });
 
         // Samplers
         self.samplers.for_each_occupied_mut(|s| {
-            unsafe { self.device.destroy_sampler(s.sampler, None) };
+            unsafe {
+                self.device
+                    .destroy_sampler(s.sampler, self.allocation_callbacks.as_deref())
+            };
         });
 
         // Image views
         self.image_views.for_each_occupied_mut(|view| {
-            unsafe { self.device.destroy_image_view(view.view, None) };
+            unsafe {
+                self.device
+                    .destroy_image_view(view.view, self.allocation_callbacks.as_deref())
+            };
         });
         self.image_view_cache.clear();
 
@@ -2868,41 +3044,56 @@ impl VulkanContext {
 
         // Render passes
         self.render_passes.for_each_occupied_mut(|rp| {
-            unsafe { self.device.destroy_render_pass(rp.raw, None) };
-            unsafe { self.device.destroy_framebuffer(rp.fb, None) };
+            unsafe {
+                self.device
+                    .destroy_render_pass(rp.raw, self.allocation_callbacks.as_deref())
+            };
+            unsafe {
+                self.device
+                    .destroy_framebuffer(rp.fb, self.allocation_callbacks.as_deref())
+            };
         });
 
         // Graphics pipeline layouts
         self.gfx_pipeline_layouts.for_each_occupied_mut(|layout| {
             for stage in &layout.shader_stages {
                 unsafe {
-                    self.device.destroy_shader_module(stage.module, None);
+                    self.device
+                        .destroy_shader_module(stage.module, self.allocation_callbacks.as_deref());
                 }
             }
-            unsafe { self.device.destroy_pipeline_layout(layout.layout, None) };
+            unsafe {
+                self.device
+                    .destroy_pipeline_layout(layout.layout, self.allocation_callbacks.as_deref())
+            };
         });
 
         // Graphics pipelines
         self.gfx_pipelines.for_each_occupied_mut(|pipeline| unsafe {
-            self.device.destroy_pipeline(pipeline.raw, None);
+            self.device
+                .destroy_pipeline(pipeline.raw, self.allocation_callbacks.as_deref());
         });
 
         // Compute pipeline layouts
         self.compute_pipeline_layouts
             .for_each_occupied_mut(|layout| unsafe {
+                self.device.destroy_shader_module(
+                    layout.shader_stage.module,
+                    self.allocation_callbacks.as_deref(),
+                );
                 self.device
-                    .destroy_shader_module(layout.shader_stage.module, None);
-                self.device.destroy_pipeline_layout(layout.layout, None);
+                    .destroy_pipeline_layout(layout.layout, self.allocation_callbacks.as_deref());
             });
 
         // Compute pipelines
         self.compute_pipelines
             .for_each_occupied_mut(|pipeline| unsafe {
-                self.device.destroy_pipeline(pipeline.raw, None);
+                self.device
+                    .destroy_pipeline(pipeline.raw, self.allocation_callbacks.as_deref());
             });
 
         for timer in self.gpu_timers.drain(..) {
-            unsafe { timer.destroy(&self.device) };
+            unsafe { timer.destroy(&self.device, self.allocation_callbacks.as_deref()) };
         }
 
         // Command pools
@@ -2921,8 +3112,10 @@ impl VulkanContext {
 
         // Device and instance
         unsafe {
-            self.device.destroy_device(None);
-            self.instance.destroy_instance(None);
+            self.device
+                .destroy_device(self.allocation_callbacks.as_deref());
+            self.instance
+                .destroy_instance(self.allocation_callbacks.as_deref());
         }
     }
 
@@ -2955,6 +3148,9 @@ impl VulkanContext {
     /// - Ensure all GPU work using the buffer has completed.
     /// - The context must still be alive.
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
+        let freed = self.buffers.get_ref(handle).and_then(|buf| {
+            (!buf.suballocated).then(|| self.allocation_size_and_locality(&buf.alloc))
+        });
         let info_handle = self
             .buffers
             .with_mut(handle, |buf| {
@@ -2964,6 +3160,9 @@ impl VulkanContext {
                 buf.info_handle
             })
             .unwrap();
+        if let Some((size, local)) = freed {
+            self.record_gpu_free(size, local);
+        }
         self.buffer_infos.release(info_handle);
         self.buffers.release(handle);
     }
@@ -2977,9 +3176,12 @@ impl VulkanContext {
     pub fn destroy_bind_table_layout(&mut self, handle: Handle<BindTableLayout>) {
         self.bind_table_layouts
             .with_mut(handle, |layout| unsafe {
+                self.device.destroy_descriptor_set_layout(
+                    layout.layout,
+                    self.allocation_callbacks.as_deref(),
+                );
                 self.device
-                    .destroy_descriptor_set_layout(layout.layout, None);
-                self.device.destroy_descriptor_pool(layout.pool, None);
+                    .destroy_descriptor_pool(layout.pool, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.bind_table_layouts.release(handle);
@@ -2989,7 +3191,8 @@ impl VulkanContext {
     pub fn destroy_compute_pipeline(&mut self, handle: Handle<ComputePipeline>) {
         self.compute_pipelines
             .with_mut(handle, |pipeline| unsafe {
-                self.device.destroy_pipeline(pipeline.raw, None);
+                self.device
+                    .destroy_pipeline(pipeline.raw, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.compute_pipelines.release(handle);
@@ -2999,9 +3202,12 @@ impl VulkanContext {
     pub fn destroy_compute_pipeline_layout(&mut self, handle: Handle<ComputePipelineLayout>) {
         self.compute_pipeline_layouts
             .with_mut(handle, |layout| unsafe {
+                self.device.destroy_shader_module(
+                    layout.shader_stage.module,
+                    self.allocation_callbacks.as_deref(),
+                );
                 self.device
-                    .destroy_shader_module(layout.shader_stage.module, None);
-                self.device.destroy_pipeline_layout(layout.layout, None);
+                    .destroy_pipeline_layout(layout.layout, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.compute_pipeline_layouts.release(handle);
@@ -3015,7 +3221,8 @@ impl VulkanContext {
     pub fn destroy_semaphore(&mut self, handle: Handle<Semaphore>) {
         self.semaphores
             .with_mut(handle, |sem| unsafe {
-                self.device.destroy_semaphore(sem.raw, None);
+                self.device
+                    .destroy_semaphore(sem.raw, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.semaphores.release(handle);
@@ -3029,7 +3236,8 @@ impl VulkanContext {
     pub fn destroy_fence(&mut self, handle: Handle<Fence>) {
         self.fences
             .with_mut(handle, |fence| unsafe {
-                self.device.destroy_fence(fence.raw, None);
+                self.device
+                    .destroy_fence(fence.raw, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.fences.release(handle);
@@ -3043,7 +3251,8 @@ impl VulkanContext {
     /// - The context must still be alive.
     pub fn destroy_image_view(&mut self, handle: Handle<VkImageView>) {
         let _ = self.image_views.with_mut(handle, |img| unsafe {
-            self.device.destroy_image_view(img.view, None);
+            self.device
+                .destroy_image_view(img.view, self.allocation_callbacks.as_deref());
         });
         self.image_view_cache.retain(|_, v| *v != handle);
         self.image_views.release(handle);
@@ -3056,6 +3265,10 @@ impl VulkanContext {
     /// - Ensure the GPU has finished using the image.
     /// - The context must still be alive.
     pub fn destroy_image(&mut self, handle: Handle<Image>) {
+        let freed = self
+            .images
+            .get_ref(handle)
+            .map(|img| self.allocation_size_and_locality(&img.alloc));
         // Destroy any cached views associated with this image
         let to_destroy: Vec<Handle<VkImageView>> = self
             .image_view_cache
@@ -3070,7 +3283,10 @@ impl VulkanContext {
             .collect();
         for view_handle in &to_destroy {
             if let Some(view) = self.image_views.get_ref(*view_handle) {
-                unsafe { self.device.destroy_image_view(view.view, None) };
+                unsafe {
+                    self.device
+                        .destroy_image_view(view.view, self.allocation_callbacks.as_deref())
+                };
             }
             self.image_views.release(*view_handle);
         }
@@ -3084,6 +3300,9 @@ impl VulkanContext {
                 img.info_handle
             })
             .unwrap();
+        if let Some((size, local)) = freed {
+            self.record_gpu_free(size, local);
+        }
         self.image_infos.release(info_handle);
         self.images.release(handle);
     }
@@ -3096,8 +3315,10 @@ impl VulkanContext {
     pub fn destroy_render_pass(&mut self, handle: Handle<RenderPass>) {
         let rp = self.render_passes.get_ref(handle).unwrap();
         unsafe {
-            self.device.destroy_framebuffer(rp.fb, None);
-            self.device.destroy_render_pass(rp.raw, None);
+            self.device
+                .destroy_framebuffer(rp.fb, self.allocation_callbacks.as_deref());
+            self.device
+                .destroy_render_pass(rp.raw, self.allocation_callbacks.as_deref());
         }
         self.render_passes.release(handle);
     }
@@ -3275,7 +3496,7 @@ impl VulkanContext {
 
         let descriptor_set_layout = unsafe {
             self.device
-                .create_descriptor_set_layout(&layout_info, None)?
+                .create_descriptor_set_layout(&layout_info, self.allocation_callbacks.as_deref())?
         };
 
         let pool_sizes = bindings
@@ -3295,7 +3516,10 @@ impl VulkanContext {
             pool_info = pool_info.flags(vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND);
         }
 
-        let descriptor_pool = unsafe { self.device.create_descriptor_pool(&pool_info, None)? };
+        let descriptor_pool = unsafe {
+            self.device
+                .create_descriptor_pool(&pool_info, self.allocation_callbacks.as_deref())?
+        };
 
         self.set_name(
             descriptor_set_layout,
@@ -3909,7 +4133,10 @@ impl VulkanContext {
             .push_constant_ranges(&[]) // Add push constant ranges if needed
             .build();
 
-        let pipeline_layout = unsafe { self.device.create_pipeline_layout(&layout_info, None)? };
+        let pipeline_layout = unsafe {
+            self.device
+                .create_pipeline_layout(&layout_info, self.allocation_callbacks.as_deref())?
+        };
 
         Ok(pipeline_layout)
     }
@@ -3917,6 +4144,7 @@ impl VulkanContext {
     fn create_empty_set_layout(
         device: &ash::Device,
         supports_update_after_bind: bool,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
     ) -> Result<vk::DescriptorSetLayout> {
         let mut layout_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(&[]);
         if supports_update_after_bind {
@@ -3925,7 +4153,8 @@ impl VulkanContext {
         }
         let layout_info = layout_info.build();
 
-        let layout = unsafe { device.create_descriptor_set_layout(&layout_info, None)? };
+        let layout =
+            unsafe { device.create_descriptor_set_layout(&layout_info, allocation_callbacks)? };
         Ok(layout)
     }
 
@@ -3936,7 +4165,10 @@ impl VulkanContext {
             .build();
 
         // Step 2: Create Shader Module using Vulkan
-        let shader_module = unsafe { self.device.create_shader_module(&create_info, None)? };
+        let shader_module = unsafe {
+            self.device
+                .create_shader_module(&create_info, self.allocation_callbacks.as_deref())?
+        };
 
         // Step 3: Return the shader module
         Ok(shader_module)
@@ -4186,7 +4418,10 @@ impl VulkanContext {
             .attachment_count(attachment_infos.len() as u32)
             .push_next(&mut attachments_info);
 
-        let fb = unsafe { self.device.create_framebuffer(&fb_info, None) }?;
+        let fb = unsafe {
+            self.device
+                .create_framebuffer(&fb_info, self.allocation_callbacks.as_deref())
+        }?;
 
         Ok(fb)
     }
@@ -4321,7 +4556,10 @@ impl VulkanContext {
         };
 
         // Create render pass
-        let render_pass = unsafe { self.device.create_render_pass(&render_pass_info, None) }?;
+        let render_pass = unsafe {
+            self.device
+                .create_render_pass(&render_pass_info, self.allocation_callbacks.as_deref())
+        }?;
         self.set_name(render_pass, info.debug_name, vk::ObjectType::RENDER_PASS);
 
         let width = info.viewport.scissor.w.max(1);
@@ -4603,8 +4841,11 @@ impl VulkanContext {
         );
         let pipeline_cache = self.open_pipeline_cache(pipeline_cache_info.as_ref());
         let compute_pipelines_result = unsafe {
-            self.device
-                .create_compute_pipelines(pipeline_cache.handle, &[pipeline_info], None)
+            self.device.create_compute_pipelines(
+                pipeline_cache.handle,
+                &[pipeline_info],
+                self.allocation_callbacks.as_deref(),
+            )
         };
         let compute_pipelines = match compute_pipelines_result {
             Ok(pipelines) => {
@@ -4780,7 +5021,10 @@ impl VulkanContext {
             .subpasses(&subpasses)
             .build();
 
-        let dummy_render_pass = unsafe { self.device.create_render_pass(&dummy_rp_info, None) }?;
+        let dummy_render_pass = unsafe {
+            self.device
+                .create_render_pass(&dummy_rp_info, self.allocation_callbacks.as_deref())
+        }?;
         self.set_name(
             dummy_render_pass,
             info.debug_name,
@@ -4876,8 +5120,11 @@ impl VulkanContext {
         );
         let pipeline_cache = self.open_pipeline_cache(pipeline_cache_info.as_ref());
         let graphics_pipelines_result = unsafe {
-            self.device
-                .create_graphics_pipelines(pipeline_cache.handle, &[pipeline_info], None)
+            self.device.create_graphics_pipelines(
+                pipeline_cache.handle,
+                &[pipeline_info],
+                self.allocation_callbacks.as_deref(),
+            )
         };
 
         let mut subpass_samples = vec![SubpassSampleInfo::default(); target_subpass + 1];

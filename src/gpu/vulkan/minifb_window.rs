@@ -7,6 +7,7 @@ pub(super) fn create_window(
     entry: &Entry,
     instance: &Instance,
     info: &WindowInfo,
+    allocation_callbacks: Option<&vk::AllocationCallbacks>,
 ) -> Result<(Window, vk::SurfaceKHR), GPUError> {
     let mut opts = WindowOptions::default();
     opts.resize = info.resizable;
@@ -18,7 +19,8 @@ pub(super) fn create_window(
     )
     .map_err(|err| GPUError::LibraryError(format!("failed to create minifb window: {err}")))?;
 
-    let surface = unsafe { ash_window::create_surface(entry, instance, &window, None)? };
+    let surface =
+        unsafe { ash_window::create_surface(entry, instance, &window, allocation_callbacks)? };
 
     Ok((window, surface))
 }

@@ -11,6 +11,12 @@ use std::ffi::{c_void, CStr};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
+#[cfg(feature = "vulkan")]
+pub use ash::vk::{
+    AllocationCallbacks as VulkanAllocationCallbacks,
+    SystemAllocationScope as VulkanAllocationScope,
+};
+
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "dashi-serde")]
 use serde::{Deserialize, Serialize};
@@ -489,6 +495,10 @@ pub struct ContextInfo {
     pub pipeline_cache_dir: Option<PathBuf>,
     pub application_name: Option<String>,
     pub engine_name: Option<String>,
+    /// Vulkan host allocation callbacks. The callback user data must remain valid
+    /// until the context has been destroyed.
+    #[cfg(feature = "vulkan")]
+    pub vulkan_allocation_callbacks: Option<VulkanAllocationCallbacks>,
     #[cfg(feature = "webgpu")]
     pub web_surface: Option<WebSurfaceInfo>,
 }
@@ -501,10 +511,34 @@ impl Default for ContextInfo {
             pipeline_cache_dir: None,
             application_name: None,
             engine_name: None,
+            #[cfg(feature = "vulkan")]
+            vulkan_allocation_callbacks: None,
             #[cfg(feature = "webgpu")]
             web_surface: None,
         }
     }
+}
+
+/// A snapshot of allocations managed by the context's GPU memory allocator.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GpuMemoryStats {
+    pub dedicated_device: bool,
+    pub heaps: Vec<GpuMemoryHeapStats>,
+    pub allocations_created: u64,
+    pub allocations_freed: u64,
+    pub bytes_created: u64,
+    pub bytes_freed: u64,
+    pub peak_device_local_bytes: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GpuMemoryHeapStats {
+    pub capacity_bytes: u64,
+    pub device_local: bool,
+    pub allocation_count: u64,
+    pub allocation_bytes: u64,
+    pub block_count: u64,
+    pub block_bytes: u64,
 }
 
 /// A snapshot of hardware limits exposed through the [`Context`].
