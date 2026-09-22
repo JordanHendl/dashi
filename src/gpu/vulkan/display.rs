@@ -643,9 +643,14 @@ impl VulkanContext {
     /// - The context must still be alive.
     pub fn destroy_display(&mut self, mut dsp: Display) {
         self.destroy_swapchain_resources(&mut dsp);
+        // SDL creates its surface internally without accepting allocation callbacks.
+        #[cfg(feature = "dashi-sdl2")]
+        let surface_callbacks = None;
+        #[cfg(not(feature = "dashi-sdl2"))]
+        let surface_callbacks = self.allocation_callbacks.as_deref();
         unsafe {
             dsp.loader
-                .destroy_surface(dsp.surface, self.allocation_callbacks.as_deref())
+                .destroy_surface(dsp.surface, surface_callbacks)
         };
     }
 
