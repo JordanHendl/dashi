@@ -698,6 +698,16 @@ impl CommandQueue {
         usage: UsageBits,
         layout: Layout,
     ) -> Result<()> {
+        if self
+            .ctx_ref()
+            .images
+            .get_ref(image)
+            .is_some_and(|r| r.externally_owned)
+        {
+            return Err(GPUError::Unimplemented(
+                "Acquire external image ownership before use",
+            ));
+        }
         if let Some(transition) = {
             let ctx = self.ctx_ref();
             ctx.resource_states
@@ -728,6 +738,16 @@ impl CommandQueue {
         queue: QueueType,
         stage: vk::PipelineStageFlags,
     ) -> Result<()> {
+        if self
+            .ctx_ref()
+            .buffers
+            .get_ref(buffer)
+            .is_some_and(|r| r.externally_owned)
+        {
+            return Err(GPUError::Unimplemented(
+                "Acquire external buffer ownership before use",
+            ));
+        }
         if self.recorded_buffer_states.get(&buffer).copied() == Some((usage, queue, stage)) {
             return Ok(());
         }

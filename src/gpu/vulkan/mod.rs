@@ -1,6 +1,8 @@
 #![allow(deprecated)]
 
+mod allocation;
 mod error;
+mod external;
 use crate::{
     cmd::{CommandStream, Executable},
     driver::{
@@ -10,6 +12,7 @@ use crate::{
     utils::{Handle, Pool},
     UsageBits,
 };
+use allocation::Allocation;
 use ash::vk::Handle as VkHandle;
 use ash::*;
 pub use error::*;
@@ -398,6 +401,7 @@ impl Fence {
 #[derive(Copy, Clone, Default)]
 pub struct Semaphore {
     raw: vk::Semaphore,
+    exportable: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -474,6 +478,7 @@ pub struct VulkanContext {
     pub(super) entry: ash::Entry,
     pub(super) instance: ash::Instance,
     pub(super) pdevice: vk::PhysicalDevice,
+    external_caps: crate::ExternalResourceCapabilities,
     pub(super) device: ash::Device,
     pub(super) properties: ash::vk::PhysicalDeviceProperties,
     pub(super) descriptor_indexing_features: vk::PhysicalDeviceDescriptorIndexingFeatures,
@@ -924,6 +929,7 @@ impl VulkanContext {
             Option<Queue>,
             bool,
             bool,
+            crate::ExternalResourceCapabilities,
         ),
         GPUError,
     > {
@@ -1270,7 +1276,7 @@ impl VulkanContext {
         let enabled_extensions =
             unsafe { instance.enumerate_device_extension_properties(pdevice) }?;
 
-        let wanted_extensions: Vec<*const c_char> = if windowed {
+        let mut wanted_extensions: Vec<*const c_char> = if windowed {
             vec![
                 ash::extensions::khr::Swapchain::name().as_ptr(),
                 vk::KhrImagelessFramebufferFn::name().as_ptr(),
@@ -1293,6 +1299,7 @@ impl VulkanContext {
             ]
         };
 
+        wanted_extensions.extend(external::extension_names().iter().map(|name| name.as_ptr()));
         let extensions_to_enable: Vec<*const c_char> = wanted_extensions
             .into_iter()
             .filter(|a| {
@@ -1371,6 +1378,7 @@ impl VulkanContext {
             transfer_queue,
             debug_utils_supported,
             debug_marker_enabled,
+            external::enabled_capabilities(&extensions_to_enable),
         ));
     }
 
@@ -1405,6 +1413,7 @@ impl VulkanContext {
             transfer_queue,
             debug_utils_supported,
             debug_marker_enabled,
+            external_caps,
         ) = Self::init_core(
             info,
             false,
@@ -1530,6 +1539,7 @@ impl VulkanContext {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             empty_set_layout,
+            external_caps,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
@@ -1583,6 +1593,7 @@ impl VulkanContext {
             transfer_queue,
             debug_utils_supported,
             debug_marker_enabled,
+            external_caps,
         ) = Self::init_core(
             info,
             true,
@@ -1713,6 +1724,7 @@ impl VulkanContext {
             compute_pipeline_layouts: Default::default(),
             compute_pipelines: Default::default(),
             empty_set_layout,
+            external_caps,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
             timestamp_period: properties.limits.timestamp_period,
@@ -2154,6 +2166,7 @@ impl VulkanContext {
         Ok(self
             .semaphores
             .insert(Semaphore {
+                exportable: false,
                 raw: unsafe {
                     self.device.create_semaphore(
                         &vk::SemaphoreCreateInfo::builder().build(),
@@ -2377,7 +2390,8 @@ impl VulkanContext {
 
         match self.images.insert(Image {
             img: image,
-            alloc: allocation,
+            alloc: Allocation::Vma(allocation),
+            externally_owned: false,
             layouts: vec![vk::ImageLayout::UNDEFINED; info.mip_levels as usize],
             info_handle,
         }) {
@@ -2442,9 +2456,12 @@ impl VulkanContext {
             None => return Err(GPUError::SlotError()),
         };
 
-        let info = self.allocator.get_allocation_info(&buf.alloc);
-        self.allocator
-            .flush_allocation(&buf.alloc, info.offset as usize, info.size as usize)?;
+        let info = self.allocator.get_allocation_info(buf.alloc.vma()?);
+        self.allocator.flush_allocation(
+            buf.alloc.vma()?,
+            info.offset as usize,
+            info.size as usize,
+        )?;
         Ok(())
     }
 
@@ -2454,7 +2471,7 @@ impl VulkanContext {
             None => return Err(GPUError::SlotError()),
         };
 
-        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(buf.alloc.vma()?) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
         let base_offset = buf.offset as u64 + view.offset as u64;
@@ -2477,7 +2494,7 @@ impl VulkanContext {
             None => return Err(GPUError::SlotError()),
         };
 
-        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(buf.alloc.vma()?) };
         let mapped = unsafe { self.allocator.map_memory(&mut alloc) }?;
         let mut typed_map: *mut T = unsafe { std::mem::transmute(mapped) };
         let base_offset = buf.offset as u64 + view.offset;
@@ -2500,7 +2517,7 @@ impl VulkanContext {
             None => return Err(GPUError::SlotError()),
         };
 
-        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+        let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(buf.alloc.vma()?) };
         unsafe { self.allocator.unmap_memory(&mut alloc) };
 
         return Ok(());
@@ -2864,7 +2881,8 @@ impl VulkanContext {
                 .ok_or(GPUError::SlotError())?;
             match self.buffers.insert(Buffer {
                 buf: buffer,
-                alloc: allocation,
+                alloc: Allocation::Vma(allocation),
+                externally_owned: false,
                 size: info.byte_size,
                 offset: 0,
                 suballocated: false,
@@ -3030,14 +3048,20 @@ impl VulkanContext {
 
         // Images
         self.images.for_each_occupied_mut(|img| {
-            unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+            unsafe {
+                img.alloc
+                    .destroy_image(&self.device, &self.allocator, img.img)
+            };
         });
         self.image_infos.clear();
 
         // Buffers
         self.buffers.for_each_occupied_mut(|buf| {
             if !buf.suballocated {
-                unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+                unsafe {
+                    buf.alloc
+                        .destroy_buffer(&self.device, &self.allocator, buf.buf)
+                };
             }
         });
         self.buffer_infos.clear();
@@ -3121,7 +3145,10 @@ impl VulkanContext {
 
     fn unmap_all_mapped_buffers(&mut self) {
         self.buffers.for_each_occupied_mut(|buf| {
-            let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(&buf.alloc) };
+            let Ok(vma) = buf.alloc.vma() else {
+                return;
+            };
+            let mut alloc: vk_mem::Allocation = unsafe { std::mem::transmute_copy(vma) };
             let alloc_info = self.allocator.get_allocation_info(&alloc);
             if alloc_info.mapped_data.is_null() {
                 return;
@@ -3148,14 +3175,18 @@ impl VulkanContext {
     /// - Ensure all GPU work using the buffer has completed.
     /// - The context must still be alive.
     pub fn destroy_buffer(&mut self, handle: Handle<Buffer>) {
-        let freed = self.buffers.get_ref(handle).and_then(|buf| {
-            (!buf.suballocated).then(|| self.allocation_size_and_locality(&buf.alloc))
-        });
+        let freed = self
+            .buffers
+            .get_ref(handle)
+            .and_then(|buf| (!buf.suballocated).then(|| self.resource_allocation_size(&buf.alloc)));
         let info_handle = self
             .buffers
             .with_mut(handle, |buf| {
                 if !buf.suballocated {
-                    unsafe { self.allocator.destroy_buffer(buf.buf, &mut buf.alloc) };
+                    unsafe {
+                        buf.alloc
+                            .destroy_buffer(&self.device, &self.allocator, buf.buf)
+                    };
                 }
                 buf.info_handle
             })
@@ -3268,7 +3299,7 @@ impl VulkanContext {
         let freed = self
             .images
             .get_ref(handle)
-            .map(|img| self.allocation_size_and_locality(&img.alloc));
+            .map(|img| self.resource_allocation_size(&img.alloc));
         // Destroy any cached views associated with this image
         let to_destroy: Vec<Handle<VkImageView>> = self
             .image_view_cache
@@ -3296,7 +3327,10 @@ impl VulkanContext {
         let info_handle = self
             .images
             .with_mut(handle, |img| {
-                unsafe { self.allocator.destroy_image(img.img, &mut img.alloc) };
+                unsafe {
+                    img.alloc
+                        .destroy_image(&self.device, &self.allocator, img.img)
+                };
                 img.info_handle
             })
             .unwrap();

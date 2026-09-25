@@ -16,6 +16,7 @@ impl From<vk::PhysicalDeviceType> for DeviceType {
 impl From<vk::PhysicalDeviceProperties> for DeviceInfo {
     fn from(value: vk::PhysicalDeviceProperties) -> Self {
         DeviceInfo {
+            identity: Default::default(),
             name: unsafe {
                 CStr::from_ptr(value.device_name.as_ptr())
                     .to_str()
@@ -102,6 +103,7 @@ impl DeviceSelector {
         for device in pdevices {
             let properties = unsafe { instance.get_physical_device_properties(device) };
             let mut info: DeviceInfo = properties.into();
+            info.identity = super::external::device_identity(&instance, device);
 
             let enabled_extensions =
                 unsafe { instance.enumerate_device_extension_properties(device) }?;

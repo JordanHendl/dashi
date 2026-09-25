@@ -1,13 +1,13 @@
 use crate::utils::Handle;
 use ash::vk;
-use vk_mem;
 
 use super::ImageInfo;
 
 #[derive(Debug)]
 pub struct Image {
     pub(crate) img: vk::Image,
-    pub(crate) alloc: vk_mem::Allocation,
+    pub(crate) alloc: super::allocation::Allocation,
+    pub(crate) externally_owned: bool,
     pub(crate) layouts: Vec<vk::ImageLayout>,
     pub(crate) info_handle: Handle<ImageInfoRecord>,
 }

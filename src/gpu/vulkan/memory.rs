@@ -3,14 +3,14 @@ use ash::vk;
 use offset_allocator;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
-use vk_mem;
 
 use super::BufferInfo;
 
 #[derive(Debug)]
 pub struct Buffer {
     pub(crate) buf: vk::Buffer,
-    pub(crate) alloc: vk_mem::Allocation,
+    pub(crate) alloc: super::allocation::Allocation,
+    pub(crate) externally_owned: bool,
     pub(crate) offset: u32,
     pub(crate) size: u32,
     pub(crate) suballocated: bool,
@@ -21,7 +21,8 @@ impl Clone for Buffer {
     fn clone(&self) -> Self {
         Self {
             buf: self.buf.clone(),
-            alloc: unsafe { std::mem::transmute_copy(&self.alloc) },
+            alloc: self.alloc.clone(),
+            externally_owned: self.externally_owned,
             offset: self.offset.clone(),
             size: self.size.clone(),
             suballocated: self.suballocated.clone(),

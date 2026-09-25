@@ -350,3 +350,25 @@ impl std::ops::DerefMut for Context {
         self.vulkan_mut().expect("Vulkan backend not active")
     }
 }
+
+#[cfg(all(feature = "vulkan", any(windows, unix)))]
+impl Context {
+    pub(super) fn external_vulkan(&self) -> Result<&VulkanContext> {
+        #[allow(unreachable_patterns)]
+        match &self.backend {
+            ContextBackend::Vulkan(ctx) => Ok(ctx),
+            _ => Err(crate::GPUError::Unimplemented(
+                "External resources require Vulkan",
+            )),
+        }
+    }
+    pub(super) fn external_vulkan_mut(&mut self) -> Result<&mut VulkanContext> {
+        #[allow(unreachable_patterns)]
+        match &mut self.backend {
+            ContextBackend::Vulkan(ctx) => Ok(ctx),
+            _ => Err(crate::GPUError::Unimplemented(
+                "External resources require Vulkan",
+            )),
+        }
+    }
+}

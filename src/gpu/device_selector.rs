@@ -8,6 +8,7 @@ pub enum DeviceType {
 
 #[derive(Default, Clone)]
 pub struct DeviceInfo {
+    pub identity: crate::DeviceIdentity,
     pub(crate) name: String,
     pub(crate) kind: DeviceType,
     pub(crate) driver_version: u32,
@@ -35,6 +36,7 @@ impl std::fmt::Display for SelectedDevice {
 
 #[derive(Default, Clone)]
 pub struct DeviceFilter {
+    identity: Option<crate::DeviceIdentity>,
     name: Option<String>,
     kind: Option<DeviceType>,
     driver_version: Option<u32>,
@@ -44,6 +46,10 @@ pub struct DeviceFilter {
 }
 
 impl DeviceFilter {
+    pub fn add_required_identity(&mut self, identity: crate::DeviceIdentity) -> Self {
+        self.identity = Some(identity);
+        self.clone()
+    }
     /// Require the selected device's name to exactly match `name`.
     ///
     /// When used with [`DeviceSelector::select`], the selection will return
@@ -116,6 +122,13 @@ impl DeviceSelector {
     }
 
     fn matches_filter(device: &DeviceInfo, filter: &DeviceFilter) -> bool {
+        if let Some(id) = filter.identity {
+            if id.device_uuid != device.identity.device_uuid
+                || id.driver_uuid != device.identity.driver_uuid
+            {
+                return false;
+            }
+        }
         if let Some(ref name) = filter.name {
             if device.name != *name {
                 return false;

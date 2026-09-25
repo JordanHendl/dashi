@@ -464,7 +464,8 @@ impl VulkanContext {
 
             let handle = match self.images.insert(Image {
                 img: raw_img,
-                alloc: unsafe { std::mem::MaybeUninit::zeroed().assume_init() },
+                alloc: super::allocation::Allocation::Borrowed,
+                externally_owned: false,
                 layouts: vec![vk::ImageLayout::UNDEFINED],
                 info_handle,
             }) {
@@ -648,10 +649,7 @@ impl VulkanContext {
         let surface_callbacks = None;
         #[cfg(not(feature = "dashi-sdl2"))]
         let surface_callbacks = self.allocation_callbacks.as_deref();
-        unsafe {
-            dsp.loader
-                .destroy_surface(dsp.surface, surface_callbacks)
-        };
+        unsafe { dsp.loader.destroy_surface(dsp.surface, surface_callbacks) };
     }
 
     #[cfg(feature = "dashi-openxr")]

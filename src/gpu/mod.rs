@@ -40,3 +40,8 @@ pub mod webgpu;
 
 #[cfg(feature = "webgpu")]
 pub use webgpu::*;
+
+#[cfg(all(feature = "vulkan", any(windows, unix)))]
+pub mod external;
+#[cfg(all(feature = "vulkan", any(windows, unix)))]
+pub use external::*;
