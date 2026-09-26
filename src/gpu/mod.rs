@@ -45,3 +45,6 @@ pub use webgpu::*;
 pub mod external;
 #[cfg(all(feature = "vulkan", any(windows, unix)))]
 pub use external::*;
+
+pub mod mesh;
+pub use mesh::*;

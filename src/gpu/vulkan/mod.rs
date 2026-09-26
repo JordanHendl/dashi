@@ -1,4 +1,5 @@
 #![allow(deprecated)]
+mod mesh;
 
 mod allocation;
 mod error;
@@ -475,6 +476,8 @@ struct GpuAllocationActivity {
 }
 
 pub struct VulkanContext {
+    mesh_caps: crate::MeshShaderCapabilities,
+    mesh_loader: Option<ash::extensions::ext::MeshShader>,
     pub(super) entry: ash::Entry,
     pub(super) instance: ash::Instance,
     pub(super) pdevice: vk::PhysicalDevice,
@@ -930,6 +933,7 @@ impl VulkanContext {
             bool,
             bool,
             crate::ExternalResourceCapabilities,
+            crate::MeshShaderCapabilities,
         ),
         GPUError,
     > {
@@ -1067,6 +1071,8 @@ impl VulkanContext {
         let mut enabled_descriptor_indexing =
             vk::PhysicalDeviceDescriptorIndexingFeatures::default();
         let mut enabled_vulkan12 = vk::PhysicalDeviceVulkan12Features::default();
+        let mut mesh_features = vk::PhysicalDeviceMeshShaderFeaturesEXT::default();
+        let mut draw_parameters = vk::PhysicalDeviceShaderDrawParametersFeatures::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
         let mut use_vulkan12_features = false;
         let mut features2 = supports_vulkan11.then(|| {
@@ -1082,6 +1088,7 @@ impl VulkanContext {
 
             unsafe { instance.get_physical_device_features2(pdevice, &mut feature_query) };
 
+            enabled_vulkan12.draw_indirect_count = vulkan12_features.draw_indirect_count;
             if supports_vulkan12 && vulkan12_features.imageless_framebuffer == vk::TRUE {
                 enabled_vulkan12.imageless_framebuffer = vk::TRUE;
             }
@@ -1261,7 +1268,8 @@ impl VulkanContext {
             }
             use_vulkan12_features = supports_vulkan12
                 && (descriptor_features_enabled_v12
-                    || enabled_vulkan12.imageless_framebuffer == vk::TRUE);
+                    || enabled_vulkan12.imageless_framebuffer == vk::TRUE
+                    || enabled_vulkan12.draw_indirect_count == vk::TRUE);
             if use_vulkan12_features {
                 f2 = f2.push_next(&mut enabled_vulkan12);
             }
@@ -1299,6 +1307,20 @@ impl VulkanContext {
             ]
         };
 
+        let mesh_available = supports_vulkan12 && enabled_extensions.iter().any(|ext| unsafe {
+            CStr::from_ptr(ext.extension_name.as_ptr()) == ash::extensions::ext::MeshShader::name()
+        });
+        if mesh_available {
+            let mut query = vk::PhysicalDeviceFeatures2::builder()
+                .push_next(&mut mesh_features).push_next(&mut draw_parameters);
+            unsafe { instance.get_physical_device_features2(pdevice, &mut query) };
+            mesh_features.p_next = std::ptr::null_mut();
+            draw_parameters.p_next = std::ptr::null_mut();
+            mesh_features.multiview_mesh_shader = vk::FALSE;
+            mesh_features.primitive_fragment_shading_rate_mesh_shader = vk::FALSE;
+            mesh_features.mesh_shader_queries = vk::FALSE;
+            wanted_extensions.push(ash::extensions::ext::MeshShader::name().as_ptr());
+        }
         wanted_extensions.extend(external::extension_names().iter().map(|name| name.as_ptr()));
         let extensions_to_enable: Vec<*const c_char> = wanted_extensions
             .into_iter()
@@ -1342,6 +1364,11 @@ impl VulkanContext {
             device_ci = device_ci.enabled_features(&features);
         }
 
+        let mesh_caps = mesh::capabilities(&instance, pdevice, &mesh_features, &draw_parameters,
+            enabled_vulkan12.draw_indirect_count == vk::TRUE);
+        if mesh_available {
+            device_ci = device_ci.push_next(&mut mesh_features).push_next(&mut draw_parameters);
+        }
         let device =
             unsafe { instance.create_device(pdevice, &device_ci.build(), allocation_callbacks) }?;
 
@@ -1379,6 +1406,7 @@ impl VulkanContext {
             debug_utils_supported,
             debug_marker_enabled,
             external::enabled_capabilities(&extensions_to_enable),
+            mesh_caps,
         ));
     }
 
@@ -1414,6 +1442,7 @@ impl VulkanContext {
             debug_utils_supported,
             debug_marker_enabled,
             external_caps,
+            mesh_caps,
         ) = Self::init_core(
             info,
             false,
@@ -1503,7 +1532,10 @@ impl VulkanContext {
             allocation_callbacks.as_deref(),
         )?;
 
+        let mesh_loader = mesh_caps.mesh_shader.then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
+            mesh_caps,
+            mesh_loader,
             entry,
             instance,
             pdevice,
@@ -1594,6 +1626,7 @@ impl VulkanContext {
             debug_utils_supported,
             debug_marker_enabled,
             external_caps,
+            mesh_caps,
         ) = Self::init_core(
             info,
             true,
@@ -1688,7 +1721,10 @@ impl VulkanContext {
             allocation_callbacks.as_deref(),
         )?;
 
+        let mesh_loader = mesh_caps.mesh_shader.then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
+            mesh_caps,
+            mesh_loader,
             entry,
             instance,
             pdevice,
@@ -4689,6 +4725,7 @@ impl VulkanContext {
         &mut self,
         info: &GraphicsPipelineLayoutInfo,
     ) -> Result<Handle<GraphicsPipelineLayout>, GPUError> {
+        mesh::validate_stages(info, self.mesh_caps)?;
         let mut shader_stages: Vec<vk::PipelineShaderStageCreateInfo> =
             Vec::with_capacity(info.shaders.len());
         let mut shader_entry_points = Vec::with_capacity(info.shaders.len());
@@ -5127,8 +5164,6 @@ impl VulkanContext {
 
         let mut pipeline_builder = vk::GraphicsPipelineCreateInfo::builder()
             .stages(&layout.shader_stages)
-            .vertex_input_state(&vertex_input_info)
-            .input_assembly_state(&layout.input_assembly)
             .viewport_state(&viewport_state)
             .rasterization_state(&layout.rasterizer)
             .multisample_state(&layout.multisample)
@@ -5137,6 +5172,9 @@ impl VulkanContext {
             .render_pass(dummy_render_pass)
             .subpass(info.subpass_id as u32);
 
+        if !layout.shader_stages.iter().any(|s| s.stage == vk::ShaderStageFlags::MESH_EXT) {
+            pipeline_builder = pipeline_builder.vertex_input_state(&vertex_input_info).input_assembly_state(&layout.input_assembly);
+        }
         if let Some(d) = layout.depth_stencil.as_ref() {
             pipeline_builder = pipeline_builder.depth_stencil_state(d);
         }

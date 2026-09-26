@@ -59,6 +59,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graph
 orbclient = { path = "orbclient_stub" }
 
 [dev-dependencies]
+shaderc = "0.8"
 inline-spirv = {version = "0.2.1"}
 serial_test = "2.0"
 image_utils = { path = "image_utils" }

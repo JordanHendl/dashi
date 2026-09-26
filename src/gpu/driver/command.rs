@@ -49,6 +49,9 @@ pub enum Op {
     GpuTimerEnd = 22,
     SyncPoint = 24,
     DebugLabel = 25,
+    DrawMeshTasks = 26,
+    DrawMeshTasksIndirect = 27,
+    DrawMeshTasksIndirectCount = 28,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -286,6 +289,38 @@ impl Default for DrawIndexed {
             dynamic_buffers: Default::default(),
         }
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DrawMeshTasks {
+    pub group_count: [u32; 3],
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct DrawMeshTasksIndirect {
+    pub indirect: BufferView,
+    pub bind_tables: [Option<Handle<BindTable>>; 4],
+    pub dynamic_buffers: [Option<DynamicBuffer>; 4],
+    pub draw_count: u32,
+    pub stride: u32,
+}
+impl Default for DrawMeshTasksIndirect {
+    fn default() -> Self {
+        Self { indirect: BufferView::new(Default::default()), bind_tables: Default::default(),
+            dynamic_buffers: Default::default(), draw_count: 1,
+            stride: std::mem::size_of::<crate::MeshTasksIndirectCommand>() as u32 }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct DrawMeshTasksIndirectCount {
+    pub draws: DrawMeshTasksIndirect,
+    pub count: BufferView,
 }
 
 #[repr(C)]
@@ -593,6 +628,18 @@ impl CommandEncoder {
         self.push(Op::DrawIndirect, cmd);
     }
 
+    pub fn draw_mesh_tasks(&mut self, cmd: &DrawMeshTasks) {
+        self.push(Op::DrawMeshTasks, cmd);
+    }
+
+    pub fn draw_mesh_tasks_indirect(&mut self, cmd: &DrawMeshTasksIndirect) {
+        self.push(Op::DrawMeshTasksIndirect, cmd);
+    }
+
+    pub fn draw_mesh_tasks_indirect_count(&mut self, cmd: &DrawMeshTasksIndirectCount) {
+        self.push(Op::DrawMeshTasksIndirectCount, cmd);
+    }
+
     pub fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) {
         self.push(Op::DrawIndexedIndirect, cmd);
     }
@@ -772,6 +819,9 @@ impl CommandEncoder {
                 Op::BlitImage => self.blit_image(cmd.payload()),
                 Op::DrawIndexed => self.draw_indexed(cmd.payload()),
                 Op::DrawIndirect => self.draw_indirect(cmd.payload()),
+                Op::DrawMeshTasks => self.draw_mesh_tasks(cmd.payload()),
+                Op::DrawMeshTasksIndirect => self.draw_mesh_tasks_indirect(cmd.payload()),
+                Op::DrawMeshTasksIndirectCount => self.draw_mesh_tasks_indirect_count(cmd.payload()),
                 Op::DrawIndexedIndirect => self.draw_indexed_indirect(cmd.payload()),
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => {
@@ -857,6 +907,9 @@ impl CommandEncoder {
                 Op::BlitImage => sink.blit_image(cmd.payload())?,
                 Op::DrawIndexed => sink.draw_indexed(cmd.payload())?,
                 Op::DrawIndirect => sink.draw_indirect(cmd.payload())?,
+                Op::DrawMeshTasks => sink.draw_mesh_tasks(cmd.payload())?,
+                Op::DrawMeshTasksIndirect => sink.draw_mesh_tasks_indirect(cmd.payload())?,
+                Op::DrawMeshTasksIndirectCount => sink.draw_mesh_tasks_indirect_count(cmd.payload())?,
                 Op::DrawIndexedIndirect => sink.draw_indexed_indirect(cmd.payload())?,
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => sink.prepare_buffer(cmd.payload())?,
@@ -960,6 +1013,9 @@ pub(crate) fn debug_expected_payload_size(op: Op) -> Option<usize> {
         Op::Draw => size_of::<Draw>(),
         Op::DrawIndexed => size_of::<DrawIndexed>(),
         Op::DrawIndirect => size_of::<DrawIndirect>(),
+        Op::DrawMeshTasks => size_of::<DrawMeshTasks>(),
+        Op::DrawMeshTasksIndirect => size_of::<DrawMeshTasksIndirect>(),
+        Op::DrawMeshTasksIndirectCount => size_of::<DrawMeshTasksIndirectCount>(),
         Op::DrawIndexedIndirect => size_of::<DrawIndexedIndirect>(),
         Op::Dispatch => size_of::<Dispatch>(),
         Op::DispatchIndirect => return None,
@@ -1070,6 +1126,9 @@ impl Op {
             x if x == Op::Draw as u16 => Some(Op::Draw),
             x if x == Op::DrawIndexed as u16 => Some(Op::DrawIndexed),
             x if x == Op::DrawIndirect as u16 => Some(Op::DrawIndirect),
+            x if x == Op::DrawMeshTasks as u16 => Some(Op::DrawMeshTasks),
+            x if x == Op::DrawMeshTasksIndirect as u16 => Some(Op::DrawMeshTasksIndirect),
+            x if x == Op::DrawMeshTasksIndirectCount as u16 => Some(Op::DrawMeshTasksIndirectCount),
             x if x == Op::DrawIndexedIndirect as u16 => Some(Op::DrawIndexedIndirect),
             x if x == Op::Dispatch as u16 => Some(Op::Dispatch),
             x if x == Op::CopyBuffer as u16 => Some(Op::CopyBuffer),
@@ -1107,6 +1166,15 @@ pub trait CommandSink {
     fn draw(&mut self, cmd: &Draw) -> Result<()>;
     fn draw_indexed(&mut self, cmd: &DrawIndexed) -> Result<()>;
     fn draw_indirect(&mut self, cmd: &DrawIndirect) -> Result<()>;
+    fn draw_mesh_tasks(&mut self, _cmd: &DrawMeshTasks) -> Result<()> {
+        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+    }
+    fn draw_mesh_tasks_indirect(&mut self, _cmd: &DrawMeshTasksIndirect) -> Result<()> {
+        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+    }
+    fn draw_mesh_tasks_indirect_count(&mut self, _cmd: &DrawMeshTasksIndirectCount) -> Result<()> {
+        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+    }
     fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) -> Result<()>;
     fn dispatch(&mut self, cmd: &Dispatch) -> Result<()>;
     fn copy_buffer(&mut self, cmd: &CopyBuffer) -> Result<()>;

@@ -372,3 +372,14 @@ impl Context {
         }
     }
 }
+
+impl Context {
+    pub fn mesh_shader_capabilities(&self) -> crate::MeshShaderCapabilities {
+        match &self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.mesh_shader_capabilities(),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => crate::MeshShaderCapabilities::default(),
+        }
+    }
+}

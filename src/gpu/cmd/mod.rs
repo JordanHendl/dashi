@@ -1,3 +1,4 @@
+use crate::driver::command::{DrawMeshTasks, DrawMeshTasksIndirect, DrawMeshTasksIndirectCount};
 use std::marker::PhantomData;
 
 use crate::gpu::driver::command::{
@@ -499,6 +500,21 @@ impl CommandStream<Graphics> {
 
     pub fn draw_indirect(mut self, cmd: &DrawIndirect) -> Self {
         self.enc.draw_indirect(cmd);
+        self
+    }
+
+    pub fn draw_mesh_tasks(mut self, cmd: &DrawMeshTasks) -> Self {
+        self.enc.draw_mesh_tasks(cmd);
+        self
+    }
+
+    pub fn draw_mesh_tasks_indirect(mut self, cmd: &DrawMeshTasksIndirect) -> Self {
+        self.enc.draw_mesh_tasks_indirect(cmd);
+        self
+    }
+
+    pub fn draw_mesh_tasks_indirect_count(mut self, cmd: &DrawMeshTasksIndirectCount) -> Self {
+        self.enc.draw_mesh_tasks_indirect_count(cmd);
         self
     }
 

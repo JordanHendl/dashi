@@ -1,6 +1,9 @@
 //! Refactored command helpers for Dashi CommandQueue
 #![allow(deprecated)]
 
+#[path = "mesh_commands.rs"]
+mod mesh_commands;
+
 use ash::vk;
 use std::ffi::CString;
 
@@ -2077,6 +2080,15 @@ impl CommandSink for CommandQueue {
         Ok(())
     }
 
+    fn draw_mesh_tasks(&mut self, cmd: &crate::driver::command::DrawMeshTasks) -> Result<()> {
+        self.record_mesh_tasks(cmd)
+    }
+    fn draw_mesh_tasks_indirect(&mut self, cmd: &crate::driver::command::DrawMeshTasksIndirect) -> Result<()> {
+        self.record_mesh_tasks_indirect(cmd, None)
+    }
+    fn draw_mesh_tasks_indirect_count(&mut self, cmd: &crate::driver::command::DrawMeshTasksIndirectCount) -> Result<()> {
+        self.record_mesh_tasks_indirect(&cmd.draws, Some(cmd.count))
+    }
     fn draw_indexed_indirect(
         &mut self,
         cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
