@@ -516,6 +516,7 @@ pub struct VulkanContext {
     pub(super) resource_states: StateTracker,
 
     pub(super) gpu_timers: Vec<GpuTimer>,
+    gpu_timer_capture: Option<timing::TimerCapture>,
     pub(super) timestamp_period: f32,
 
     /// Indicates whether the context was created in headless mode
@@ -1574,6 +1575,7 @@ impl VulkanContext {
             external_caps,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
+            gpu_timer_capture: None,
             timestamp_period: properties.limits.timestamp_period,
             headless: true,
 
@@ -1763,6 +1765,7 @@ impl VulkanContext {
             external_caps,
             resource_states: StateTracker::new(),
             gpu_timers: Vec::new(),
+            gpu_timer_capture: None,
             timestamp_period: properties.limits.timestamp_period,
             headless: false,
 
@@ -2724,17 +2727,23 @@ impl VulkanContext {
         for timer in self.gpu_timers.drain(..) {
             unsafe { timer.destroy(&self.device, self.allocation_callbacks.as_deref()) };
         }
+        self.gpu_timer_capture = None;
+        self.ensure_gpu_timers(count)
+    }
+
+    // Swapchain allocation must preserve application-owned query pools.
+    pub(super) fn ensure_gpu_timers(&mut self, count: usize) -> Result<()> {
         if !self.gpu_timers_enabled() {
             return Ok(());
         }
-        let mut timers = Vec::with_capacity(count);
-        for _ in 0..count {
+        let mut timers = Vec::with_capacity(count.saturating_sub(self.gpu_timers.len()));
+        for _ in self.gpu_timers.len()..count {
             timers.push(GpuTimer::new(
                 &self.device,
                 self.allocation_callbacks.as_deref(),
             )?);
         }
-        self.gpu_timers = timers;
+        self.gpu_timers.extend(timers);
         Ok(())
     }
 
@@ -2752,6 +2761,10 @@ impl VulkanContext {
         if !self.gpu_timers_enabled() {
             return;
         }
+        self.record_gpu_timer(frame);
+        let Some(frame) = self.mapped_gpu_timer(frame) else {
+            return;
+        };
         if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe {
                 self.device.cmd_reset_query_pool(list.cmd_buf, t.pool, 0, 2);
@@ -2767,6 +2780,9 @@ impl VulkanContext {
         if !self.gpu_timers_enabled() {
             return;
         }
+        let Some(frame) = self.mapped_gpu_timer(frame) else {
+            return;
+        };
         if let Some(t) = self.gpu_timers.get_mut(frame) {
             unsafe { t.end(&self.device, list.cmd_buf) };
         }

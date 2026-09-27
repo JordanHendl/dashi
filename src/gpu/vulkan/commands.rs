@@ -1051,7 +1051,10 @@ impl CommandSink for CommandQueue {
         unsafe {
             let device = &(*ctx).device;
             for frame in frames {
-                if let Some(timer) = (&(*ctx).gpu_timers).get(*frame as usize) {
+                let Some(frame) = (*ctx).mapped_gpu_timer(*frame as usize) else {
+                    continue;
+                };
+                if let Some(timer) = (&(*ctx).gpu_timers).get(frame) {
                     device.cmd_reset_query_pool(self.cmd_buf, timer.pool, 0, 2);
                 }
             }
@@ -2472,7 +2475,11 @@ impl CommandSink for CommandQueue {
             // CommandTape resets these queries before executing the tape. A timer
             // may begin inside a render pass, where resetting queries is invalid.
             unsafe {
-                if let Some(timer) = (&mut (*ctx).gpu_timers).get_mut(cmd.frame as usize) {
+                (*ctx).record_gpu_timer(cmd.frame as usize);
+                let Some(frame) = (*ctx).mapped_gpu_timer(cmd.frame as usize) else {
+                    return Ok(());
+                };
+                if let Some(timer) = (&mut (*ctx).gpu_timers).get_mut(frame) {
                     timer.begin(&(*ctx).device, self.cmd_buf);
                 }
             }

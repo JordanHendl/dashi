@@ -246,6 +246,29 @@ impl Context {
         }
     }
 
+    /// Remap recorded timer indices below `count` into a caller-owned query bank.
+    /// `None` suppresses those timers while preserving timers outside the range.
+    /// End the capture after recording/submitting its work; do not nest captures.
+    /// Read results using physical indices after the submission completes.
+    pub fn begin_gpu_timer_capture(&mut self, count: usize, base: Option<usize>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.begin_gpu_timer_capture(count, base),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => {}
+        }
+    }
+
+    /// Restore unmodified timer indices and return the logical indices begun in the capture.
+    pub fn end_gpu_timer_capture(&mut self) -> Vec<usize> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.end_gpu_timer_capture(),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => Vec::new(),
+        }
+    }
+
     /// Return the elapsed GPU time for `frame` in milliseconds, if available.
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         match &mut self.backend {

@@ -140,4 +140,114 @@ mod tests {
             "Vulkan validation reported an error"
         );
     }
+
+    #[test]
+    #[serial_test::serial]
+    fn captured_timer_banks_survive_display_allocation_and_skipped_captures() {
+        use crate::{cmd::CommandStream, driver::command::CommandEncoder};
+        let mut ctx = VulkanContext::headless(&ContextInfo::default()).unwrap();
+        let error = AtomicBool::new(false);
+        let messenger = ctx
+            .create_debug_messenger(&DebugMessengerCreateInfo {
+                message_severity: DebugMessageSeverity::ERROR,
+                message_type: DebugMessageType::VALIDATION,
+                user_callback: validation_error,
+                user_data: &error as *const AtomicBool as *mut std::ffi::c_void,
+            })
+            .unwrap();
+        ctx.init_gpu_timers(12).unwrap();
+        let pool = ctx.gpu_timers[4].pool;
+        let mut commands = ctx
+            .pool_mut(QueueType::Graphics)
+            .begin("banked timers", false)
+            .unwrap();
+        ctx.begin_gpu_timer_capture(2, Some(4));
+        CommandStream::new()
+            .begin()
+            .gpu_timer_begin(0)
+            .gpu_timer_end(0)
+            .end()
+            .append(&mut commands)
+            .unwrap();
+        assert_eq!(ctx.end_gpu_timer_capture(), vec![0]);
+        ctx.begin_gpu_timer_capture(2, Some(6));
+        ctx.gpu_timer_begin(&mut commands, 1);
+        ctx.gpu_timer_end(&mut commands, 1);
+        assert_eq!(ctx.end_gpu_timer_capture(), vec![1]);
+        ctx.begin_gpu_timer_capture(2, None);
+        let mut tape = CommandEncoder::new(QueueType::Graphics);
+        tape.gpu_timer_begin(0);
+        tape.gpu_timer_end(0);
+        tape.gpu_timer_begin(10);
+        tape.gpu_timer_end(10);
+        tape.append(&mut commands).unwrap();
+        assert!(ctx.end_gpu_timer_capture().is_empty());
+        let fence = ctx.submit(&mut commands, &Default::default()).unwrap();
+        ctx.wait(fence).unwrap();
+        assert!(ctx.get_elapsed_gpu_time_ms(4).is_some());
+        assert!(ctx.get_elapsed_gpu_time_ms(7).is_some());
+        assert!(ctx.get_elapsed_gpu_time_ms(10).is_some());
+        assert!(ctx.get_elapsed_gpu_time_ms(0).is_none());
+        assert!(ctx.get_elapsed_gpu_time_ms(6).is_none());
+        ctx.ensure_gpu_timers(3).unwrap();
+        assert_eq!(ctx.gpu_timers.len(), 12);
+        assert_eq!(ctx.gpu_timers[4].pool, pool);
+        ctx.ensure_gpu_timers(15).unwrap();
+        assert_eq!(ctx.gpu_timers.len(), 15);
+        assert_eq!(ctx.gpu_timers[4].pool, pool);
+        assert!(ctx.get_elapsed_gpu_time_ms(4).is_some());
+        ctx.destroy_cmd_queue(commands);
+        ctx.destroy_debug_messenger(messenger);
+        ctx.destroy();
+        assert!(
+            !error.load(Ordering::SeqCst),
+            "Vulkan validation reported an error"
+        );
+    }
+}
+
+pub(super) struct TimerCapture {
+    count: usize,
+    base: Option<usize>,
+    recorded: Vec<usize>,
+}
+
+impl super::VulkanContext {
+    pub fn begin_gpu_timer_capture(&mut self, count: usize, base: Option<usize>) {
+        assert!(
+            self.gpu_timer_capture.is_none(),
+            "nested GPU timer captures"
+        );
+        self.gpu_timer_capture = Some(TimerCapture {
+            count,
+            base,
+            recorded: Vec::new(),
+        });
+    }
+
+    pub fn end_gpu_timer_capture(&mut self) -> Vec<usize> {
+        let Some(mut capture) = self.gpu_timer_capture.take() else {
+            return Vec::new();
+        };
+        capture.recorded.sort_unstable();
+        capture.recorded.dedup();
+        capture.recorded
+    }
+
+    pub(super) fn mapped_gpu_timer(&self, index: usize) -> Option<usize> {
+        match &self.gpu_timer_capture {
+            Some(capture) if index < capture.count => {
+                capture.base.and_then(|base| base.checked_add(index))
+            }
+            _ => Some(index),
+        }
+    }
+
+    pub(super) fn record_gpu_timer(&mut self, index: usize) {
+        if let Some(capture) = &mut self.gpu_timer_capture {
+            if index < capture.count && capture.base.is_some() {
+                capture.recorded.push(index);
+            }
+        }
+    }
 }

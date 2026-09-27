@@ -583,7 +583,7 @@ impl VulkanContext {
             }
         }
 
-        if let Err(err) = self.init_gpu_timers(images.len()) {
+        if let Err(err) = self.ensure_gpu_timers(images.len()) {
             for sem in semaphores {
                 self.destroy_semaphore(sem);
             }
