@@ -1,3 +1,19 @@
+/// Completed timestamp pair in the device clock domain. Not a CPU wall-clock time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GpuTimestampInterval {
+    pub start_ticks: u64,
+    pub end_ticks: u64,
+    pub nanoseconds_per_tick: f64,
+}
+
+impl GpuTimestampInterval {
+    /// Wrapped pairs are unavailable rather than being reported as zero work.
+    pub fn elapsed_ms(self) -> Option<f64> {
+        self.end_ticks.checked_sub(self.start_ticks)
+            .map(|ticks| ticks as f64 * self.nanoseconds_per_tick / 1_000_000.0)
+    }
+}
+
 use crate::gpu::device_selector::SelectedDevice;
 use crate::utils::Handle;
 use crate::{

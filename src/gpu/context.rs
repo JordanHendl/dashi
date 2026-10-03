@@ -269,6 +269,18 @@ impl Context {
         }
     }
 
+    /// Read a completed timestamp interval without blocking. Call only after the
+    /// owning submission completes to avoid reading a preceding use of the query.
+    /// Returns None for unavailable, wrapped or unsupported timestamp pairs.
+    pub fn get_gpu_timestamp_interval(&mut self, frame: usize) -> Option<crate::GpuTimestampInterval> {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.get_gpu_timestamp_interval(frame),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => None,
+        }
+    }
+
     /// Return the elapsed GPU time for `frame` in milliseconds, if available.
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         match &mut self.backend {

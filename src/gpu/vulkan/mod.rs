@@ -2792,6 +2792,15 @@ impl VulkanContext {
     ///
     /// Poll without waiting for GPU execution. Returns `None` until both queries
     /// are available. Callers requiring a result must wait for their submission first.
+    pub fn get_gpu_timestamp_interval(&mut self, frame: usize) -> Option<crate::GpuTimestampInterval> {
+        if !self.gpu_timers_enabled() { return None; }
+        let [start_ticks, end_ticks] = self.gpu_timers.get_mut(frame)?.resolve_ticks(&self.device).ok()?;
+        if end_ticks < start_ticks { return None; }
+        Some(crate::GpuTimestampInterval {
+            start_ticks, end_ticks, nanoseconds_per_tick: self.timestamp_period as f64,
+        })
+    }
+
     pub fn get_elapsed_gpu_time_ms(&mut self, frame: usize) -> Option<f32> {
         if !self.gpu_timers_enabled() {
             return None;

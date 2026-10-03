@@ -43,6 +43,11 @@ impl GpuTimer {
     }
 
     pub(super) fn resolve(&mut self, device: &ash::Device, period: f32) -> Result<f32, GPUError> {
+        let data = self.resolve_ticks(device)?;
+        Ok(data[1].saturating_sub(data[0]) as f32 * period / 1_000_000.0)
+    }
+
+    pub(super) fn resolve_ticks(&mut self, device: &ash::Device) -> Result<[u64; 2], GPUError> {
         if self.state != TimerState::Ended {
             return Err(GPUError::LibraryError(
                 "GPU timer queries have not been initialized or ended yet.".to_string(),
@@ -58,8 +63,7 @@ impl GpuTimer {
                 vk::QueryResultFlags::TYPE_64,
             )?;
         }
-        let diff = data[1].saturating_sub(data[0]);
-        Ok(diff as f32 * period / 1_000_000.0)
+        Ok(data)
     }
 }
 
@@ -121,6 +125,7 @@ mod tests {
         ctx.gpu_timers[0].state = TimerState::Ended;
         let started = std::time::Instant::now();
         assert!(ctx.get_elapsed_gpu_time_ms(0).is_none());
+        assert!(ctx.get_gpu_timestamp_interval(0).is_none());
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
         let mut measured = ctx
             .pool_mut(QueueType::Graphics)
@@ -130,7 +135,10 @@ mod tests {
         ctx.gpu_timer_end(&mut measured, 0);
         let fence = ctx.submit(&mut measured, &Default::default()).unwrap();
         ctx.wait(fence).unwrap();
-        assert!(ctx.get_elapsed_gpu_time_ms(0).unwrap() >= 0.0);
+        let elapsed = ctx.get_elapsed_gpu_time_ms(0).unwrap();
+        let interval = ctx.get_gpu_timestamp_interval(0).unwrap();
+        assert!(interval.end_ticks >= interval.start_ticks);
+        assert!((interval.elapsed_ms().unwrap() - elapsed as f64).abs() < 0.0001);
         ctx.destroy_cmd_queue(reset);
         ctx.destroy_cmd_queue(measured);
         ctx.destroy_debug_messenger(messenger);

@@ -138,6 +138,19 @@ impl<'a> Pass<'a> {
 pub type SubdrawStream = CommandStream<PendingGraphics>;
 
 impl<T> CommandStream<T> {
+    /// Discard CPU commands and retain their storage for another recording.
+    /// This does not retire GPU resources or make in-flight parameter memory reusable.
+    pub fn recycle(mut self) -> CommandStream<Initial> {
+        self.enc.reset();
+        CommandStream { enc: self.enc, _state: PhantomData }
+    }
+
+    /// Copy commands into this stream without consuming the source storage.
+    pub fn combine_ref<G>(mut self, source: &CommandStream<G>) -> Self {
+        self.enc.combine(&source.enc);
+        self
+    }
+
     pub fn combine<G>(mut self, sink: CommandStream<G>) -> Self {
         self.enc.combine(&sink.enc);
         self
@@ -565,6 +578,12 @@ impl CommandStream<Graphics> {
 }
 
 impl CommandStream<Executable> {
+    /// Replay CPU commands while retaining their storage. Referenced resources and
+    /// dynamic parameters must remain valid until every resulting submission retires.
+    pub fn append_ref<S: CommandSink>(&self, sink: &mut S) -> Result<()> {
+        self.enc.append(sink).map(|_| ())
+    }
+
     /// Submit the recorded commands to a sink and transition to pending.
     pub fn submit<S: CommandSink>(
         self,
@@ -593,5 +612,32 @@ impl CommandStream<Executable> {
             enc: self.enc,
             _state: PhantomData,
         })
+    }
+}
+
+#[cfg(test)]
+mod reuse_tests {
+    use super::*;
+
+    #[test]
+    fn recycled_stream_discards_commands_and_preserves_queue() {
+        let stream = CommandStream::new_with_queue(QueueType::Compute).begin()
+            .debug_label("old frame").end();
+        assert!(stream.enc.iter().count() > 0);
+        let mut stream = stream.recycle().begin();
+        assert_eq!(stream.queue_type(), QueueType::Compute);
+        assert_eq!(stream.enc.iter().count(), 0);
+        stream = stream.debug_label("new frame");
+        assert_eq!(stream.enc.iter().count(), 1);
+    }
+
+    #[test]
+    fn borrowed_combination_keeps_source_replayable() {
+        let source = CommandStream::new().begin().debug_label("retained").end();
+        for _ in 0..3 {
+            let combined = CommandStream::new().begin().combine_ref(&source).end();
+            assert_eq!(combined.enc.iter().count(), 1);
+            assert_eq!(source.enc.iter().count(), 1);
+        }
     }
 }
