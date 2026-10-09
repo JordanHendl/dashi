@@ -138,6 +138,15 @@ impl CommandRing {
     }
 
     /// Waits on all in-flight fences and clears them.
+    pub fn poll_idle(&mut self) -> Result<bool> {
+        let mut idle = true;
+        for index in 0..self.fences.len() {
+            idle &= self.slot_available(index)?;
+        }
+        Ok(idle)
+    }
+
+    /// Waits on all in-flight fences and clears them.
     pub fn wait_all(&mut self) -> Result<()> {
         for slot in self.fences.iter_mut() {
             if let Some(fence) = slot.take() {

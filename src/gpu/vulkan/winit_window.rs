@@ -142,20 +142,9 @@ fn settle_x11_primary_extent(
     }
 }
 
-pub(super) fn create_window(
-    entry: &Entry,
-    instance: &Instance,
+fn create_native_window(
     info: &DisplayInfo,
-    allocation_callbacks: Option<&vk::AllocationCallbacks>,
-) -> Result<
-    (
-        EventLoop<()>,
-        winit::window::Window,
-        vk::SurfaceKHR,
-        [u32; 2],
-    ),
-    GPUError,
-> {
+) -> Result<(EventLoop<()>, winit::window::Window, [u32; 2]), GPUError> {
     #[cfg(target_os = "linux")]
     let mut event_loop = EventLoop::new_any_thread();
     #[cfg(target_os = "windows")]
@@ -246,20 +235,192 @@ pub(super) fn create_window(
     window.request_redraw();
     let _ = window.focus_window();
 
+    Ok((event_loop, window, [actual_size.width, actual_size.height]))
+}
+
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
+type PendingWindow = (EventLoop<()>, winit::window::Window, [u32; 2]);
+thread_local! {
+    static STARTUP: RefCell<Weak<RefCell<Option<PendingWindow>>>> = RefCell::new(Weak::new());
+}
+
+/// Owner-thread startup presentation. The first normal display adopts this exact native window.
+/// Keep the guard alive until display creation; dropping all guards cancels an unadopted window.
+#[derive(Clone)]
+pub struct StartupDisplay(Rc<RefCell<Option<PendingWindow>>>);
+
+impl StartupDisplay {
+    pub fn new(info: &DisplayInfo) -> Result<Self, GPUError> {
+        if let Some(existing) = STARTUP.with(|slot| slot.borrow().upgrade()) {
+            if existing.borrow().is_some() {
+                return Ok(Self(existing));
+            }
+        }
+        let pending = Rc::new(RefCell::new(Some(create_native_window(info)?)));
+        STARTUP.with(|slot| *slot.borrow_mut() = Rc::downgrade(&pending));
+        let result = Self(pending);
+        result.pump();
+        Ok(result)
+    }
+
+    pub fn pump(&self) -> bool {
+        use winit::platform::run_return::EventLoopExtRunReturn;
+        use winit::{
+            event::{Event, WindowEvent},
+            event_loop::ControlFlow,
+        };
+        let mut pending = self.0.borrow_mut();
+        let Some((events, window, _)) = pending.as_mut() else {
+            return true;
+        };
+        let mut open = true;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::Poll;
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    open = false;
+                    *flow = ControlFlow::Exit;
+                }
+                Event::MainEventsCleared => *flow = ControlFlow::Exit,
+                _ => {}
+            }
+        });
+        paint_startup(window);
+        open
+    }
+
+    pub fn set_title(&self, title: &str) {
+        if let Some((_, window, _)) = self.0.borrow().as_ref() {
+            window.set_title(title);
+        }
+    }
+}
+
+pub(super) fn create_window(
+    entry: &Entry,
+    instance: &Instance,
+    info: &DisplayInfo,
+    allocation_callbacks: Option<&vk::AllocationCallbacks>,
+) -> Result<
+    (
+        EventLoop<()>,
+        winit::window::Window,
+        vk::SurfaceKHR,
+        [u32; 2],
+    ),
+    GPUError,
+> {
+    let (events, window, size) = take_native_window(info)?;
     let surface =
         unsafe { ash_window::create_surface(entry, instance, &window, allocation_callbacks)? };
+    Ok((events, window, surface, size))
+}
 
-    Ok((
-        event_loop,
-        window,
-        surface,
-        [actual_size.width, actual_size.height],
-    ))
+fn take_native_window(info: &DisplayInfo) -> Result<PendingWindow, GPUError> {
+    let pending = STARTUP
+        .with(|slot| slot.borrow().upgrade())
+        .and_then(|window| window.borrow_mut().take());
+    let Some((events, window, _)) = pending else {
+        return create_native_window(info);
+    };
+    window.set_title(&info.window.title);
+    window.set_resizable(info.window.resizable);
+    if info.window_mode == WindowMode::Windowed {
+        window.set_fullscreen(None);
+        window.set_decorations(true);
+        window.set_inner_size(PhysicalSize::new(info.window.size[0], info.window.size[1]));
+    } else {
+        let monitor = (info.monitor_selection == MonitorSelection::Primary)
+            .then(|| events.primary_monitor())
+            .flatten();
+        window.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+    }
+    let size = window.inner_size();
+    Ok((events, window, [size.width, size.height]))
+}
+
+#[cfg(target_os = "windows")]
+fn paint_startup(window: &winit::window::Window) {
+    use windows_sys::Win32::{
+        Foundation::RECT,
+        Graphics::Gdi::{
+            CreateSolidBrush, DeleteObject, DrawTextW, FillRect, GetDC, ReleaseDC, SetBkMode,
+            SetTextColor, DT_CENTER, DT_SINGLELINE, DT_VCENTER, TRANSPARENT,
+        },
+    };
+    use winit::platform::windows::WindowExtWindows;
+    let size = window.inner_size();
+    let hwnd = window.hwnd() as _;
+    unsafe {
+        let dc = GetDC(hwnd);
+        if dc.is_null() {
+            return;
+        }
+        let background = CreateSolidBrush(0x000a0806);
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: size.width as i32,
+            bottom: size.height as i32,
+        };
+        FillRect(dc, &rect, background);
+        DeleteObject(background);
+        SetBkMode(dc, TRANSPARENT as i32);
+        SetTextColor(dc, 0x00f0e4d8);
+        let mut title: Vec<u16> = "Loading...".encode_utf16().collect();
+        DrawTextW(
+            dc,
+            title.as_mut_ptr(),
+            title.len() as i32,
+            &mut rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+        let accent = CreateSolidBrush(0x00e68c26);
+        let bar = RECT {
+            left: rect.right * 3 / 10,
+            top: rect.bottom / 2 + 28,
+            right: rect.right * 7 / 10,
+            bottom: rect.bottom / 2 + 32,
+        };
+        FillRect(dc, &bar, accent);
+        DeleteObject(accent);
+        ReleaseDC(hwnd, dc);
+    }
+}
+#[cfg(not(target_os = "windows"))]
+fn paint_startup(window: &winit::window::Window) {
+    window.request_redraw();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn startup_display_transfers_the_same_native_window() {
+        let info = DisplayInfo {
+            window: crate::WindowInfo {
+                title: "Startup handoff test".into(),
+                size: [320, 180],
+                resizable: true,
+            },
+            ..Default::default()
+        };
+        let startup = StartupDisplay::new(&info).unwrap();
+        let id = startup.0.borrow().as_ref().unwrap().1.id();
+        assert!(startup.pump());
+        let (_, window, size) = take_native_window(&info).unwrap();
+        assert_eq!(window.id(), id);
+        assert_eq!(size, [320, 180]);
+        assert!(startup.0.borrow().is_none());
+    }
 
     #[test]
     fn windowed_creation_ignores_monitor_selection() {

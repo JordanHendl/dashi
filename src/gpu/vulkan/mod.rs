@@ -4,6 +4,7 @@ mod mesh;
 mod allocation;
 mod error;
 mod external;
+mod paging;
 use crate::{
     cmd::{CommandStream, Executable},
     driver::{
@@ -2498,7 +2499,7 @@ impl VulkanContext {
         let info = self.allocator.get_allocation_info(buf.alloc.vma()?);
         self.allocator.flush_allocation(
             buf.alloc.vma()?,
-            info.offset as usize,
+            0,
             info.size as usize,
         )?;
         Ok(())
