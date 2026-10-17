@@ -5,6 +5,7 @@
 mod mesh_commands;
 
 use ash::vk;
+use smallvec::SmallVec;
 use std::ffi::CString;
 
 use super::{
@@ -19,8 +20,7 @@ use crate::gpu::driver::state::{
 use crate::utils::Handle;
 use crate::{
     BindTable, Buffer, ClearValue, CommandQueue, ComputePipeline, DynamicBuffer, Fence, GPUError,
-    GraphicsPipeline, Image, QueueType, Rect2D, Result, Semaphore, ShaderStageMask, SubmitInfo2,
-    UsageBits,
+    GraphicsPipeline, Image, QueueType, Rect2D, Result, ShaderStageMask, SubmitInfo, UsageBits,
 };
 
 // --- New: helpers to map engine Layout/UsageBits to Vulkan ---
@@ -84,8 +84,8 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
 fn collect_imageless_attachment_infos(
     ctx: &VulkanContext,
     attachments: &[(Handle<super::VkImageView>, vk::ImageLayout)],
-) -> Result<(Vec<ImagelessFramebufferAttachmentInfo>, u32, u32), GPUError> {
-    let mut attachment_infos = Vec::with_capacity(attachments.len());
+) -> Result<(SmallVec<[ImagelessFramebufferAttachmentInfo; 9]>, u32, u32), GPUError> {
+    let mut attachment_infos = SmallVec::new();
     let mut attachment_min_width = u32::MAX;
     let mut attachment_min_height = u32::MAX;
 
@@ -409,6 +409,8 @@ impl CommandQueue {
         self.invalidate_graphics_descriptor_binds();
         self.invalidate_compute_descriptor_binds();
         self.recorded_buffer_states.clear();
+        self.vertex_binding = None;
+        self.index_binding = None;
         Ok(())
     }
 
@@ -432,50 +434,31 @@ impl CommandQueue {
     fn ensure_active_render_pass(&self) -> Result<()> {
         Ok(())
     }
-    fn submit(&mut self, info: &SubmitInfo2) -> Result<Handle<Fence>, GPUError> {
+    pub(super) fn submit(&mut self, info: &SubmitInfo) -> Result<Handle<Fence>, GPUError> {
         if self.dirty {
             unsafe { (*self.ctx).device.end_command_buffer(self.cmd_buf)? };
             self.dirty = false;
         }
 
         unsafe {
-            let wait_sems: Vec<Handle<Semaphore>> = info
-                .wait_sems
-                .iter()
-                .copied()
-                .filter(|h| h.valid())
-                .collect();
-
-            let signal_sems: Vec<Handle<Semaphore>> = info
-                .signal_sems
-                .iter()
-                .copied()
-                .filter(|h| h.valid())
-                .collect();
-
-            let raw_wait_sems: Vec<vk::Semaphore> = wait_sems
-                .into_iter()
-                .map(|a| {
-                    (*self.ctx)
-                        .semaphores
-                        .get_ref(a.clone())
-                        .ok_or(GPUError::SlotError())
-                        .map(|sem| sem.raw)
-                })
-                .collect::<Result<_, _>>()?;
-
-            let raw_signal_sems: Vec<vk::Semaphore> = signal_sems
-                .into_iter()
-                .map(|a| {
-                    (*self.ctx)
-                        .semaphores
-                        .get_ref(a.clone())
-                        .ok_or(GPUError::SlotError())
-                        .map(|sem| sem.raw)
-                })
-                .collect::<Result<_, _>>()?;
-
-            let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+            let resolve =
+                |sems: &[Handle<crate::Semaphore>]| -> Result<SmallVec<[vk::Semaphore; 4]>> {
+                    sems.iter()
+                        .filter(|h| h.valid())
+                        .map(|h| {
+                            (*self.ctx)
+                                .semaphores
+                                .get_ref(*h)
+                                .map(|sem| sem.raw)
+                                .ok_or(GPUError::SlotError())
+                        })
+                        .collect()
+                };
+            let raw_wait_sems = resolve(info.wait_sems)?;
+            let raw_signal_sems = resolve(info.signal_sems)?;
+            let stage_masks =
+                smallvec::smallvec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
+            let stage_masks: SmallVec<[_; 4]> = stage_masks;
 
             let queue = (*self.ctx).queue(self.queue_type);
             let fence = (*self.ctx)
@@ -492,12 +475,7 @@ impl CommandQueue {
                     .wait_dst_stage_mask(&stage_masks)
                     .wait_semaphores(&raw_wait_sems)
                     .build()],
-                (*self.ctx)
-                    .fences
-                    .get_ref(self.fence)
-                    .ok_or(GPUError::SlotError())?
-                    .raw
-                    .clone(),
+                fence,
             )?;
 
             return Ok(self.fence.clone());
@@ -510,32 +488,6 @@ impl CommandQueue {
 
     fn invalidate_compute_descriptor_binds(&mut self) {
         self.compute_descriptor_binds = Default::default();
-    }
-
-    fn cached_descriptor_bind(
-        &self,
-        bind_point: vk::PipelineBindPoint,
-        index: usize,
-        entry: DescriptorBindCacheEntry,
-    ) -> bool {
-        if bind_point == vk::PipelineBindPoint::GRAPHICS {
-            self.graphics_descriptor_binds[index] == entry
-        } else {
-            self.compute_descriptor_binds[index] == entry
-        }
-    }
-
-    fn record_descriptor_bind(
-        &mut self,
-        bind_point: vk::PipelineBindPoint,
-        index: usize,
-        entry: DescriptorBindCacheEntry,
-    ) {
-        if bind_point == vk::PipelineBindPoint::GRAPHICS {
-            self.graphics_descriptor_binds[index] = entry;
-        } else {
-            self.compute_descriptor_binds[index] = entry;
-        }
     }
 
     fn bind_descriptor_tables(
@@ -573,12 +525,19 @@ impl CommandQueue {
                 dynamic_offset: dynamic_offsets[0],
                 dynamic_offset_count,
             };
-            if self.cached_descriptor_bind(bind_point, index, entry) {
+            let ctx = self.ctx_ref();
+            let cache = if bind_point == vk::PipelineBindPoint::GRAPHICS {
+                &mut self.graphics_descriptor_binds
+            } else {
+                &mut self.compute_descriptor_binds
+            };
+            let cached = cache.get_mut(set_id as usize);
+            if cached.as_deref() == Some(&entry) {
                 continue;
             }
 
             unsafe {
-                self.ctx_ref().device.cmd_bind_descriptor_sets(
+                ctx.device.cmd_bind_descriptor_sets(
                     self.cmd_buf,
                     bind_point,
                     layout,
@@ -587,7 +546,9 @@ impl CommandQueue {
                     &dynamic_offsets[..dynamic_offset_count as usize],
                 );
             }
-            self.record_descriptor_bind(bind_point, index, entry);
+            if let Some(cached) = cached {
+                *cached = entry;
+            }
         }
         Ok(())
     }
@@ -616,9 +577,11 @@ impl CommandQueue {
 
     /// Bind a graphics pipeline for subsequent draw calls.
     fn bind_graphics_pipeline(&mut self, pipeline: Handle<GraphicsPipeline>) -> Result<()> {
-        let curr_rp = self.curr_rp.ok_or(GPUError::LibraryError(format!(
-            "Trying to bind graphics pipeline without active bound render pass."
-        )))?;
+        let curr_rp = self.curr_rp.ok_or_else(|| {
+            GPUError::LibraryError(
+                "Trying to bind graphics pipeline without active bound render pass.".into(),
+            )
+        })?;
         if self.curr_pipeline == Some(pipeline) {
             return Ok(());
         }
@@ -687,6 +650,68 @@ impl CommandQueue {
                 }
             }
         }
+    }
+
+    fn prepare_draw(
+        &mut self,
+        vertices: Handle<Buffer>,
+        indices: Handle<Buffer>,
+        tables: &[Option<Handle<BindTable>>; 4],
+        dynamic: &[Option<DynamicBuffer>; 4],
+    ) -> Result<()> {
+        self.ensure_active_render_pass()?;
+        for (handle, usage, indexed) in [
+            (vertices, UsageBits::VERTEX_READ, false),
+            (indices, UsageBits::INDEX_READ, true),
+        ] {
+            if !handle.valid() {
+                continue;
+            }
+            self.ensure_buffer_state(handle, usage)?;
+            let ctx = self.ctx_ref();
+            let buffer = ctx.buffers.get_ref(handle).ok_or(GPUError::SlotError())?;
+            let binding = (buffer.buf, buffer.offset as u64);
+            let cached = if indexed {
+                &mut self.index_binding
+            } else {
+                &mut self.vertex_binding
+            };
+            if *cached != Some(binding) {
+                unsafe {
+                    if indexed {
+                        ctx.device.cmd_bind_index_buffer(
+                            self.cmd_buf,
+                            binding.0,
+                            binding.1,
+                            vk::IndexType::UINT32,
+                        );
+                    } else {
+                        ctx.device.cmd_bind_vertex_buffers(
+                            self.cmd_buf,
+                            0,
+                            &[binding.0],
+                            &[binding.1],
+                        );
+                    }
+                }
+                *cached = Some(binding);
+            }
+        }
+        self.ensure_binding_states(tables, ShaderStageMask::ALL_GRAPHICS)?;
+        if let Some(pipe) = self.curr_pipeline {
+            let ctx = self.ctx_ref();
+            let pipeline = ctx
+                .gfx_pipelines
+                .get_ref(pipe)
+                .ok_or(GPUError::SlotError())?;
+            let layout = ctx
+                .gfx_pipeline_layouts
+                .get_ref(pipeline.layout)
+                .ok_or(GPUError::SlotError())?
+                .layout;
+            self.bind_descriptor_tables(vk::PipelineBindPoint::GRAPHICS, layout, tables, dynamic)?;
+        }
+        Ok(())
     }
 
     fn update_last_access(&mut self, stage: vk::PipelineStageFlags, access: vk::AccessFlags) {
@@ -789,7 +814,7 @@ impl CommandQueue {
     ) -> Result<()> {
         let requirements = self
             .ctx_ref()
-            .bind_table_buffer_requirements(table, stage_filter);
+            .iter_bind_table_buffer_requirements(table, stage_filter);
         for requirement in requirements {
             self.ensure_buffer_state_on_queue_at_stage(
                 requirement.buffer,
@@ -1083,42 +1108,14 @@ impl CommandSink for CommandQueue {
                 Layout::DepthStencilAttachment,
             )?;
         }
-        // end previous pass
         if self.curr_rp.is_some() {
-            unsafe {
-                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
-            }
-            // finalize CPU layouts for previous attachments
-            let attachments_prev = std::mem::take(&mut self.curr_attachments);
-            for (view, layout) in attachments_prev {
-                let ctx = self.ctx_ref();
-                let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
-                ctx.images
-                    .with_mut(v.img, |img| {
-                        let base = v.range.base_mip_level as usize;
-                        let count = v.range.level_count as usize;
-                        for i in base..base + count {
-                            if let Some(l) = img.layouts.get_mut(i) {
-                                *l = layout;
-                            }
-                        }
-                    })
-                    .ok_or(GPUError::SlotError())?;
-            }
+            self.end_drawing(&Default::default())?;
         }
 
         self.curr_rp = Some(cmd.render_pass);
         self.curr_subpass = Some(0);
 
-        let (
-            rp_raw,
-            mut fb,
-            rp_attachment_infos,
-            rp_subpass_samples,
-            rp_initial_layouts,
-            mut rp_width,
-            mut rp_height,
-        ) = {
+        let (rp_raw, mut fb, rp_attachment_infos, rp_initial_layouts, mut rp_width, mut rp_height) = {
             let rp_obj = self
                 .ctx_ref()
                 .render_passes
@@ -1127,9 +1124,10 @@ impl CommandSink for CommandQueue {
             (
                 rp_obj.raw,
                 rp_obj.fb,
-                rp_obj.attachment_infos.clone(),
-                rp_obj.subpass_samples.clone(),
-                rp_obj.attachment_initial_layouts.clone(),
+                SmallVec::<[ImagelessFramebufferAttachmentInfo; 9]>::from_slice(
+                    &rp_obj.attachment_infos,
+                ),
+                SmallVec::<[vk::ImageLayout; 9]>::from_slice(&rp_obj.attachment_initial_layouts),
                 rp_obj.width,
                 rp_obj.height,
             )
@@ -1139,6 +1137,13 @@ impl CommandSink for CommandQueue {
 
         #[cfg(debug_assertions)]
         {
+            let rp = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(cmd.render_pass)
+                .ok_or(GPUError::SlotError())?;
+            let rp_subpass_samples = &rp.subpass_samples;
+
             if let Err(err) = self.validate_subpass_samples(
                 &rp_subpass_samples,
                 0,
@@ -1150,7 +1155,7 @@ impl CommandSink for CommandQueue {
             }
         }
 
-        let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
+        let mut attachments_vk: SmallVec<[vk::ImageView; 9]> = SmallVec::new();
         self.curr_attachments.clear();
 
         for view in cmd.color_attachments.iter().flatten() {
@@ -1211,7 +1216,7 @@ impl CommandSink for CommandQueue {
                         rp_mut.fb = new_fb;
                         rp_mut.width = target_width;
                         rp_mut.height = target_height;
-                        rp_mut.attachment_infos = updated_attachment_infos;
+                        rp_mut.attachment_infos = updated_attachment_infos.into_vec();
                     })
                     .ok_or(GPUError::SlotError())?;
             }
@@ -1246,7 +1251,7 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let mut clears: Vec<vk::ClearValue> = cmd
+        let mut clears: SmallVec<[vk::ClearValue; 9]> = cmd
             .clear_values
             .iter()
             .flatten()
@@ -1311,43 +1316,14 @@ impl CommandSink for CommandQueue {
             return Ok(());
         }
 
-        // end previous pass
         if self.curr_rp.is_some() {
-            unsafe {
-                self.ctx_ref().device.cmd_end_render_pass(self.cmd_buf);
-            }
-            // finalize CPU layouts for previous attachments
-            let attachments_prev = std::mem::take(&mut self.curr_attachments);
-            for (view, layout) in attachments_prev {
-                let ctx = self.ctx_ref();
-                let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
-                ctx.images
-                    .with_mut(v.img, |img| {
-                        let base = v.range.base_mip_level as usize;
-                        let count = v.range.level_count as usize;
-                        for i in base..base + count {
-                            if let Some(l) = img.layouts.get_mut(i) {
-                                *l = layout;
-                            }
-                        }
-                    })
-                    .ok_or(GPUError::SlotError())?;
-            }
+            self.end_drawing(&Default::default())?;
         }
 
         self.curr_rp = Some(cmd.render_pass);
         self.curr_subpass = Some(0);
 
-        let (
-            rp_raw,
-            mut fb,
-            rp_subpass_samples,
-            rp_subpass_formats,
-            rp_attachment_infos,
-            rp_initial_layouts,
-            mut rp_width,
-            mut rp_height,
-        ) = {
+        let (rp_raw, mut fb, rp_attachment_infos, rp_initial_layouts, mut rp_width, mut rp_height) = {
             let rp = self
                 .ctx_ref()
                 .render_passes
@@ -1356,10 +1332,10 @@ impl CommandSink for CommandQueue {
             (
                 rp.raw,
                 rp.fb,
-                rp.subpass_samples.clone(),
-                rp.subpass_formats.clone(),
-                rp.attachment_infos.clone(),
-                rp.attachment_initial_layouts.clone(),
+                SmallVec::<[ImagelessFramebufferAttachmentInfo; 9]>::from_slice(
+                    &rp.attachment_infos,
+                ),
+                SmallVec::<[vk::ImageLayout; 9]>::from_slice(&rp.attachment_initial_layouts),
                 rp.width,
                 rp.height,
             )
@@ -1369,6 +1345,14 @@ impl CommandSink for CommandQueue {
 
         #[cfg(debug_assertions)]
         {
+            let rp = self
+                .ctx_ref()
+                .render_passes
+                .get_ref(cmd.render_pass)
+                .ok_or(GPUError::SlotError())?;
+            let rp_subpass_samples = &rp.subpass_samples;
+            let rp_subpass_formats = &rp.subpass_formats;
+
             let pipeline_samples = {
                 let layout = self
                     .ctx_ref()
@@ -1421,7 +1405,7 @@ impl CommandSink for CommandQueue {
             );
         }
 
-        let mut attachments_vk: Vec<vk::ImageView> = Vec::new();
+        let mut attachments_vk: SmallVec<[vk::ImageView; 9]> = SmallVec::new();
         self.curr_attachments.clear();
 
         for view in cmd.color_attachments.iter().flatten() {
@@ -1482,7 +1466,7 @@ impl CommandSink for CommandQueue {
                         rp_mut.fb = new_fb;
                         rp_mut.width = target_width;
                         rp_mut.height = target_height;
-                        rp_mut.attachment_infos = updated_attachment_infos;
+                        rp_mut.attachment_infos = updated_attachment_infos.into_vec();
                     })
                     .ok_or(GPUError::SlotError())?;
             }
@@ -1517,7 +1501,7 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let mut clears: Vec<vk::ClearValue> = cmd
+        let mut clears: SmallVec<[vk::ClearValue; 9]> = cmd
             .clear_values
             .iter()
             .flatten()
@@ -1558,9 +1542,8 @@ impl CommandSink for CommandQueue {
         self.last_op_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         self.last_op_access = vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
 
-        let attachments = std::mem::take(&mut self.curr_attachments);
-        for (view, layout) in attachments {
-            let ctx = self.ctx_ref();
+        let ctx = self.ctx_ref();
+        for (view, layout) in self.curr_attachments.drain(..) {
             let v = ctx.image_views.get_ref(view).ok_or(GPUError::SlotError())?;
             ctx.images
                 .with_mut(v.img, |img| {
@@ -1887,47 +1870,12 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw(&mut self, cmd: &crate::gpu::driver::command::Draw) -> Result<()> {
-        self.ensure_active_render_pass()?;
-        if cmd.vertices.valid() {
-            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
-        }
-        self.ensure_binding_states(&cmd.bind_tables, ShaderStageMask::ALL_GRAPHICS)?;
-
-        if cmd.vertices.valid() {
-            let v = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            unsafe {
-                self.ctx_ref().device.cmd_bind_vertex_buffers(
-                    self.cmd_buf,
-                    0,
-                    &[v.buf],
-                    &[v.offset as u64],
-                );
-            }
-        }
-        if let Some(pipe) = self.curr_pipeline {
-            let p = self
-                .ctx_ref()
-                .gfx_pipelines
-                .get_ref(pipe)
-                .ok_or(GPUError::SlotError())?;
-            let layout = self
-                .ctx_ref()
-                .gfx_pipeline_layouts
-                .get_ref(p.layout)
-                .ok_or(GPUError::SlotError())?
-                .layout;
-
-            self.bind_descriptor_tables(
-                vk::PipelineBindPoint::GRAPHICS,
-                layout,
-                &cmd.bind_tables,
-                &cmd.dynamic_buffers,
-            )?;
-        }
+        self.prepare_draw(
+            cmd.vertices,
+            Handle::default(),
+            &cmd.bind_tables,
+            &cmd.dynamic_buffers,
+        )?;
 
         unsafe {
             self.ctx_ref()
@@ -1942,62 +1890,12 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indexed(&mut self, cmd: &crate::gpu::driver::command::DrawIndexed) -> Result<()> {
-        self.ensure_active_render_pass()?;
-        if cmd.vertices.valid() {
-            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
-        }
-        if cmd.indices.valid() {
-            self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ)?;
-        }
-        self.ensure_binding_states(&cmd.bind_tables, ShaderStageMask::ALL_GRAPHICS)?;
-
-        if cmd.vertices.valid() && cmd.indices.valid() {
-            let v = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            let i = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.indices)
-                .ok_or(GPUError::SlotError())?;
-            unsafe {
-                self.ctx_ref().device.cmd_bind_vertex_buffers(
-                    self.cmd_buf,
-                    0,
-                    &[v.buf],
-                    &[v.offset as u64],
-                );
-
-                self.ctx_ref().device.cmd_bind_index_buffer(
-                    self.cmd_buf,
-                    i.buf,
-                    i.offset as u64,
-                    vk::IndexType::UINT32,
-                );
-            }
-        }
-        if let Some(pipe) = self.curr_pipeline {
-            let p = self
-                .ctx_ref()
-                .gfx_pipelines
-                .get_ref(pipe)
-                .ok_or(GPUError::SlotError())?;
-            let layout = self
-                .ctx_ref()
-                .gfx_pipeline_layouts
-                .get_ref(p.layout)
-                .ok_or(GPUError::SlotError())?
-                .layout;
-
-            self.bind_descriptor_tables(
-                vk::PipelineBindPoint::GRAPHICS,
-                layout,
-                &cmd.bind_tables,
-                &cmd.dynamic_buffers,
-            )?;
-        }
+        self.prepare_draw(
+            cmd.vertices,
+            cmd.indices,
+            &cmd.bind_tables,
+            &cmd.dynamic_buffers,
+        )?;
 
         unsafe {
             self.ctx_ref().device.cmd_draw_indexed(
@@ -2017,48 +1915,13 @@ impl CommandSink for CommandQueue {
     }
 
     fn draw_indirect(&mut self, cmd: &crate::gpu::driver::command::DrawIndirect) -> Result<()> {
-        self.ensure_active_render_pass()?;
-        if cmd.vertices.valid() {
-            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
-        }
+        self.prepare_draw(
+            cmd.vertices,
+            Handle::default(),
+            &cmd.bind_tables,
+            &cmd.dynamic_buffers,
+        )?;
         self.ensure_buffer_state(cmd.indirect.handle, UsageBits::INDIRECT_READ)?;
-        self.ensure_binding_states(&cmd.bind_tables, ShaderStageMask::ALL_GRAPHICS)?;
-        if cmd.vertices.valid() {
-            let v = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            unsafe {
-                self.ctx_ref().device.cmd_bind_vertex_buffers(
-                    self.cmd_buf,
-                    0,
-                    &[v.buf],
-                    &[v.offset as u64],
-                );
-            }
-        }
-
-        if let Some(pipe) = self.curr_pipeline {
-            let p = self
-                .ctx_ref()
-                .gfx_pipelines
-                .get_ref(pipe)
-                .ok_or(GPUError::SlotError())?;
-            let layout = self
-                .ctx_ref()
-                .gfx_pipeline_layouts
-                .get_ref(p.layout)
-                .ok_or(GPUError::SlotError())?
-                .layout;
-
-            self.bind_descriptor_tables(
-                vk::PipelineBindPoint::GRAPHICS,
-                layout,
-                &cmd.bind_tables,
-                &cmd.dynamic_buffers,
-            )?;
-        }
 
         let indirect = self
             .ctx_ref()
@@ -2086,78 +1949,29 @@ impl CommandSink for CommandQueue {
     fn draw_mesh_tasks(&mut self, cmd: &crate::driver::command::DrawMeshTasks) -> Result<()> {
         self.record_mesh_tasks(cmd)
     }
-    fn draw_mesh_tasks_indirect(&mut self, cmd: &crate::driver::command::DrawMeshTasksIndirect) -> Result<()> {
+    fn draw_mesh_tasks_indirect(
+        &mut self,
+        cmd: &crate::driver::command::DrawMeshTasksIndirect,
+    ) -> Result<()> {
         self.record_mesh_tasks_indirect(cmd, None)
     }
-    fn draw_mesh_tasks_indirect_count(&mut self, cmd: &crate::driver::command::DrawMeshTasksIndirectCount) -> Result<()> {
+    fn draw_mesh_tasks_indirect_count(
+        &mut self,
+        cmd: &crate::driver::command::DrawMeshTasksIndirectCount,
+    ) -> Result<()> {
         self.record_mesh_tasks_indirect(&cmd.draws, Some(cmd.count))
     }
     fn draw_indexed_indirect(
         &mut self,
         cmd: &crate::gpu::driver::command::DrawIndexedIndirect,
     ) -> Result<()> {
-        self.ensure_active_render_pass()?;
-        if cmd.vertices.valid() {
-            self.ensure_buffer_state(cmd.vertices, UsageBits::VERTEX_READ)?;
-        }
-        if cmd.indices.valid() {
-            self.ensure_buffer_state(cmd.indices, UsageBits::INDEX_READ)?;
-        }
+        self.prepare_draw(
+            cmd.vertices,
+            cmd.indices,
+            &cmd.bind_tables,
+            &cmd.dynamic_buffers,
+        )?;
         self.ensure_buffer_state(cmd.indirect.handle, UsageBits::INDIRECT_READ)?;
-        self.ensure_binding_states(&cmd.bind_tables, ShaderStageMask::ALL_GRAPHICS)?;
-        if cmd.vertices.valid() {
-            let v = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.vertices)
-                .ok_or(GPUError::SlotError())?;
-            unsafe {
-                self.ctx_ref().device.cmd_bind_vertex_buffers(
-                    self.cmd_buf,
-                    0,
-                    &[v.buf],
-                    &[v.offset as u64],
-                );
-            }
-        }
-
-        if cmd.indices.valid() {
-            let i = self
-                .ctx_ref()
-                .buffers
-                .get_ref(cmd.indices)
-                .ok_or(GPUError::SlotError())?;
-
-            unsafe {
-                self.ctx_ref().device.cmd_bind_index_buffer(
-                    self.cmd_buf,
-                    i.buf,
-                    i.offset as u64,
-                    vk::IndexType::UINT32,
-                );
-            }
-        }
-
-        if let Some(pipe) = self.curr_pipeline {
-            let p = self
-                .ctx_ref()
-                .gfx_pipelines
-                .get_ref(pipe)
-                .ok_or(GPUError::SlotError())?;
-            let layout = self
-                .ctx_ref()
-                .gfx_pipeline_layouts
-                .get_ref(p.layout)
-                .ok_or(GPUError::SlotError())?
-                .layout;
-
-            self.bind_descriptor_tables(
-                vk::PipelineBindPoint::GRAPHICS,
-                layout,
-                &cmd.bind_tables,
-                &cmd.dynamic_buffers,
-            )?;
-        }
 
         let indirect = self
             .ctx_ref()
@@ -2408,7 +2222,10 @@ impl CommandSink for CommandQueue {
     }
 
     fn submit(&mut self, cmd: &crate::SubmitInfo2) -> Result<Handle<Fence>> {
-        self.submit(cmd)
+        self.submit(&SubmitInfo {
+            wait_sems: &cmd.wait_sems,
+            signal_sems: &cmd.signal_sems,
+        })
     }
 
     fn debug_marker_begin(

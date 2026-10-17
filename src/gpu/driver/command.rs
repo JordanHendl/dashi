@@ -310,9 +310,13 @@ pub struct DrawMeshTasksIndirect {
 }
 impl Default for DrawMeshTasksIndirect {
     fn default() -> Self {
-        Self { indirect: BufferView::new(Default::default()), bind_tables: Default::default(),
-            dynamic_buffers: Default::default(), draw_count: 1,
-            stride: std::mem::size_of::<crate::MeshTasksIndirectCommand>() as u32 }
+        Self {
+            indirect: BufferView::new(Default::default()),
+            bind_tables: Default::default(),
+            dynamic_buffers: Default::default(),
+            draw_count: 1,
+            stride: std::mem::size_of::<crate::MeshTasksIndirectCommand>() as u32,
+        }
     }
 }
 
@@ -469,6 +473,7 @@ struct CmdHeader {
 pub struct CommandEncoder {
     data: Vec<u8>,
     side: Vec<u8>,
+    timer_frames: Vec<u32>,
     queue: QueueType,
 }
 
@@ -479,6 +484,7 @@ impl CommandEncoder {
         Self {
             data: Vec::with_capacity(1024),
             side: Vec::with_capacity(256),
+            timer_frames: Vec::new(),
             queue,
         }
     }
@@ -492,21 +498,31 @@ impl CommandEncoder {
     pub fn reset(&mut self) {
         self.data.clear();
         self.side.clear();
+        self.timer_frames.clear();
     }
 
     /// Push a command payload into the internal byte stream. The method is marked
     /// `inline(always)` so that callers can be optimized tightly.
     #[inline(always)]
     fn push<T: std::fmt::Debug>(&mut self, op: Op, payload: &T) {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(payload as *const T as *const u8, size_of::<T>())
+        };
+        self.push_payload(op, bytes, align_of::<T>());
+    }
+
+    fn push_bytes(&mut self, op: Op, payload: &[u8]) {
+        self.push_payload(op, payload, 8);
+    }
+
+    #[inline(always)]
+    fn push_payload(&mut self, op: Op, payload: &[u8], alignment: usize) {
         const INLINE_ALIGN: usize = 8;
         const SIDE_ALIGN: usize = 8;
         const INLINE_MAX: usize = 32;
         const SIDE_FLAG: u16 = 0x8000;
-
-        let size = size_of::<T>();
-        let p = unsafe { core::slice::from_raw_parts(payload as *const T as *const u8, size) };
-
-        if size <= INLINE_MAX && align_of::<T>() <= INLINE_ALIGN {
+        let size = payload.len();
+        if size <= INLINE_MAX && alignment <= INLINE_ALIGN {
             // Write header (op, size)
             self.data.extend_from_slice(&(op as u16).to_ne_bytes());
             self.data.extend_from_slice(&(size as u16).to_ne_bytes());
@@ -526,7 +542,7 @@ impl CommandEncoder {
             }
 
             // Write payload
-            self.data.extend_from_slice(p);
+            self.data.extend_from_slice(payload);
         } else {
             // Side path: header with SIDE_FLAG and u32 offset to side blob.
             let header_size = SIDE_FLAG;
@@ -553,36 +569,8 @@ impl CommandEncoder {
                 self.side.resize(self.side.len() + pad, 0);
             }
 
-            self.side.extend_from_slice(p);
+            self.side.extend_from_slice(payload);
         }
-    }
-
-    #[inline(always)]
-    fn push_bytes(&mut self, op: Op, payload: &[u8]) {
-        const SIDE_ALIGN: usize = 8;
-        const SIDE_FLAG: u16 = 0x8000;
-
-        self.data.extend_from_slice(&(op as u16).to_ne_bytes());
-        self.data.extend_from_slice(&SIDE_FLAG.to_ne_bytes());
-
-        let offset = self.side.len() as u32;
-        self.data.extend_from_slice(&offset.to_ne_bytes());
-
-        let len_u32: u32 = payload.len() as u32;
-        self.side.extend_from_slice(&len_u32.to_ne_bytes());
-
-        self.side.reserve(SIDE_ALIGN - 1 + payload.len());
-
-        let base = self.side.as_ptr() as usize;
-        let here = base + self.side.len();
-        let start = align_up(here, SIDE_ALIGN);
-        let pad = start - here;
-
-        if pad != 0 {
-            self.side.resize(self.side.len() + pad, 0);
-        }
-
-        self.side.extend_from_slice(payload);
     }
 
     /// Begin a render pass with the provided attachments.
@@ -752,6 +740,9 @@ impl CommandEncoder {
 
     /// Begin a GPU timer region for the specified frame index.
     pub fn gpu_timer_begin(&mut self, frame: u32) {
+        if !self.timer_frames.contains(&frame) {
+            self.timer_frames.push(frame);
+        }
         self.push(Op::GpuTimerBegin, &GpuTimerBegin { frame });
     }
 
@@ -788,87 +779,17 @@ impl CommandEncoder {
                     eprintln!("{}", Backtrace::force_capture());
                 }
             }
-            match cmd.op {
-                Op::BeginDrawing => self.begin_drawing(cmd.payload()),
-                Op::EndDrawing => {
-                    let _ = cmd.payload::<EndDrawing>();
-                    self.end_drawing();
-                }
-                Op::BindGraphicsPipeline => {
-                    let payload = cmd.payload::<BindGraphicsPipeline>();
-                    self.bind_graphics_pipeline(payload.pipeline);
-                }
-                Op::UpdateGraphicsPipelineState => {
-                    self.update_graphics_pipeline_state(cmd.payload())
-                }
-                Op::Draw => self.draw(cmd.payload()),
-                Op::Dispatch => self.dispatch(cmd.payload()),
-                Op::CopyBuffer => self.copy_buffer(cmd.payload()),
-                Op::CopyBufferToImage => self.copy_buffer_to_image(cmd.payload()),
-                Op::CopyImage => {
-                    let payload = cmd.payload::<CopyImage>();
-                    self.push(Op::CopyImage, payload);
-                }
-                Op::ResolveImage => self.resolve_image(cmd.payload()),
-                Op::DebugMarkerBegin => self.begin_debug_marker(),
-                Op::DebugMarkerEnd => self.end_debug_marker(),
-                Op::DebugLabel => self.push_bytes(Op::DebugLabel, cmd.bytes()),
-                Op::GpuTimerBegin => self.gpu_timer_begin(cmd.payload::<GpuTimerBegin>().frame),
-                Op::GpuTimerEnd => self.gpu_timer_end(cmd.payload::<GpuTimerEnd>().frame),
-                Op::CopyImageToBuffer => self.copy_image_to_buffer(cmd.payload()),
-                Op::BlitImage => self.blit_image(cmd.payload()),
-                Op::DrawIndexed => self.draw_indexed(cmd.payload()),
-                Op::DrawIndirect => self.draw_indirect(cmd.payload()),
-                Op::DrawMeshTasks => self.draw_mesh_tasks(cmd.payload()),
-                Op::DrawMeshTasksIndirect => self.draw_mesh_tasks_indirect(cmd.payload()),
-                Op::DrawMeshTasksIndirectCount => self.draw_mesh_tasks_indirect_count(cmd.payload()),
-                Op::DrawIndexedIndirect => self.draw_indexed_indirect(cmd.payload()),
-                Op::DispatchIndirect => todo!(),
-                Op::PrepareBuffer => {
-                    let payload = cmd.payload::<PrepareBuffer>();
-                    if payload.stages.is_empty() {
-                        self.prepare_buffer(payload.buffer, payload.usage, Some(payload.queue));
-                    } else {
-                        self.prepare_buffer_requirement(
-                            BufferStateRequirement {
-                                buffer: payload.buffer,
-                                usage: payload.usage,
-                                stages: payload.stages,
-                            },
-                            Some(payload.queue),
-                        );
-                    }
-                }
-                Op::TransitionImage => self.transition_image(cmd.payload()),
-                Op::BeginRenderPass => self.begin_render_pass(cmd.payload()),
-                Op::NextSubpass => {
-                    // Validate payload shape and record the implicit next-subpass command.
-                    let _ = cmd.payload::<NextSubpass>();
-                    self.next_subpass();
-                }
-                Op::SyncPoint => {
-                    let payload = cmd.payload::<SyncPointCmd>();
-                    let point =
-                        SyncPoint::from_u8(payload.point).expect("invalid sync point payload");
-                    let scope = Scope::from_u8(payload.scope).expect("invalid scope payload");
-                    self.sync_point(point, scope);
-                }
+            if let Op::GpuTimerBegin = cmd.op {
+                self.gpu_timer_begin(cmd.payload::<GpuTimerBegin>().frame);
+            } else {
+                self.push_bytes(cmd.op, cmd.bytes());
             }
         }
     }
     /// Submit the recorded commands to a backend context implementing [`CommandSink`].
     pub fn append<S: CommandSink>(&self, sink: &mut S) -> Result<usize> {
-        let mut gpu_timer_frames = Vec::new();
-        for cmd in self.iter() {
-            if let Op::GpuTimerBegin = cmd.op {
-                let frame = cmd.payload::<GpuTimerBegin>().frame;
-                if !gpu_timer_frames.contains(&frame) {
-                    gpu_timer_frames.push(frame);
-                }
-            }
-        }
-        if !gpu_timer_frames.is_empty() {
-            sink.prepare_gpu_timers(&gpu_timer_frames)?;
+        if !self.timer_frames.is_empty() {
+            sink.prepare_gpu_timers(&self.timer_frames)?;
         }
 
         let mut cnt = 0;
@@ -909,7 +830,9 @@ impl CommandEncoder {
                 Op::DrawIndirect => sink.draw_indirect(cmd.payload())?,
                 Op::DrawMeshTasks => sink.draw_mesh_tasks(cmd.payload())?,
                 Op::DrawMeshTasksIndirect => sink.draw_mesh_tasks_indirect(cmd.payload())?,
-                Op::DrawMeshTasksIndirectCount => sink.draw_mesh_tasks_indirect_count(cmd.payload())?,
+                Op::DrawMeshTasksIndirectCount => {
+                    sink.draw_mesh_tasks_indirect_count(cmd.payload())?
+                }
                 Op::DrawIndexedIndirect => sink.draw_indexed_indirect(cmd.payload())?,
                 Op::DispatchIndirect => todo!(),
                 Op::PrepareBuffer => sink.prepare_buffer(cmd.payload())?,
@@ -1167,13 +1090,19 @@ pub trait CommandSink {
     fn draw_indexed(&mut self, cmd: &DrawIndexed) -> Result<()>;
     fn draw_indirect(&mut self, cmd: &DrawIndirect) -> Result<()>;
     fn draw_mesh_tasks(&mut self, _cmd: &DrawMeshTasks) -> Result<()> {
-        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+        Err(crate::GPUError::Unimplemented(
+            "Mesh shaders are unavailable on this command sink",
+        ))
     }
     fn draw_mesh_tasks_indirect(&mut self, _cmd: &DrawMeshTasksIndirect) -> Result<()> {
-        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+        Err(crate::GPUError::Unimplemented(
+            "Mesh shaders are unavailable on this command sink",
+        ))
     }
     fn draw_mesh_tasks_indirect_count(&mut self, _cmd: &DrawMeshTasksIndirectCount) -> Result<()> {
-        Err(crate::GPUError::Unimplemented("Mesh shaders are unavailable on this command sink"))
+        Err(crate::GPUError::Unimplemented(
+            "Mesh shaders are unavailable on this command sink",
+        ))
     }
     fn draw_indexed_indirect(&mut self, cmd: &DrawIndexedIndirect) -> Result<()>;
     fn dispatch(&mut self, cmd: &Dispatch) -> Result<()>;
@@ -1297,5 +1226,24 @@ mod tests {
         assert_eq!(second_payload.bind_tables[0], dispatch_b.bind_tables[0]);
 
         assert!(iter.next().is_none());
+    }
+    #[test]
+    fn combine_preserves_short_labels_and_timer_preparation() {
+        let mut first = CommandEncoder::new(QueueType::Graphics);
+        first.gpu_timer_begin(3);
+        first.debug_label("abc");
+        first.gpu_timer_end(3);
+        let mut combined = CommandEncoder::new(QueueType::Graphics);
+        combined.combine(&first);
+        combined.combine(&first);
+        assert_eq!(combined.timer_frames, [3]);
+        let labels: Vec<_> = combined.iter().filter(|c| c.op == Op::DebugLabel).collect();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].bytes(), b"abc");
+        assert_eq!(labels[1].bytes(), b"abc");
+        combined.reset();
+        assert!(combined.timer_frames.is_empty());
+        combined.gpu_timer_begin(5);
+        assert_eq!(combined.timer_frames, [5]);
     }
 }

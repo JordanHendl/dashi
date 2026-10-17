@@ -166,30 +166,79 @@ fn pipeline_switch() {
         })
         .unwrap();
 
-    //    let mut list = ctx
-    //        .begin_command_queue(&CommandQueueInfo { debug_name: "draw", ..Default::default() })
-    //        .unwrap();
-    //
-    //    list.begin_drawing(&DrawBegin {
-    //        viewport: Viewport {
-    //            area: FRect2D { w: WIDTH as f32, h: HEIGHT as f32, ..Default::default() },
-    //            scissor: Rect2D { w: WIDTH, h: HEIGHT, ..Default::default() },
-    //            ..Default::default()
-    //        },
-    //        pipeline: pipe_red,
-    //        render_target: rt,
-    //        clear_values: &[ClearValue::Color([0.0,0.0,0.0,1.0])],
-    //    }).unwrap();
-    //
-    //    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-    //
-    //    list.bind_pipeline(pipe_green).unwrap();
-    //    list.append(Command::Draw(Draw { vertices: vb, count: 3, ..Default::default() }));
-    //
-    //    list.end_drawing().unwrap();
-    //
-    //    let fence = ctx.submit(&mut list, &Default::default()).unwrap();
-    //    ctx.wait(fence).unwrap();
-
-    //    ctx.destroy_cmd_queue(list);
+    let readback = ctx
+        .make_buffer(&BufferInfo {
+            debug_name: "readback",
+            byte_size: WIDTH * HEIGHT * 4,
+            visibility: MemoryVisibility::CpuAndGpu,
+            ..Default::default()
+        })
+        .unwrap();
+    let viewport = Viewport {
+        area: FRect2D {
+            w: WIDTH as f32,
+            h: HEIGHT as f32,
+            ..Default::default()
+        },
+        scissor: Rect2D {
+            w: WIDTH,
+            h: HEIGHT,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut encoder = driver::command::CommandEncoder::new(QueueType::Graphics);
+    encoder.prepare_buffer(vb, UsageBits::VERTEX_READ, None);
+    encoder.begin_render_pass(&driver::command::BeginRenderPass {
+        render_pass: rp,
+        viewport,
+        color_attachments: [Some(view), None, None, None, None, None, None, None],
+        clear_values: [
+            Some(ClearValue::Color([0.0; 4])),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+        ..Default::default()
+    });
+    for pipeline in [pipe_red, pipe_green] {
+        encoder.bind_graphics_pipeline(pipeline);
+        encoder.update_graphics_pipeline_state(&driver::command::GraphicsPipelineStateUpdate {
+            viewport: Some(viewport),
+        });
+        encoder.draw(&driver::command::Draw {
+            vertices: vb,
+            count: 3,
+            instance_count: 1,
+            ..Default::default()
+        });
+    }
+    encoder.end_drawing();
+    encoder.copy_image_to_buffer(&driver::command::CopyImageBuffer {
+        src: img,
+        dst: readback,
+        ..Default::default()
+    });
+    let mut ring = ctx
+        .make_command_ring(&CommandQueueInfo2::default())
+        .unwrap();
+    for _ in 0..7 {
+        ring.record(|queue| {
+            encoder.append(queue).unwrap();
+        })
+        .unwrap();
+        ring.submit(&Default::default()).unwrap();
+        ring.wait_all().unwrap();
+        let pixels = ctx
+            .map_buffer::<u8>(BufferView::new(readback))
+            .unwrap()
+            .to_vec();
+        ctx.unmap_buffer(readback).unwrap();
+        let center = ((HEIGHT / 2 * WIDTH + WIDTH / 2) * 4) as usize;
+        assert_eq!(&pixels[center..center + 4], &[0, 255, 0, 255]);
+    }
 }

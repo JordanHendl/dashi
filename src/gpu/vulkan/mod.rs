@@ -425,6 +425,8 @@ pub struct CommandQueue {
     curr_subpass: Option<usize>,
     curr_pipeline: Option<Handle<GraphicsPipeline>>,
     curr_compute_pipeline: Option<Handle<ComputePipeline>>,
+    vertex_binding: Option<(vk::Buffer, u64)>,
+    index_binding: Option<(vk::Buffer, u64)>,
     graphics_descriptor_binds: [DescriptorBindCacheEntry; 4],
     compute_descriptor_binds: [DescriptorBindCacheEntry; 4],
     recorded_buffer_states: HashMap<Handle<Buffer>, (UsageBits, QueueType, vk::PipelineStageFlags)>,
@@ -447,6 +449,8 @@ impl Default for CommandQueue {
             curr_subpass: None,
             curr_pipeline: None,
             curr_compute_pipeline: None,
+            vertex_binding: None,
+            index_binding: None,
             graphics_descriptor_binds: Default::default(),
             compute_descriptor_binds: Default::default(),
             recorded_buffer_states: HashMap::new(),
@@ -1309,12 +1313,15 @@ impl VulkanContext {
             ]
         };
 
-        let mesh_available = supports_vulkan12 && enabled_extensions.iter().any(|ext| unsafe {
-            CStr::from_ptr(ext.extension_name.as_ptr()) == ash::extensions::ext::MeshShader::name()
-        });
+        let mesh_available = supports_vulkan12
+            && enabled_extensions.iter().any(|ext| unsafe {
+                CStr::from_ptr(ext.extension_name.as_ptr())
+                    == ash::extensions::ext::MeshShader::name()
+            });
         if mesh_available {
             let mut query = vk::PhysicalDeviceFeatures2::builder()
-                .push_next(&mut mesh_features).push_next(&mut draw_parameters);
+                .push_next(&mut mesh_features)
+                .push_next(&mut draw_parameters);
             unsafe { instance.get_physical_device_features2(pdevice, &mut query) };
             mesh_features.p_next = std::ptr::null_mut();
             draw_parameters.p_next = std::ptr::null_mut();
@@ -1366,10 +1373,17 @@ impl VulkanContext {
             device_ci = device_ci.enabled_features(&features);
         }
 
-        let mesh_caps = mesh::capabilities(&instance, pdevice, &mesh_features, &draw_parameters,
-            enabled_vulkan12.draw_indirect_count == vk::TRUE);
+        let mesh_caps = mesh::capabilities(
+            &instance,
+            pdevice,
+            &mesh_features,
+            &draw_parameters,
+            enabled_vulkan12.draw_indirect_count == vk::TRUE,
+        );
         if mesh_available {
-            device_ci = device_ci.push_next(&mut mesh_features).push_next(&mut draw_parameters);
+            device_ci = device_ci
+                .push_next(&mut mesh_features)
+                .push_next(&mut draw_parameters);
         }
         let device =
             unsafe { instance.create_device(pdevice, &device_ci.build(), allocation_callbacks) }?;
@@ -1534,7 +1548,9 @@ impl VulkanContext {
             allocation_callbacks.as_deref(),
         )?;
 
-        let mesh_loader = mesh_caps.mesh_shader.then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
+        let mesh_loader = mesh_caps
+            .mesh_shader
+            .then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
             mesh_caps,
             mesh_loader,
@@ -1724,7 +1740,9 @@ impl VulkanContext {
             allocation_callbacks.as_deref(),
         )?;
 
-        let mesh_loader = mesh_caps.mesh_shader.then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
+        let mesh_loader = mesh_caps
+            .mesh_shader
+            .then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
             mesh_caps,
             mesh_loader,
@@ -2154,43 +2172,7 @@ impl VulkanContext {
         cmd: &mut CommandQueue,
         info: &SubmitInfo,
     ) -> Result<Handle<Fence>, GPUError> {
-        if cmd.dirty {
-            unsafe { self.device.end_command_buffer(cmd.cmd_buf)? };
-            cmd.dirty = false;
-        }
-
-        let raw_wait_sems: Vec<vk::Semaphore> = info
-            .wait_sems
-            .into_iter()
-            .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
-            .collect();
-
-        let raw_signal_sems: Vec<vk::Semaphore> = info
-            .signal_sems
-            .into_iter()
-            .map(|a| self.semaphores.get_ref(a.clone()).unwrap().raw)
-            .collect();
-
-        let stage_masks = vec![vk::PipelineStageFlags::ALL_COMMANDS; raw_wait_sems.len()];
-        let queue = self.queue(cmd.queue_type);
-        unsafe {
-            // A fence can have several observers (for example a command ring and
-            // a compute readback). Only the next submission consumes its signal.
-            self.device
-                .reset_fences(&[self.fences.get_ref(cmd.fence).unwrap().raw])?;
-            self.device.queue_submit(
-                queue,
-                &[vk::SubmitInfo::builder()
-                    .command_buffers(&[cmd.cmd_buf])
-                    .signal_semaphores(&raw_signal_sems)
-                    .wait_dst_stage_mask(&stage_masks)
-                    .wait_semaphores(&raw_wait_sems)
-                    .build()],
-                self.fences.get_ref(cmd.fence).unwrap().raw.clone(),
-            )?
-        };
-
-        return Ok(cmd.fence.clone());
+        cmd.submit(info)
     }
 
     pub fn make_semaphores(&mut self, count: usize) -> Result<Vec<Handle<Semaphore>>, GPUError> {
@@ -2497,11 +2479,8 @@ impl VulkanContext {
         };
 
         let info = self.allocator.get_allocation_info(buf.alloc.vma()?);
-        self.allocator.flush_allocation(
-            buf.alloc.vma()?,
-            0,
-            info.size as usize,
-        )?;
+        self.allocator
+            .flush_allocation(buf.alloc.vma()?, 0, info.size as usize)?;
         Ok(())
     }
 
@@ -2793,12 +2772,25 @@ impl VulkanContext {
     ///
     /// Poll without waiting for GPU execution. Returns `None` until both queries
     /// are available. Callers requiring a result must wait for their submission first.
-    pub fn get_gpu_timestamp_interval(&mut self, frame: usize) -> Option<crate::GpuTimestampInterval> {
-        if !self.gpu_timers_enabled() { return None; }
-        let [start_ticks, end_ticks] = self.gpu_timers.get_mut(frame)?.resolve_ticks(&self.device).ok()?;
-        if end_ticks < start_ticks { return None; }
+    pub fn get_gpu_timestamp_interval(
+        &mut self,
+        frame: usize,
+    ) -> Option<crate::GpuTimestampInterval> {
+        if !self.gpu_timers_enabled() {
+            return None;
+        }
+        let [start_ticks, end_ticks] = self
+            .gpu_timers
+            .get_mut(frame)?
+            .resolve_ticks(&self.device)
+            .ok()?;
+        if end_ticks < start_ticks {
+            return None;
+        }
         Some(crate::GpuTimestampInterval {
-            start_ticks, end_ticks, nanoseconds_per_tick: self.timestamp_period as f64,
+            start_ticks,
+            end_ticks,
+            nanoseconds_per_tick: self.timestamp_period as f64,
         })
     }
 
@@ -3802,39 +3794,29 @@ impl VulkanContext {
         let write_usage = requirement.usage & UsageBits::STORAGE_WRITE;
         self.bind_tables
             .with_mut(table_handle, |table| {
+                let replacement = BoundBufferRequirement {
+                    buffer: requirement.buffer,
+                    read_usage,
+                    write_usage,
+                    read_stages: if read_usage.is_empty() {
+                        ShaderStageMask::NONE
+                    } else {
+                        requirement.stages
+                    },
+                    write_stages: if write_usage.is_empty() {
+                        ShaderStageMask::NONE
+                    } else {
+                        requirement.stages
+                    },
+                };
                 if let Some(existing) = table
                     .buffer_states
                     .iter_mut()
                     .find(|tracked| tracked.buffer == requirement.buffer)
                 {
-                    existing.read_usage = read_usage;
-                    existing.write_usage = write_usage;
-                    existing.read_stages = if read_usage.is_empty() {
-                        ShaderStageMask::NONE
-                    } else {
-                        requirement.stages
-                    };
-                    existing.write_stages = if write_usage.is_empty() {
-                        ShaderStageMask::NONE
-                    } else {
-                        requirement.stages
-                    };
+                    *existing = replacement;
                 } else {
-                    table.buffer_states.push(BoundBufferRequirement {
-                        buffer: requirement.buffer,
-                        read_usage,
-                        write_usage,
-                        read_stages: if read_usage.is_empty() {
-                            ShaderStageMask::NONE
-                        } else {
-                            requirement.stages
-                        },
-                        write_stages: if write_usage.is_empty() {
-                            ShaderStageMask::NONE
-                        } else {
-                            requirement.stages
-                        },
-                    });
+                    table.buffer_states.push(replacement);
                 }
             })
             .ok_or(GPUError::SlotError())?;
@@ -3846,13 +3828,20 @@ impl VulkanContext {
         table_handle: Handle<BindTable>,
         stage_filter: ShaderStageMask,
     ) -> Vec<BufferStateRequirement> {
-        let Some(table) = self.bind_tables.get_ref(table_handle) else {
-            return Vec::new();
-        };
-        table
-            .buffer_states
-            .iter()
-            .filter_map(|requirement| {
+        self.iter_bind_table_buffer_requirements(table_handle, stage_filter)
+            .collect()
+    }
+
+    pub(super) fn iter_bind_table_buffer_requirements(
+        &self,
+        table_handle: Handle<BindTable>,
+        stage_filter: ShaderStageMask,
+    ) -> impl Iterator<Item = BufferStateRequirement> + '_ {
+        self.bind_tables
+            .get_ref(table_handle)
+            .into_iter()
+            .flat_map(|table| &table.buffer_states)
+            .filter_map(move |requirement| {
                 let read_stages = requirement.read_stages & stage_filter;
                 let write_stages = requirement.write_stages & stage_filter;
                 let mut usage = UsageBits::empty();
@@ -3869,7 +3858,6 @@ impl VulkanContext {
                     stages,
                 })
             })
-            .collect()
     }
 
     fn write_bind_table_bindings(
@@ -5198,8 +5186,14 @@ impl VulkanContext {
             .render_pass(dummy_render_pass)
             .subpass(info.subpass_id as u32);
 
-        if !layout.shader_stages.iter().any(|s| s.stage == vk::ShaderStageFlags::MESH_EXT) {
-            pipeline_builder = pipeline_builder.vertex_input_state(&vertex_input_info).input_assembly_state(&layout.input_assembly);
+        if !layout
+            .shader_stages
+            .iter()
+            .any(|s| s.stage == vk::ShaderStageFlags::MESH_EXT)
+        {
+            pipeline_builder = pipeline_builder
+                .vertex_input_state(&vertex_input_info)
+                .input_assembly_state(&layout.input_assembly);
         }
         if let Some(d) = layout.depth_stencil.as_ref() {
             pipeline_builder = pipeline_builder.depth_stencil_state(d);

@@ -204,33 +204,18 @@ pub fn usage_to_access(_usage: UsageBits) -> Access {
 
 #[derive(Default)]
 pub struct StateTracker {
-    images: HashMap<(Handle<Image>, SubresourceRange), UsageBits>,
+    images: HashMap<(Handle<Image>, SubresourceRange), (UsageBits, Layout, Option<QueueType>)>,
     buffers: HashMap<Handle<Buffer>, BufferState>,
-    image_layouts: HashMap<(Handle<Image>, SubresourceRange), Layout>,
-    image_queues: HashMap<(Handle<Image>, SubresourceRange), QueueType>,
-    image_stages: HashMap<(Handle<Image>, SubresourceRange), PipelineStage>,
-    image_accesses: HashMap<(Handle<Image>, SubresourceRange), Access>,
 }
 
 impl StateTracker {
     pub fn new() -> Self {
-        Self {
-            images: HashMap::new(),
-            image_layouts: HashMap::new(),
-            buffers: HashMap::new(),
-            image_queues: HashMap::new(),
-            image_stages: HashMap::new(),
-            image_accesses: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn reset(&mut self) {
         self.images.clear();
         self.buffers.clear();
-        self.image_layouts.clear();
-        self.image_queues.clear();
-        self.image_stages.clear();
-        self.image_accesses.clear();
     }
 
     /// Returns (usage barrier if usage changed, layout transition if usage or layout changed).
@@ -239,81 +224,31 @@ impl StateTracker {
         &mut self,
         image: Handle<Image>,
         range: SubresourceRange,
-        mut new_usage: UsageBits,
-        mut new_layout: Layout,
+        new_usage: UsageBits,
+        new_layout: Layout,
         queue: QueueType,
     ) -> Option<LayoutTransition> {
-        let key = (image, range);
-
-        let old_usage = self.images.get(&key).copied().unwrap_or_default();
-        let usage_changed = old_usage != new_usage;
-
-        let old_layout = self
-            .image_layouts
-            .get(&key)
-            .copied()
-            .unwrap_or(Layout::Undefined);
-        let layout_changed = old_layout != new_layout;
-
-        let old_queue = self.image_queues.get(&key).copied().unwrap_or(queue);
-        let queue_changed = old_queue != queue;
-
-        let old_stage = self
-            .image_stages
-            .get(&key)
-            .copied()
-            .unwrap_or_else(|| usage_to_stage(old_usage));
-        let old_access = self
-            .image_accesses
-            .get(&key)
-            .copied()
-            .unwrap_or_else(|| usage_to_access(old_usage));
-
-        let mut new_stage = usage_to_stage(new_usage);
-        let mut new_access = usage_to_access(new_usage);
-
-        // Persist tracker state.
-        if usage_changed {
-            self.images.insert(key, new_usage);
-        } else {
-            new_usage = old_usage;
-            new_stage = old_stage;
-            new_access = old_access;
-        }
-        if layout_changed {
-            self.image_layouts.insert(key, new_layout);
-        } else {
-            new_layout = old_layout;
-            if old_layout == Layout::Undefined {
-                self.image_layouts.insert(key, new_layout);
-            }
-        }
-        if queue_changed {
-            self.image_queues.insert(key, queue);
-        } else {
-            self.image_queues.entry(key).or_insert(queue);
-        }
-        self.image_stages.insert(key, new_stage);
-        self.image_accesses.insert(key, new_access);
-
-        if usage_changed || layout_changed || queue_changed {
-            Some(LayoutTransition {
+        let (old_usage, old_layout, old_queue) = self
+            .images
+            .insert((image, range), (new_usage, new_layout, Some(queue)))
+            .unwrap_or((UsageBits::empty(), Layout::Undefined, None));
+        let old_queue = old_queue.unwrap_or(queue);
+        (old_usage != new_usage || old_layout != new_layout || old_queue != queue).then(|| {
+            LayoutTransition {
                 image,
                 range,
                 old_usage,
                 new_usage,
-                old_stage,
-                new_stage,
-                old_access,
-                new_access,
+                old_stage: usage_to_stage(old_usage),
+                new_stage: usage_to_stage(new_usage),
+                old_access: usage_to_access(old_usage),
+                new_access: usage_to_access(new_usage),
                 old_layout,
                 new_layout,
                 old_queue,
                 new_queue: queue,
-            })
-        } else {
-            None
-        }
+            }
+        })
     }
 
     pub fn request_buffer_state(
@@ -411,15 +346,17 @@ impl StateTracker {
         layout: Layout,
     ) {
         let key = (image, range);
-        self.image_layouts.insert(key, layout);
+        self.images
+            .entry(key)
+            .or_insert((UsageBits::empty(), Layout::Undefined, None))
+            .1 = layout;
     }
 
     /// New: query the last-known layout (Layout::Undefined if unknown).
     pub fn current_image_layout(&self, image: Handle<Image>, range: SubresourceRange) -> Layout {
-        self.image_layouts
+        self.images
             .get(&(image, range))
-            .copied()
-            .unwrap_or(Layout::Undefined)
+            .map_or(Layout::Undefined, |state| state.1)
     }
 }
 
@@ -683,4 +620,49 @@ mod tests {
     //            .request_buffer_state(buf, UsageBits::COPY_DST)
     //            .is_some());
     //    }
+    #[test]
+    fn image_record_preserves_forced_layout_queue_and_generation() {
+        use super::{usage_to_stage, Layout};
+        let mut states = StateTracker::new();
+        let image = Handle::<crate::Image>::new(12, 4);
+        let range = Default::default();
+        states.force_image_layout(image, range, Layout::TransferDst);
+        let barrier = states
+            .request_image_state(
+                image,
+                range,
+                UsageBits::SAMPLED,
+                Layout::ShaderReadOnly,
+                QueueType::Graphics,
+            )
+            .unwrap();
+        assert_eq!(barrier.old_layout, Layout::TransferDst);
+        assert_eq!(barrier.new_stage, usage_to_stage(UsageBits::SAMPLED));
+        assert!(states
+            .request_image_state(
+                image,
+                range,
+                UsageBits::SAMPLED,
+                Layout::ShaderReadOnly,
+                QueueType::Graphics
+            )
+            .is_none());
+        let barrier = states
+            .request_image_state(
+                image,
+                range,
+                UsageBits::SAMPLED,
+                Layout::ShaderReadOnly,
+                QueueType::Compute,
+            )
+            .unwrap();
+        assert_eq!(barrier.old_queue, QueueType::Graphics);
+        assert_eq!(
+            states.current_image_layout(Handle::new(12, 5), range),
+            Layout::Undefined
+        );
+        assert_eq!(std::mem::size_of_val(&image), 4);
+        states.reset();
+        assert_eq!(states.current_image_layout(image, range), Layout::Undefined);
+    }
 }
