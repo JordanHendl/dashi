@@ -1682,7 +1682,7 @@ impl CommandSink for CommandQueue {
                     vk::Offset3D {
                         x: cmd.src_region.x.saturating_add(src_width) as i32,
                         y: cmd.src_region.y.saturating_add(src_height) as i32,
-                        z: 1,
+                        z: src_dims[2] as i32,
                     },
                 ],
                 dst_subresource: vk::ImageSubresourceLayers {
@@ -1700,7 +1700,7 @@ impl CommandSink for CommandQueue {
                     vk::Offset3D {
                         x: cmd.dst_region.x.saturating_add(dst_width) as i32,
                         y: cmd.dst_region.y.saturating_add(dst_height) as i32,
-                        z: 1,
+                        z: dst_dims[2] as i32,
                     },
                 ],
             }];
@@ -2072,6 +2072,17 @@ impl CommandSink for CommandQueue {
         &mut self,
         cmd: &crate::gpu::driver::command::CopyBufferImage,
     ) -> Result<()> {
+        let dims = crate::gpu::mip_dimensions(self.ctx_ref().image_info(cmd.dst).dim, cmd.range.base_mip);
+        self.copy_buffer_to_image_region(&crate::gpu::driver::command::CopyBufferImageRegion {
+            copy: *cmd, offset: [0; 3], extent: dims,
+        })
+    }
+
+    fn copy_buffer_to_image_region(
+        &mut self,
+        region: &crate::gpu::driver::command::CopyBufferImageRegion,
+    ) -> Result<()> {
+        let cmd = &region.copy;
         self.ensure_buffer_state(cmd.src, UsageBits::COPY_SRC)?;
         self.ensure_image_state(cmd.dst, cmd.range, UsageBits::COPY_DST, Layout::TransferDst)?;
         unsafe {
@@ -2082,7 +2093,6 @@ impl CommandSink for CommandQueue {
                 .ok_or(GPUError::SlotError())?;
             let img_info = self.ctx_ref().image_info(cmd.dst);
             let mip = cmd.range.base_mip as usize;
-            let dims = crate::gpu::mip_dimensions(img_info.dim, cmd.range.base_mip);
             self.ctx_ref().device.cmd_copy_buffer_to_image(
                 self.cmd_buf,
                 self.ctx_ref()
@@ -2100,10 +2110,11 @@ impl CommandSink for CommandQueue {
                         base_array_layer: cmd.range.base_layer,
                         layer_count: cmd.range.layer_count,
                     },
+                    image_offset: vk::Offset3D { x: region.offset[0] as i32, y: region.offset[1] as i32, z: region.offset[2] as i32 },
                     image_extent: vk::Extent3D {
-                        width: dims[0],
-                        height: dims[1],
-                        depth: dims[2],
+                        width: region.extent[0],
+                        height: region.extent[1],
+                        depth: region.extent[2],
                     },
                     ..Default::default()
                 }],

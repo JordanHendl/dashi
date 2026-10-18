@@ -5,10 +5,12 @@ mod allocation;
 mod error;
 mod external;
 mod paging;
+mod uploads;
+pub use uploads::{ImageUploadRegion, UploadBatch, UploadTicket};
 use crate::{
     cmd::{CommandStream, Executable},
     driver::{
-        command::{BlitImage, CopyBuffer, CopyBufferImage},
+        command::CopyBuffer,
         state::{Layout, StateTracker},
     },
     utils::{Handle, Pool},
@@ -2418,7 +2420,10 @@ impl VulkanContext {
             info_handle,
         }) {
             Some(h) => {
-                self.init_image(h, &info)?;
+                if let Err(error) = self.init_image(h, &info) {
+                    self.destroy_image(h);
+                    return Err(error);
+                }
                 return Ok(h);
             }
             None => {
@@ -2582,116 +2587,14 @@ impl VulkanContext {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
-        if info.initial_data.is_none() {
-            return Ok(());
+        let Some(data) = info.initial_data else { return Ok(()); };
+        let mut batch = UploadBatch::new();
+        if let Err(error) = self.stage_image_initial_data(&mut batch, image, data) {
+            self.discard_upload_batch(batch)?;
+            return Err(error);
         }
-
-        let initial_data = unsafe { info.initial_data.unwrap_unchecked() };
-        let total_mip_levels = info.mip_levels.max(1);
-        let level_byte_size = |level: u32| -> usize {
-            let dims = mip_dimensions(info.dim, level);
-            (dims[0]
-                * dims[1]
-                * dims[2]
-                * info.layers
-                * channel_count(&info.format)
-                * bytes_per_channel(&info.format)) as usize
-        };
-        let mut provided_mip_levels = 0u32;
-        let mut required_bytes = 0usize;
-        for level in 0..total_mip_levels {
-            required_bytes += level_byte_size(level);
-            if required_bytes == initial_data.len() {
-                provided_mip_levels = level + 1;
-                break;
-            }
-            if required_bytes > initial_data.len() {
-                break;
-            }
-        }
-        if provided_mip_levels == 0 {
-            return Err(GPUError::LibraryError(format!(
-                "Image '{}' initial data size {} does not match a valid mip prefix for dim {:?}, layers {}, format {:?}, mip_levels {}",
-                info.debug_name,
-                initial_data.len(),
-                info.dim,
-                info.layers,
-                info.format,
-                info.mip_levels
-            )));
-        }
-        let staging = self.make_buffer(&BufferInfo {
-            debug_name: "",
-            byte_size: initial_data.len() as u32,
-            visibility: MemoryVisibility::CpuAndGpu,
-            initial_data: Some(initial_data),
-            ..Default::default()
-        })?;
-
-        let ctx_ptr = self as *mut _;
-        self.gfx_pool.bind_context(ctx_ptr);
-        let mut list = self.gfx_pool.begin("", false)?;
-        let mut cmd = CommandStream::new().begin();
-        let mut src_offset = 0u32;
-        for level in 0..provided_mip_levels {
-            let mip_byte_size = level_byte_size(level) as u32;
-            cmd = cmd.copy_buffer_to_image(&CopyBufferImage {
-                src: staging,
-                dst: image,
-                range: SubresourceRange {
-                    base_mip: level,
-                    level_count: 1,
-                    base_layer: 0,
-                    layer_count: info.layers,
-                },
-                src_offset,
-                amount: mip_byte_size,
-            });
-            src_offset += mip_byte_size;
-        }
-
-        if total_mip_levels > provided_mip_levels && info.samples == SampleCount::S1 {
-            for i in (provided_mip_levels - 1)..(total_mip_levels - 1) {
-                let src_dims = mip_dimensions(info.dim, i);
-                let dst_dims = mip_dimensions(info.dim, i + 1);
-                cmd = cmd.blit_images(&BlitImage {
-                    src: image,
-                    dst: image,
-                    src_range: SubresourceRange {
-                        base_mip: i,
-                        level_count: 1,
-                        base_layer: 0,
-                        layer_count: info.layers,
-                    },
-                    dst_range: SubresourceRange {
-                        base_mip: i + 1,
-                        level_count: 1,
-                        base_layer: 0,
-                        layer_count: info.layers,
-                    },
-                    filter: Filter::Linear,
-                    src_region: Rect2D {
-                        x: 0,
-                        y: 0,
-                        w: src_dims[0],
-                        h: src_dims[1],
-                    },
-                    dst_region: Rect2D {
-                        x: 0,
-                        y: 0,
-                        w: dst_dims[0],
-                        h: dst_dims[1],
-                    },
-                });
-            }
-        }
-
-        cmd.end().append(&mut list)?;
-        let fence = self.submit(&mut list, &Default::default())?;
-        self.wait(fence)?;
-        self.destroy_cmd_queue(list);
-        self.destroy_buffer(staging);
-        Ok(())
+        let mut ticket = self.submit_upload_batch(batch)?;
+        self.wait_upload(&mut ticket)
     }
 
     /// Block until the current device finishes all queued work.

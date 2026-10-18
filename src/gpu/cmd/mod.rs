@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use crate::gpu::driver::command::{
     BeginDrawing, BeginRenderPass, BlitImage, CommandEncoder, CommandSink, CopyBuffer,
-    CopyBufferImage, CopyImageBuffer, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
+    CopyBufferImage, CopyBufferImageRegion, CopyImageBuffer, Dispatch, Draw, DrawIndexed, DrawIndexedIndirect,
     DrawIndirect, GraphicsPipelineStateUpdate, MSImageResolve,
 };
 pub use crate::gpu::driver::command::{Scope, SyncPoint};
@@ -258,6 +258,11 @@ impl CommandStream<Recording> {
         self
     }
 
+    pub fn copy_buffer_to_image_region(mut self, cmd: &CopyBufferImageRegion) -> Self {
+        self.enc.copy_buffer_to_image_region(cmd);
+        self
+    }
+
     pub fn copy_image_to_buffer(mut self, cmd: &CopyImageBuffer) -> Self {
         self.enc.copy_image_to_buffer(cmd);
         self
@@ -358,6 +363,11 @@ impl CommandStream<Compute> {
 
     pub fn copy_buffer_to_image(mut self, cmd: &CopyBufferImage) -> Self {
         self.enc.copy_buffer_to_image(cmd);
+        self
+    }
+
+    pub fn copy_buffer_to_image_region(mut self, cmd: &CopyBufferImageRegion) -> Self {
+        self.enc.copy_buffer_to_image_region(cmd);
         self
     }
 

@@ -52,6 +52,7 @@ pub enum Op {
     DrawMeshTasks = 26,
     DrawMeshTasksIndirect = 27,
     DrawMeshTasksIndirectCount = 28,
+    CopyBufferToImageRegion = 29,
 }
 
 fn align_up(v: usize, a: usize) -> usize {
@@ -358,6 +359,15 @@ pub struct CopyBufferImage {
     pub amount: u32,
 }
 
+/// A tightly packed rectangular upload into one mip and one or more array layers.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq, Default)]
+pub struct CopyBufferImageRegion {
+    pub copy: CopyBufferImage,
+    pub offset: [u32; 3],
+    pub extent: [u32; 3],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq, Eq, Default)]
 pub struct CopyImageBuffer {
@@ -647,6 +657,10 @@ impl CommandEncoder {
         self.push(Op::CopyBufferToImage, cmd);
     }
 
+    pub fn copy_buffer_to_image_region(&mut self, cmd: &CopyBufferImageRegion) {
+        self.push(Op::CopyBufferToImageRegion, cmd);
+    }
+
     /// Copy data between buffers. Barriers for source and destination are emitted automatically.
     pub fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) {
         self.push(Op::CopyImageToBuffer, cmd);
@@ -817,6 +831,7 @@ impl CommandEncoder {
                 Op::Dispatch => sink.dispatch(cmd.payload())?,
                 Op::CopyBuffer => sink.copy_buffer(cmd.payload())?,
                 Op::CopyBufferToImage => sink.copy_buffer_to_image(cmd.payload())?,
+                Op::CopyBufferToImageRegion => sink.copy_buffer_to_image_region(cmd.payload())?,
                 Op::CopyImage => sink.copy_image(cmd.payload())?,
                 Op::ResolveImage => sink.resolve_image(cmd.payload())?,
                 Op::DebugMarkerBegin => sink.debug_marker_begin(cmd.payload())?,
@@ -944,6 +959,7 @@ pub(crate) fn debug_expected_payload_size(op: Op) -> Option<usize> {
         Op::DispatchIndirect => return None,
         Op::CopyBuffer => size_of::<CopyBuffer>(),
         Op::CopyBufferToImage => size_of::<CopyBufferImage>(),
+        Op::CopyBufferToImageRegion => size_of::<CopyBufferImageRegion>(),
         Op::CopyImageToBuffer => size_of::<CopyImageBuffer>(),
         Op::CopyImage => size_of::<CopyImage>(),
         Op::BlitImage => size_of::<BlitImage>(),
@@ -1056,6 +1072,7 @@ impl Op {
             x if x == Op::Dispatch as u16 => Some(Op::Dispatch),
             x if x == Op::CopyBuffer as u16 => Some(Op::CopyBuffer),
             x if x == Op::CopyBufferToImage as u16 => Some(Op::CopyBufferToImage),
+            x if x == Op::CopyBufferToImageRegion as u16 => Some(Op::CopyBufferToImageRegion),
             x if x == Op::CopyImageToBuffer as u16 => Some(Op::CopyImageToBuffer),
             x if x == Op::CopyImage as u16 => Some(Op::CopyImage),
             x if x == Op::ResolveImage as u16 => Some(Op::ResolveImage),
@@ -1108,6 +1125,9 @@ pub trait CommandSink {
     fn dispatch(&mut self, cmd: &Dispatch) -> Result<()>;
     fn copy_buffer(&mut self, cmd: &CopyBuffer) -> Result<()>;
     fn copy_buffer_to_image(&mut self, cmd: &CopyBufferImage) -> Result<()>;
+    fn copy_buffer_to_image_region(&mut self, _cmd: &CopyBufferImageRegion) -> Result<()> {
+        Err(crate::GPUError::Unimplemented("image region uploads"))
+    }
     fn copy_image_to_buffer(&mut self, cmd: &CopyImageBuffer) -> Result<()>;
     fn copy_image(&mut self, cmd: &CopyImage) -> Result<()>;
     fn resolve_image(&mut self, cmd: &MSImageResolve) -> Result<()>;
