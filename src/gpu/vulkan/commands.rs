@@ -776,8 +776,19 @@ impl CommandQueue {
                 "Acquire external buffer ownership before use",
             ));
         }
-        if self.recorded_buffer_states.get(&buffer).copied() == Some((usage, queue, stage)) {
-            return Ok(());
+        if let Some(&(prepared_usage, prepared_queue, prepared_stage)) =
+            self.recorded_buffer_states.get(&buffer)
+        {
+            if (prepared_usage, prepared_queue, prepared_stage) == (usage, queue, stage)
+                || (self.curr_rp.is_some()
+                    && prepared_queue == queue
+                    && prepared_usage.contains(usage)
+                    && prepared_stage.contains(stage))
+            {
+                // A pass prepares the union of its draws' requirements. Keep that
+                // scope intact when a draw uses only a subset of its stages/accesses.
+                return Ok(());
+            }
         }
 
         if self.curr_rp.is_some() {
