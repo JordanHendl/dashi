@@ -269,6 +269,7 @@ pub(super) fn lib_to_vk_image_format(fmt: &Format) -> vk::Format {
         Format::RGB8 => vk::Format::R8G8B8_SRGB,
         Format::RGBA16F => vk::Format::R16G16B16A16_SFLOAT,
         Format::RGBA32F => vk::Format::R32G32B32A32_SFLOAT,
+        Format::RGBA32Uint => vk::Format::R32G32B32A32_UINT,
         Format::RGBA8 => vk::Format::R8G8B8A8_SRGB,
         Format::BGRA8 => vk::Format::B8G8R8A8_SRGB,
         Format::BGRA8Unorm => vk::Format::B8G8R8A8_SNORM,
@@ -284,6 +285,7 @@ pub(super) fn vk_to_lib_image_format(fmt: vk::Format) -> Result<Format, GPUError
         vk::Format::R8G8B8_SRGB => Ok(Format::RGB8),
         vk::Format::R16G16B16A16_SFLOAT => Ok(Format::RGBA16F),
         vk::Format::R32G32B32A32_SFLOAT => Ok(Format::RGBA32F),
+        vk::Format::R32G32B32A32_UINT => Ok(Format::RGBA32Uint),
         vk::Format::R8G8B8A8_SRGB => Ok(Format::RGBA8),
         vk::Format::B8G8R8A8_SRGB => Ok(Format::BGRA8),
         vk::Format::B8G8R8A8_SNORM => Ok(Format::BGRA8Unorm),
@@ -302,7 +304,8 @@ pub fn channel_count(fmt: &Format) -> u32 {
         | Format::RGBA8
         | Format::RGBA8Unorm
         | Format::RGBA16F
-        | Format::RGBA32F => 4,
+        | Format::RGBA32F
+        | Format::RGBA32Uint => 4,
         Format::D24S8 => 4,
         Format::R8Sint | Format::R8Uint => 1,
     }
@@ -319,7 +322,7 @@ pub fn bytes_per_channel(fmt: &Format) -> u32 {
         | Format::R8Sint
         | Format::R8Uint => 1,
         Format::RGBA16F => 2,
-        Format::RGBA32F => 4,
+        Format::RGBA32F | Format::RGBA32Uint => 4,
         Format::D24S8 => 3,
     }
 }

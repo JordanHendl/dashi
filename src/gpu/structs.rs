@@ -179,6 +179,7 @@ pub enum Format {
     RGBA16F,
     RGBA32F,
     D24S8,
+    RGBA32Uint,
 }
 
 #[repr(C)]

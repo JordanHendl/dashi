@@ -13,6 +13,7 @@ pub enum Format {
     RGBA32Float,
     BGRA8Unorm,
     D24S8,
+    RGBA32Uint,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
