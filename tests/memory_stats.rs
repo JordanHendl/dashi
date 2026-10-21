@@ -1,6 +1,6 @@
 use ash::vk;
 use dashi::{BufferInfo, BufferUsage, Context, ContextInfo, DeviceFilter, DeviceSelector};
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -120,6 +120,65 @@ fn vulkan_host_callbacks_and_vma_stats_follow_resource_lifetime() {
     ctx.destroy_buffer(buffer);
     let after = ctx.gpu_memory_stats().unwrap().unwrap();
     assert_eq!(after.allocations_freed, during.allocations_freed + 1);
+    let vertex = inline_spirv::inline_spirv!(
+        "#version 450\nvoid main(){gl_Position=vec4(0,0,0,1);}",
+        vert
+    );
+    let fragment = inline_spirv::inline_spirv!(
+        "#version 450\nlayout(location=0) out vec4 color;void main(){color=vec4(1);}",
+        frag
+    );
+    let layout = ctx
+        .make_graphics_pipeline_layout(&dashi::GraphicsPipelineLayoutInfo {
+            debug_name: "allocator retirement",
+            bt_layouts: [None; 4],
+            shaders: &[
+                dashi::PipelineShaderInfo {
+                    stage: dashi::ShaderType::Vertex,
+                    spirv: vertex,
+                    entry_point: "main",
+                    specialization: &[],
+                },
+                dashi::PipelineShaderInfo {
+                    stage: dashi::ShaderType::Fragment,
+                    spirv: fragment,
+                    entry_point: "main",
+                    specialization: &[],
+                },
+            ],
+            vertex_info: dashi::VertexDescriptionInfo {
+                entries: &[],
+                stride: 0,
+                rate: dashi::VertexRate::Vertex,
+            },
+            details: dashi::GraphicsPipelineDetails {
+                color_blend_states: vec![dashi::ColorBlendState {
+                    enable: false,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    let formats = vec![dashi::Format::RGBA8];
+    let pipeline = ctx
+        .make_graphics_pipeline(&dashi::GraphicsPipelineInfo {
+            layout,
+            attachment_formats: formats,
+            subpass_samples: dashi::SubpassSampleInfo {
+                color_samples: vec![dashi::SampleCount::S1],
+                depth_sample: None,
+            },
+            ..Default::default()
+        })
+        .unwrap();
+    let freed = FREED.load(Ordering::Relaxed);
+    ctx.destroy_graphics_pipeline(pipeline);
+    ctx.destroy_graphics_pipeline_layout(layout);
+    assert!(
+        FREED.load(Ordering::Relaxed) > freed,
+        "pipeline retirement uses the supplied allocator"
+    );
     ctx.destroy();
     assert!(CREATED.load(Ordering::Relaxed) > 0);
     assert_eq!(

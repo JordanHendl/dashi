@@ -3215,7 +3215,7 @@ impl VulkanContext {
     pub fn destroy_graphics_pipeline(&mut self, handle: Handle<GraphicsPipeline>) {
         self.gfx_pipelines
             .with_mut(handle, |pipeline| unsafe {
-                self.device.destroy_pipeline(pipeline.raw, None);
+                self.device.destroy_pipeline(pipeline.raw, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.gfx_pipelines.release(handle);
@@ -3227,9 +3227,9 @@ impl VulkanContext {
         self.gfx_pipeline_layouts
             .with_mut(handle, |layout| unsafe {
                 for stage in &layout.shader_stages {
-                    self.device.destroy_shader_module(stage.module, None);
+                    self.device.destroy_shader_module(stage.module, self.allocation_callbacks.as_deref());
                 }
-                self.device.destroy_pipeline_layout(layout.layout, None);
+                self.device.destroy_pipeline_layout(layout.layout, self.allocation_callbacks.as_deref());
             })
             .unwrap();
         self.gfx_pipeline_layouts.release(handle);
