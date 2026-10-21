@@ -42,6 +42,8 @@ pub use timing::*;
 pub mod minifb_window;
 #[cfg(feature = "dashi-openxr")]
 pub mod openxr_window;
+#[cfg(feature = "dashi-openxr")]
+pub use openxr_window::XrGraphics;
 #[cfg(feature = "dashi-winit")]
 pub mod winit_window;
 
@@ -354,6 +356,7 @@ unsafe extern "system" fn user_debug_trampoline(
 
 #[derive(Clone, Default)]
 pub struct RenderPass {
+    pub(super) view_mask: u32,
     pub(super) raw: vk::RenderPass,
     pub(super) fb: vk::Framebuffer,
     pub(super) width: u32,
@@ -483,6 +486,8 @@ struct GpuAllocationActivity {
 }
 
 pub struct VulkanContext {
+    #[cfg(feature = "dashi-openxr")]
+    pub(super) xr: Option<std::sync::Arc<XrGraphics>>,
     mesh_caps: crate::MeshShaderCapabilities,
     mesh_loader: Option<ash::extensions::ext::MeshShader>,
     pub(super) entry: ash::Entry,
@@ -954,6 +959,8 @@ impl VulkanContext {
             info.engine_name.as_deref(),
         )?;
         let app_info = make_application_info(&application_name, &engine_name);
+        #[cfg(feature = "dashi-openxr")]
+        let app_info = { let mut app = app_info; if let Some(xr) = &info.xr { app.api_version = xr.api_version()?; } app };
 
         // Create instance
         let entry = unsafe { Entry::load() }?;
@@ -990,17 +997,25 @@ impl VulkanContext {
             inst_exts.push(ash::extensions::khr::Win32Surface::name().as_ptr());
         }
 
-        let instance = unsafe {
-            entry.create_instance(
-                &vk::InstanceCreateInfo::builder()
-                    .application_info(&app_info)
-                    .enabled_extension_names(&inst_exts)
-                    .enabled_layer_names(&inst_layers)
-                    .build(),
-                allocation_callbacks,
-            )
-        }?;
-
+        let instance_ci = vk::InstanceCreateInfo::builder()
+            .application_info(&app_info)
+            .enabled_extension_names(&inst_exts)
+            .enabled_layer_names(&inst_layers).build();
+        #[cfg(feature = "dashi-openxr")]
+        let instance = if let Some(xr) = &info.xr {
+            unsafe { xr.create_instance(&entry, &instance_ci, allocation_callbacks)? }
+        } else {
+            unsafe { entry.create_instance(&instance_ci, allocation_callbacks)? }
+        };
+        #[cfg(not(feature = "dashi-openxr"))]
+        let instance = unsafe { entry.create_instance(&instance_ci, allocation_callbacks)? };
+        #[cfg(feature = "dashi-openxr")]
+        let pdevice = if let Some(xr) = &info.xr {
+            unsafe { xr.physical_device(&instance)? }
+        } else {
+            unsafe { instance.enumerate_physical_devices()?[info.device.device_id] }
+        };
+        #[cfg(not(feature = "dashi-openxr"))]
         let pdevice = unsafe { instance.enumerate_physical_devices()?[info.device.device_id] };
         let device_prop = unsafe { instance.get_physical_device_properties(pdevice) };
 
@@ -1082,6 +1097,13 @@ impl VulkanContext {
         let mut mesh_features = vk::PhysicalDeviceMeshShaderFeaturesEXT::default();
         let mut draw_parameters = vk::PhysicalDeviceShaderDrawParametersFeatures::default();
         let mut features16bit = vk::PhysicalDevice16BitStorageFeatures::default();
+        let mut multiview = vk::PhysicalDeviceMultiviewFeatures::default();
+        if supports_vulkan11 {
+            let mut query = vk::PhysicalDeviceFeatures2::builder().push_next(&mut multiview);
+            unsafe { instance.get_physical_device_features2(pdevice, &mut query); }
+            multiview.multiview_geometry_shader = vk::FALSE;
+            multiview.multiview_tessellation_shader = vk::FALSE;
+        }
         let mut use_vulkan12_features = false;
         let mut features2 = supports_vulkan11.then(|| {
             let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
@@ -1366,7 +1388,7 @@ impl VulkanContext {
         if let Some(ref mut f2) = features2 {
             device_ci = device_ci.push_next(f2);
             if supports_vulkan11 {
-                device_ci = device_ci.push_next(&mut features16bit);
+                device_ci = device_ci.push_next(&mut features16bit).push_next(&mut multiview);
                 if !supports_vulkan12 && !use_vulkan12_features && imageless_extension_enabled {
                     device_ci = device_ci.push_next(&mut imageless);
                 }
@@ -1387,8 +1409,16 @@ impl VulkanContext {
                 .push_next(&mut mesh_features)
                 .push_next(&mut draw_parameters);
         }
-        let device =
-            unsafe { instance.create_device(pdevice, &device_ci.build(), allocation_callbacks) }?;
+        let device_ci = device_ci.build();
+        #[cfg(feature = "dashi-openxr")]
+        let device = if let Some(xr) = &info.xr {
+            unsafe { xr.create_device(&entry, &instance, pdevice, &device_ci, allocation_callbacks)? }
+        } else {
+            unsafe { instance.create_device(pdevice, &device_ci, allocation_callbacks)? }
+        };
+        #[cfg(not(feature = "dashi-openxr"))]
+        let device = unsafe { instance.create_device(pdevice, &device_ci, allocation_callbacks)? };
+
 
         gfx_queue.queue = unsafe { device.get_device_queue(gfx_family, 0) };
         if let Some(ref mut q) = compute_queue {
@@ -1554,6 +1584,8 @@ impl VulkanContext {
             .mesh_shader
             .then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
+            #[cfg(feature = "dashi-openxr")]
+            xr: info.xr.clone(),
             mesh_caps,
             mesh_loader,
             entry,
@@ -1746,6 +1778,8 @@ impl VulkanContext {
             .mesh_shader
             .then(|| ash::extensions::ext::MeshShader::new(&instance, &device));
         let mut ctx = VulkanContext {
+            #[cfg(feature = "dashi-openxr")]
+            xr: info.xr.clone(),
             mesh_caps,
             mesh_loader,
             entry,
@@ -2272,7 +2306,7 @@ impl VulkanContext {
                     ));
                 }
             }
-            ImageViewType::Type2D => {
+            ImageViewType::Type2D | ImageViewType::Type2DArray => {
                 if is_3d {
                     return Err(GPUError::LibraryError(
                         "3D images require ImageViewType::Type3D".to_string(),
@@ -4379,6 +4413,7 @@ impl VulkanContext {
         attachment_infos: &[ImagelessFramebufferAttachmentInfo],
         width: u32,
         height: u32,
+        multiview: bool,
     ) -> Result<vk::Framebuffer, GPUError> {
         let mut view_formats_vk = Vec::with_capacity(attachment_infos.len());
         let mut attachment_image_infos = Vec::with_capacity(attachment_infos.len());
@@ -4427,7 +4462,7 @@ impl VulkanContext {
             .render_pass(render_pass)
             .width(width)
             .height(height)
-            .layers(framebuffer_layers)
+            .layers(if multiview { 1 } else { framebuffer_layers })
             .attachment_count(attachment_infos.len() as u32)
             .push_next(&mut attachments_info);
 
@@ -4444,6 +4479,32 @@ impl VulkanContext {
         &mut self,
         info: &RenderPassInfo,
     ) -> Result<Handle<RenderPass>, GPUError> {
+        self.make_render_pass_multiview(info, 0)
+    }
+
+    /// Maximum view count available for vertex-stage multiview (zero when unsupported).
+    pub fn multiview_max_views(&self) -> u32 {
+        if self.properties.api_version < vk::API_VERSION_1_1 { return 0; }
+        let mut features = vk::PhysicalDeviceMultiviewFeatures::default();
+        let mut query = vk::PhysicalDeviceFeatures2::builder().push_next(&mut features);
+        unsafe { self.instance.get_physical_device_features2(self.pdevice, &mut query); }
+        if features.multiview == vk::FALSE { return 0; }
+        let mut properties = vk::PhysicalDeviceMultiviewProperties::default();
+        let mut query = vk::PhysicalDeviceProperties2::builder().push_next(&mut properties);
+        unsafe { self.instance.get_physical_device_properties2(self.pdevice, &mut query); }
+        properties.max_multiview_view_count
+    }
+
+    fn validate_view_mask(&self, mask: u32) -> Result<()> {
+        if 32 - mask.leading_zeros() > self.multiview_max_views() {
+            return Err(GPUError::LibraryError("Multiview mask exceeds device capabilities".into()));
+        }
+        Ok(())
+    }
+
+    /// Applies the same view mask to each subpass. Zero preserves ordinary rendering.
+    pub fn make_render_pass_multiview(&mut self, info: &RenderPassInfo, view_mask: u32) -> Result<Handle<RenderPass>> {
+        if view_mask != 0 { self.validate_view_mask(view_mask)?; }
         let mut attachments = Vec::with_capacity(256);
         let mut color_attachment_refs = Vec::with_capacity(256);
         let mut subpasses = Vec::with_capacity(256);
@@ -4560,7 +4621,10 @@ impl VulkanContext {
             subpass_formats.push(subpass_format_info);
         }
         // Create the render pass info
+        let masks = vec![view_mask; subpasses.len()];
+        let multiview = vk::RenderPassMultiviewCreateInfo::builder().view_masks(&masks).build();
         let render_pass_info = vk::RenderPassCreateInfo {
+            p_next: if view_mask == 0 { std::ptr::null() } else { &multiview as *const _ as _ },
             attachment_count: attachments.len() as u32,
             p_attachments: attachments.as_ptr(),
             subpass_count: subpasses.len() as u32,
@@ -4581,15 +4645,16 @@ impl VulkanContext {
         let attachment_infos = attachment_formats
             .iter()
             .copied()
-            .map(ImagelessFramebufferAttachmentInfo::from_format)
+            .map(|format| { let mut info = ImagelessFramebufferAttachmentInfo::from_format(format); info.layer_count = (32 - view_mask.leading_zeros()).max(1); info })
             .collect::<Vec<_>>();
 
         let fb =
-            self.create_imageless_framebuffer(render_pass, &attachment_infos, width, height)?;
+            self.create_imageless_framebuffer(render_pass, &attachment_infos, width, height, view_mask != 0)?;
 
         return Ok(self
             .render_passes
             .insert(RenderPass {
+                view_mask,
                 raw: render_pass,
                 fb,
                 width,
@@ -4903,6 +4968,14 @@ impl VulkanContext {
     where
         I: GraphicsPipelineInfoRequest<'a>,
     {
+        self.make_graphics_pipeline_multiview(request, 0)
+    }
+
+    /// Creates a pipeline compatible with the supplied multiview render-pass mask.
+    pub fn make_graphics_pipeline_multiview<'a, I: GraphicsPipelineInfoRequest<'a>>(
+        &mut self, request: I, view_mask: u32,
+    ) -> Result<Handle<GraphicsPipeline>> {
+        if view_mask != 0 { self.validate_view_mask(view_mask)?; }
         let info = request.graphics_pipeline_info();
         let layout = self.gfx_pipeline_layouts.get_ref(info.layout).unwrap();
         let subpass_index = info.subpass_id as usize;
@@ -5030,10 +5103,12 @@ impl VulkanContext {
             }
         }
 
+        let masks = vec![view_mask; subpasses.len()];
+        let mut multiview = vk::RenderPassMultiviewCreateInfo::builder().view_masks(&masks);
         let dummy_rp_info = vk::RenderPassCreateInfo::builder()
             .attachments(&attachments)
-            .subpasses(&subpasses)
-            .build();
+            .subpasses(&subpasses);
+        let dummy_rp_info = if view_mask != 0 { dummy_rp_info.push_next(&mut multiview) } else { dummy_rp_info }.build();
 
         let dummy_render_pass = unsafe {
             self.device
@@ -5050,11 +5125,11 @@ impl VulkanContext {
         let attachment_infos = attachment_formats
             .iter()
             .copied()
-            .map(ImagelessFramebufferAttachmentInfo::from_format)
+            .map(|format| { let mut info = ImagelessFramebufferAttachmentInfo::from_format(format); info.layer_count = (32 - view_mask.leading_zeros()).max(1); info })
             .collect::<Vec<_>>();
 
         let fb =
-            self.create_imageless_framebuffer(dummy_render_pass, &attachment_infos, width, height)?;
+            self.create_imageless_framebuffer(dummy_render_pass, &attachment_infos, width, height, view_mask != 0)?;
 
         let vinputs: &[vk::VertexInputBindingDescription] = if layout.vertex_attribs.is_empty() {
             &[]
@@ -5161,6 +5236,7 @@ impl VulkanContext {
         let render_pass_handle = self
             .render_passes
             .insert(RenderPass {
+                view_mask,
                 raw: dummy_render_pass,
                 fb,
                 width,
@@ -5194,6 +5270,7 @@ impl VulkanContext {
         return Ok(self
             .gfx_pipelines
             .insert(GraphicsPipeline {
+                view_mask,
                 raw: graphics_pipelines[0],
                 render_pass: render_pass_handle,
                 layout: info.layout,

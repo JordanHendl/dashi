@@ -507,6 +507,8 @@ pub enum WebSurfaceInfo {
 
 #[repr(C)]
 pub struct ContextInfo {
+    #[cfg(feature = "dashi-openxr")]
+    pub xr: Option<std::sync::Arc<crate::XrGraphics>>,
     pub device: SelectedDevice,
     pub profiles: ContextProfiles,
     pub pipeline_cache_dir: Option<PathBuf>,
@@ -523,6 +525,8 @@ pub struct ContextInfo {
 impl Default for ContextInfo {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "dashi-openxr")]
+            xr: None,
             device: SelectedDevice::default(),
             profiles: ContextProfiles::default(),
             pipeline_cache_dir: None,
@@ -698,6 +702,7 @@ pub enum ImageViewType {
     Type2D,
     Type3D,
     Cube,
+    Type2DArray,
 }
 
 unsafe impl Pod for ImageViewType {}

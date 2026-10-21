@@ -33,6 +33,7 @@ pub struct ComputePipeline {
 
 #[derive(Clone, Default)]
 pub struct GraphicsPipeline {
+    pub(super) view_mask: u32,
     pub(super) raw: vk::Pipeline,
     pub(super) render_pass: Handle<RenderPass>,
     pub(super) layout: Handle<GraphicsPipelineLayout>,

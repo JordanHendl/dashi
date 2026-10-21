@@ -1,8 +1,7 @@
 use super::execution::CommandRing;
 #[cfg(all(
     feature = "vulkan",
-    feature = "dashi-winit",
-    not(feature = "dashi-openxr")
+    feature = "dashi-winit"
 ))]
 use crate::gpu::vulkan::Display as VulkanDisplay;
 #[cfg(feature = "webgpu")]
@@ -333,8 +332,7 @@ impl Context {
 
     #[cfg(all(
         feature = "vulkan",
-        feature = "dashi-winit",
-        not(feature = "dashi-openxr")
+        feature = "dashi-winit"
     ))]
     pub fn prepare_display_from_state(
         &mut self,
@@ -353,8 +351,7 @@ impl Context {
 
     #[cfg(all(
         feature = "vulkan",
-        feature = "dashi-winit",
-        not(feature = "dashi-openxr")
+        feature = "dashi-winit"
     ))]
     pub fn prepare_display(&mut self, display: &mut VulkanDisplay) -> Result<DisplayStatus> {
         match &mut self.backend {

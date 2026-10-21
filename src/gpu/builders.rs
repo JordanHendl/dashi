@@ -1,8 +1,6 @@
 //! Builder pattern wrappers for Dashi Context resource creation.
 
 use crate::utils::Handle;
-#[cfg(feature = "dashi-openxr")]
-use crate::XrDisplayInfo;
 use crate::{
     AttachmentDescription, BindTable, BindTableLayout, BindTableLayoutInfo, ComputePipeline,
     ComputePipelineInfo, ComputePipelineLayout, ComputePipelineLayoutInfo, Display, DisplayInfo,
@@ -123,21 +121,11 @@ impl DisplayBuilder {
     }
 
     /// Finalize and create the Display.
-    #[cfg(not(feature = "dashi-openxr"))]
     pub fn build(self, ctx: &mut Context) -> Result<Display, GPUError> {
         ctx.make_display(&self.info)
     }
 
-    #[cfg(feature = "dashi-openxr")]
-    pub fn build(self, ctx: &mut Context) -> Result<Display, GPUError> {
-        ctx.make_xr_display(&XrDisplayInfo::default())
-    }
 
-    /// Create an OpenXR display when the `dashi-openxr` feature is enabled.
-    #[cfg(feature = "dashi-openxr")]
-    pub fn build_xr(&self, ctx: &mut Context) -> Result<Display, GPUError> {
-        ctx.make_xr_display(&XrDisplayInfo::default())
-    }
 }
 
 /// Builds a GraphicsPipelineLayout via the builder pattern.

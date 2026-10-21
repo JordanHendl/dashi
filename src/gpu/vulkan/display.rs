@@ -1,25 +1,18 @@
 use crate::utils::Handle;
 use ash::vk;
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 use std::{thread, time::Duration};
 
-#[cfg(feature = "dashi-openxr")]
-use super::XrSwapchainImage;
 use super::{
     DisplayInfo, DisplayStatus, Fence, GPUError, Image, ImageInfo, ImageInfoRecord, ImageView,
     ImageViewType, SampleCount, Semaphore, VulkanContext, WindowBuffering, WindowMode,
 };
 
-#[cfg(feature = "dashi-openxr")]
-use super::{openxr_window, XrDisplayInfo};
-#[cfg(feature = "dashi-openxr")]
-use openxr as xr;
-
-#[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-minifb")]
 use super::minifb_window;
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 use super::winit_window;
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 use winit::{
     dpi::PhysicalSize,
     event::{Event, WindowEvent},
@@ -27,7 +20,7 @@ use winit::{
     platform::run_return::EventLoopExtRunReturn,
 };
 
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct WinitEventBatch {
     close_requested: bool,
@@ -35,7 +28,7 @@ struct WinitEventBatch {
     scale_factor_changed: bool,
 }
 
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PrepareAction {
     status: Option<DisplayStatus>,
@@ -43,7 +36,7 @@ struct PrepareAction {
     wait_for_restore: bool,
 }
 
-#[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(feature = "dashi-winit")]
 fn classify_prepare_action(
     swapchain_size: [u32; 2],
     observed_size: [u32; 2],
@@ -83,7 +76,6 @@ fn classify_prepare_action(
     }
 }
 
-#[cfg(not(feature = "dashi-openxr"))]
 struct SwapchainConfig {
     extent: vk::Extent2D,
     surface_format: vk::SurfaceFormatKHR,
@@ -92,7 +84,6 @@ struct SwapchainConfig {
     pre_transform: vk::SurfaceTransformFlagsKHR,
 }
 
-#[cfg(not(feature = "dashi-openxr"))]
 struct SwapchainResources {
     swapchain: ash::vk::SwapchainKHR,
     sc_loader: ash::extensions::khr::Swapchain,
@@ -105,108 +96,79 @@ struct SwapchainResources {
 
 #[allow(dead_code)]
 pub struct Display {
-    #[cfg(all(feature = "dashi-sdl2", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-sdl2")]
     pub(crate) window: std::cell::Cell<sdl2::video::Window>,
-    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-minifb")]
     pub(crate) window: minifb::Window,
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub(crate) window: winit::window::Window,
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub(crate) event_loop: winit::event_loop::EventLoop<()>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) swapchain: ash::vk::SwapchainKHR,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) surface: ash::vk::SurfaceKHR,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) images: Vec<Handle<Image>>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) views: Vec<vk::ImageView>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) loader: ash::extensions::khr::Surface,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) sc_loader: ash::extensions::khr::Swapchain,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) semaphores: Vec<Handle<Semaphore>>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) fences: Vec<Handle<Fence>>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) frame_idx: u32,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) info: DisplayInfo,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) extent: vk::Extent2D,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) needs_rebuild: std::cell::Cell<bool>,
-    #[cfg(not(feature = "dashi-openxr"))]
     pub(crate) closed: bool,
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub(crate) minimized: bool,
 
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_instance: xr::Instance,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_session: xr::Session<xr::Vulkan>,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_waiter: xr::FrameWaiter,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_stream: xr::FrameStream<xr::Vulkan>,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_swapchain: xr::Swapchain<xr::Vulkan>,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_images: Vec<XrSwapchainImage>,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_view_config: Vec<xr::ViewConfigurationView>,
-    #[cfg(feature = "dashi-openxr")]
-    pub(crate) xr_input: openxr_window::XrInput,
 }
 
 impl Display {
-    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-minifb")]
     pub fn minifb_window(&mut self) -> &mut minifb::Window {
         &mut self.window
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn winit_window(&self) -> &winit::window::Window {
         &self.window
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
         &mut self.event_loop
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn set_resizable(&mut self, resizable: bool) {
         self.info.window.resizable = resizable;
         self.window.set_resizable(resizable);
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn set_size(&mut self, width: u32, height: u32) {
         self.info.window.size = [width, height];
         self.window.set_inner_size(PhysicalSize::new(width, height));
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn size(&self) -> [u32; 2] {
         let size = self.window.inner_size();
         [size.width, size.height]
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn minimize(&mut self) {
         self.minimized = true;
         self.window.set_minimized(true);
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn restore(&mut self) {
         self.minimized = false;
         self.window.set_minimized(false);
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     fn pump_events(&mut self, _wait_for_events: bool) -> WinitEventBatch {
         let mut batch = WinitEventBatch::default();
         let window_id = self.window.id();
@@ -236,7 +198,6 @@ impl Display {
 
     #[cfg(all(
         feature = "dashi-winit",
-        not(feature = "dashi-openxr"),
         target_os = "windows"
     ))]
     fn is_os_minimized(&self) -> bool {
@@ -245,66 +206,19 @@ impl Display {
 
     #[cfg(all(
         feature = "dashi-winit",
-        not(feature = "dashi-openxr"),
         not(target_os = "windows")
     ))]
     fn is_os_minimized(&self) -> bool {
         false
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     pub fn image_count(&self) -> usize {
         self.images.len()
     }
 
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_instance(&self) -> &xr::Instance {
-        &self.xr_instance
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_session(&self) -> &xr::Session<xr::Vulkan> {
-        &self.xr_session
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_frame_waiter(&mut self) -> &mut xr::FrameWaiter {
-        &mut self.xr_waiter
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_frame_stream(&mut self) -> &mut xr::FrameStream<xr::Vulkan> {
-        &mut self.xr_stream
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_swapchain(&self) -> &xr::Swapchain<xr::Vulkan> {
-        &self.xr_swapchain
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_swapchain_images(&self) -> &[XrSwapchainImage] {
-        &self.xr_images
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_view_configuration(&self) -> &[xr::ViewConfigurationView] {
-        &self.xr_view_config
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn poll_inputs(&mut self) -> xr::Result<openxr_window::XrInputState> {
-        self.xr_input.poll_inputs()
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    pub fn xr_input(&self) -> &openxr_window::XrInput {
-        &self.xr_input
-    }
 }
 
 impl VulkanContext {
-    #[cfg(not(feature = "dashi-openxr"))]
     fn release_swapchain_images(
         &mut self,
         handles: &mut Vec<Handle<Image>>,
@@ -325,7 +239,6 @@ impl VulkanContext {
         }
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     fn destroy_swapchain_resources(&mut self, dsp: &mut Display) {
         self.release_swapchain_images(&mut dsp.images, &mut dsp.views);
 
@@ -346,7 +259,6 @@ impl VulkanContext {
         }
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     fn choose_swapchain_config(
         &self,
         loader: &ash::extensions::khr::Surface,
@@ -432,7 +344,6 @@ impl VulkanContext {
         })
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     fn wrap_swapchain_images(
         &mut self,
         raw_images: Vec<vk::Image>,
@@ -516,7 +427,6 @@ impl VulkanContext {
         Ok((handles, views))
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     fn create_swapchain_resources(
         &mut self,
         surface: vk::SurfaceKHR,
@@ -606,7 +516,6 @@ impl VulkanContext {
         })
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     fn rebuild_display_swapchain(
         &mut self,
         dsp: &mut Display,
@@ -635,7 +544,6 @@ impl VulkanContext {
         Ok(())
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     /// Destroys a windowing display and its swapchain.
     ///
     /// # Prerequisites
@@ -652,19 +560,7 @@ impl VulkanContext {
         unsafe { dsp.loader.destroy_surface(dsp.surface, surface_callbacks) };
     }
 
-    #[cfg(feature = "dashi-openxr")]
-    /// Destroys an OpenXR display.
-    ///
-    /// # Prerequisites
-    /// - Ensure the GPU has finished using any swapchain images provided by OpenXR.
-    /// - The context must still be alive.
-    ///
-    /// OpenXR resources are cleaned up by their `Drop` implementations.
-    pub fn destroy_display(&mut self, _dsp: Display) {
-        // OpenXR resources are cleaned up by Drop implementations
-    }
-
-    #[cfg(all(feature = "dashi-sdl2", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-sdl2")]
     fn make_window(
         &mut self,
         info: &DisplayInfo,
@@ -712,7 +608,7 @@ impl VulkanContext {
         ))
     }
 
-    #[cfg(all(feature = "dashi-minifb", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-minifb")]
     fn make_window(
         &mut self,
         info: &DisplayInfo,
@@ -737,7 +633,7 @@ impl VulkanContext {
         ))
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     fn make_window(
         &mut self,
         info: &DisplayInfo,
@@ -758,7 +654,6 @@ impl VulkanContext {
         )
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     /// Creates a display and associated swapchain for presenting images.
     ///
     /// # Prerequisites
@@ -808,7 +703,7 @@ impl VulkanContext {
         })
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn prepare_display_from_state(
         &mut self,
         dsp: &mut Display,
@@ -847,7 +742,7 @@ impl VulkanContext {
         Ok(action.status)
     }
 
-    #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+    #[cfg(feature = "dashi-winit")]
     pub fn prepare_display(&mut self, dsp: &mut Display) -> Result<DisplayStatus, GPUError> {
         loop {
             let batch = dsp.pump_events(dsp.minimized);
@@ -861,41 +756,6 @@ impl VulkanContext {
         }
     }
 
-    #[cfg(feature = "dashi-openxr")]
-    /// Creates an XR display and session for immersive rendering.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn make_xr_display(&mut self, _info: &XrDisplayInfo) -> Result<Display, GPUError> {
-        let (xr_instance, session, waiter, stream, swapchain, images, views) =
-            openxr_window::create_xr_session(
-                &self.instance,
-                self.pdevice,
-                &self.device,
-                self.gfx_queue.family,
-            )
-            .map_err(|_| GPUError::LibraryError())?;
-
-        let xr_input = openxr_window::XrInput::new(&xr_instance, &session)
-            .map_err(|_| GPUError::LibraryError())?;
-
-        Ok(Display {
-            xr_instance,
-            xr_session: session,
-            xr_waiter: waiter,
-            xr_stream: stream,
-            xr_swapchain: swapchain,
-            xr_images: images,
-            xr_view_config: views,
-            xr_input,
-        })
-    }
-
-    #[cfg(not(feature = "dashi-openxr"))]
     /// Acquires the next image from a windowed swapchain.
     ///
     /// # Prerequisites
@@ -959,7 +819,6 @@ impl VulkanContext {
         Ok((view, signal_sem_handle, image_index, suboptimal))
     }
 
-    #[cfg(not(feature = "dashi-openxr"))]
     /// Presents the current swapchain image to the display.
     ///
     /// # Prerequisites
@@ -995,7 +854,7 @@ impl VulkanContext {
 
         match present_result {
             Ok(_) => {
-                #[cfg(all(feature = "dashi-winit", not(feature = "dashi-openxr")))]
+                #[cfg(feature = "dashi-winit")]
                 dsp.window.request_redraw();
                 Ok(())
             }
@@ -1007,62 +866,9 @@ impl VulkanContext {
         }
     }
 
-    #[cfg(feature = "dashi-openxr")]
-    /// Acquires the next image from the XR swapchain.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn acquire_xr_image(
-        &mut self,
-        dsp: &mut Display,
-    ) -> Result<(u32, xr::FrameState), GPUError> {
-        let state = dsp.xr_waiter.wait().map_err(|_| GPUError::LibraryError())?;
-        dsp.xr_stream
-            .begin()
-            .map_err(|_| GPUError::LibraryError())?;
-        let idx = dsp
-            .xr_swapchain
-            .acquire_image()
-            .map_err(|_| GPUError::LibraryError())?;
-        dsp.xr_swapchain
-            .wait_image(xr::Duration::INFINITE)
-            .map_err(|_| GPUError::LibraryError())?;
-        Ok((idx, state))
-    }
-
-    #[cfg(feature = "dashi-openxr")]
-    /// Presents the current frame to the XR display.
-    ///
-    /// # Prerequisites
-    /// - Correct attachment formats.
-    /// - Matching pipeline layouts.
-    /// - Swapchain acquisition order is respected.
-    /// - XR session state is valid.
-    /// - Synchronization primitives are handled during presentation.
-    pub fn present_xr_display(
-        &mut self,
-        dsp: &mut Display,
-        state: xr::FrameState,
-    ) -> Result<(), GPUError> {
-        dsp.xr_swapchain
-            .release_image()
-            .map_err(|_| GPUError::LibraryError())?;
-        dsp.xr_stream
-            .end(
-                state.predicted_display_time,
-                xr::EnvironmentBlendMode::OPAQUE,
-                &[],
-            )
-            .map_err(|_| GPUError::LibraryError())?;
-        Ok(())
-    }
 }
 
-#[cfg(all(test, feature = "dashi-winit", not(feature = "dashi-openxr")))]
+#[cfg(all(test, feature = "dashi-winit"))]
 mod tests {
     use super::*;
 

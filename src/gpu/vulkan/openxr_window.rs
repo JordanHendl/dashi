@@ -1,249 +1,245 @@
-use super::XrSwapchainImage;
-use ash::vk;
-use ash::vk::Handle;
-use ash::{Device, Instance};
-#[cfg(feature = "dashi-openxr")]
+//! OpenXR graphics bootstrap. Window displays remain independent of XR sessions.
+use super::*;
 use openxr as xr;
 
-/// Create an OpenXR Vulkan session and swapchain.
-///
-/// # Prerequisites
-/// - A supported OpenXR runtime must be available.
-/// - `vk_instance` must be created with the extensions required by the runtime,
-///   such as `khr_vulkan_enable2`.
-/// - Ownership of the returned [`xr::Session`] remains with the caller. Any
-///   [`xr::Space`] created from the session is valid only while the session is
-///   active.
-///
-/// Returns the created `openxr::Instance`, `openxr::Session`, `openxr::Swapchain`,
-/// the swapchain images, and the view configuration.
-pub fn create_xr_session(
-    vk_instance: &Instance,
-    physical_device: vk::PhysicalDevice,
-    device: &Device,
-    queue_family_index: u32,
-) -> Result<
-    (
-        xr::Instance,
+pub struct XrGraphics {
+    pub instance: xr::Instance,
+    pub system: xr::SystemId,
+    requirements: xr::vulkan::Requirements,
+}
+
+fn xr_error(error: impl std::fmt::Display) -> GPUError {
+    GPUError::LibraryError(format!("OpenXR: {error}"))
+}
+
+impl XrGraphics {
+    pub fn load(application_name: &str) -> Result<std::sync::Arc<Self>> {
+        let entry = unsafe { xr::Entry::load() }.map_err(xr_error)?;
+        let available = entry.enumerate_extensions().map_err(xr_error)?;
+        if !available.khr_vulkan_enable2 {
+            return Err(xr_error("XR_KHR_vulkan_enable2 is required"));
+        }
+        let mut extensions = xr::ExtensionSet::default();
+        extensions.khr_vulkan_enable2 = true;
+        let instance = entry
+            .create_instance(
+                &xr::ApplicationInfo {
+                    application_name,
+                    application_version: 1,
+                    engine_name: "dashi",
+                    engine_version: 1,
+                    api_version: xr::Version::new(1, 0, 0),
+                },
+                &extensions,
+                &[],
+            )
+            .map_err(xr_error)?;
+        let system = instance
+            .system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)
+            .map_err(xr_error)?;
+        let requirements = instance
+            .graphics_requirements::<xr::Vulkan>(system)
+            .map_err(xr_error)?;
+        Ok(std::sync::Arc::new(Self {
+            instance,
+            system,
+            requirements,
+        }))
+    }
+
+    pub(super) fn api_version(&self) -> Result<u32> {
+        let upper = self
+            .requirements
+            .max_api_version_supported
+            .min(xr::Version::new(1, 3, 0));
+        if upper < self.requirements.min_api_version_supported || upper < xr::Version::new(1, 2, 0)
+        {
+            return Err(xr_error("runtime must support Vulkan 1.2 or later"));
+        }
+        Ok(vk::make_api_version(
+            0,
+            upper.major() as _,
+            upper.minor() as _,
+            0,
+        ))
+    }
+
+    pub(super) unsafe fn create_instance(
+        &self,
+        entry: &ash::Entry,
+        info: &vk::InstanceCreateInfo,
+        allocator: Option<&vk::AllocationCallbacks>,
+    ) -> Result<ash::Instance> {
+        let api = (*info.p_application_info).api_version;
+        let version = xr::Version::new(
+            vk::api_version_major(api) as _,
+            vk::api_version_minor(api) as _,
+            0,
+        );
+        if version < self.requirements.min_api_version_supported
+            || version > self.requirements.max_api_version_supported
+        {
+            return Err(xr_error(format!(
+                "Vulkan {version} outside runtime graphics requirements"
+            )));
+        }
+        let mut raw = std::ptr::null();
+        let mut result = 0;
+        let status = (self
+            .instance
+            .exts()
+            .khr_vulkan_enable2
+            .as_ref()
+            .unwrap()
+            .create_vulkan_instance)(
+            self.instance.as_raw(),
+            &xr::sys::VulkanInstanceCreateInfoKHR {
+                ty: xr::sys::VulkanInstanceCreateInfoKHR::TYPE,
+                next: std::ptr::null(),
+                system_id: self.system,
+                create_flags: xr::sys::VulkanInstanceCreateFlagsKHR::EMPTY,
+                pfn_get_instance_proc_addr: Some(std::mem::transmute(
+                    entry.static_fn().get_instance_proc_addr,
+                )),
+                vulkan_create_info: info as *const _ as _,
+                vulkan_allocator: allocator.map_or(std::ptr::null(), |a| a as *const _ as _),
+            },
+            &mut raw,
+            &mut result,
+        );
+        if status.into_raw() < 0 {
+            return Err(xr_error(status));
+        }
+        if result < 0 {
+            return Err(vk::Result::from_raw(result).into());
+        }
+        Ok(ash::Instance::load(
+            entry.static_fn(),
+            vk::Instance::from_raw(raw as u64),
+        ))
+    }
+
+    pub(super) unsafe fn physical_device(
+        &self,
+        instance: &ash::Instance,
+    ) -> Result<vk::PhysicalDevice> {
+        self.instance
+            .vulkan_graphics_device(self.system, instance.handle().as_raw() as _)
+            .map(|raw| vk::PhysicalDevice::from_raw(raw as u64))
+            .map_err(xr_error)
+    }
+
+    pub(super) unsafe fn create_device(
+        &self,
+        entry: &ash::Entry,
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        info: &vk::DeviceCreateInfo,
+        allocator: Option<&vk::AllocationCallbacks>,
+    ) -> Result<ash::Device> {
+        let mut raw = std::ptr::null();
+        let mut result = 0;
+        let status = (self
+            .instance
+            .exts()
+            .khr_vulkan_enable2
+            .as_ref()
+            .unwrap()
+            .create_vulkan_device)(
+            self.instance.as_raw(),
+            &xr::sys::VulkanDeviceCreateInfoKHR {
+                ty: xr::sys::VulkanDeviceCreateInfoKHR::TYPE,
+                next: std::ptr::null(),
+                system_id: self.system,
+                create_flags: xr::sys::VulkanDeviceCreateFlagsKHR::EMPTY,
+                pfn_get_instance_proc_addr: Some(std::mem::transmute(
+                    entry.static_fn().get_instance_proc_addr,
+                )),
+                vulkan_physical_device: physical_device.as_raw() as _,
+                vulkan_create_info: info as *const _ as _,
+                vulkan_allocator: allocator.map_or(std::ptr::null(), |a| a as *const _ as _),
+            },
+            &mut raw,
+            &mut result,
+        );
+        if status.into_raw() < 0 {
+            return Err(xr_error(status));
+        }
+        if result < 0 {
+            return Err(vk::Result::from_raw(result).into());
+        }
+        Ok(ash::Device::load(
+            instance.fp_v1_0(),
+            vk::Device::from_raw(raw as u64),
+        ))
+    }
+}
+
+impl VulkanContext {
+    /// Creates a session only on a device initialized with the same OpenXR bootstrap.
+    /// The caller must destroy session children and the session before this context.
+    pub fn create_xr_session(
+        &self,
+    ) -> Result<(
         xr::Session<xr::Vulkan>,
         xr::FrameWaiter,
         xr::FrameStream<xr::Vulkan>,
-        xr::Swapchain<xr::Vulkan>,
-        Vec<XrSwapchainImage>,
-        Vec<xr::ViewConfigurationView>,
-    ),
-    xr::sys::Result,
-> {
-    #[cfg(feature = "static")]
-    let entry = xr::Entry::linked();
-    #[cfg(not(feature = "static"))]
-    let entry = unsafe { xr::Entry::load().map_err(|_| xr::sys::Result::ERROR_RUNTIME_FAILURE)? };
-
-    let exts = entry.enumerate_extensions()?;
-    if !exts.khr_vulkan_enable2 {
-        return Err(xr::sys::Result::ERROR_EXTENSION_NOT_PRESENT);
-    }
-    let mut enabled = xr::ExtensionSet::default();
-    enabled.khr_vulkan_enable2 = true;
-
-    let instance = entry.create_instance(
-        &xr::ApplicationInfo {
-            application_name: "dashi",
-            application_version: 0,
-            engine_name: "dashi",
-            engine_version: 0,
-            api_version: xr::Version::new(1, 0, 0),
-        },
-        &enabled,
-        &[],
-    )?;
-
-    let system = instance.system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
-
-    let (session, waiter, stream) = unsafe {
-        instance.create_session::<xr::Vulkan>(
-            system,
-            &xr::vulkan::SessionCreateInfo {
-                instance: vk_instance.handle().as_raw() as _,
-                physical_device: physical_device.as_raw() as _,
-                device: device.handle().as_raw() as _,
-                queue_family_index,
-                queue_index: 0,
-            },
-        )?
-    };
-
-    let views = instance
-        .enumerate_view_configuration_views(system, xr::ViewConfigurationType::PRIMARY_STEREO)?;
-    let image_rect_width = views[0].recommended_image_rect_width;
-    let image_rect_height = views[0].recommended_image_rect_height;
-    let array_size = views.len() as u32;
-
-    let swapchain = session.create_swapchain(&xr::SwapchainCreateInfo {
-        create_flags: xr::SwapchainCreateFlags::EMPTY,
-        usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT | xr::SwapchainUsageFlags::SAMPLED,
-        format: vk::Format::B8G8R8A8_SRGB.as_raw() as _,
-        sample_count: 1,
-        width: image_rect_width,
-        height: image_rect_height,
-        face_count: 1,
-        array_size,
-        mip_count: 1,
-    })?;
-    let images_raw = swapchain.enumerate_images()?;
-    let images = images_raw
-        .into_iter()
-        .map(|img| XrSwapchainImage::from_raw(img as u64))
-        .collect();
-
-    Ok((instance, session, waiter, stream, swapchain, images, views))
-}
-
-#[cfg(feature = "dashi-openxr")]
-#[derive(Default, Debug)]
-pub struct XrInputState {
-    pub left_trigger: f32,
-    pub right_trigger: f32,
-    pub left_active: bool,
-    pub right_active: bool,
-}
-
-#[cfg(feature = "dashi-openxr")]
-pub struct XrInput {
-    session: xr::Session<xr::Vulkan>,
-    base_space: xr::Space,
-    action_set: xr::ActionSet,
-    grip_action: xr::Action<xr::Posef>,
-    trigger_action: xr::Action<f32>,
-    left_path: xr::Path,
-    right_path: xr::Path,
-    left_space: xr::Space,
-    right_space: xr::Space,
-}
-
-#[cfg(feature = "dashi-openxr")]
-impl XrInput {
-    /// Create input actions and spaces for the supplied session.
-    ///
-    /// # Prerequisites
-    /// - A supported OpenXR runtime must be present.
-    /// - The session must originate from a Vulkan instance that enabled the
-    ///   required extensions.
-    /// - The session is cloned and must remain active for the lifetime of the
-    ///   returned [`XrInput`] and any [`xr::Space`] values it exposes.
-    pub fn new(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> xr::Result<Self> {
-        let action_set = instance.create_action_set("input", "input", 0)?;
-        let left_path = instance.string_to_path("/user/hand/left")?;
-        let right_path = instance.string_to_path("/user/hand/right")?;
-
-        let grip_action = action_set.create_action::<xr::Posef>(
-            "grip_pose",
-            "Grip Pose",
-            &[left_path, right_path],
-        )?;
-        let trigger_action =
-            action_set.create_action::<f32>("trigger", "Trigger", &[left_path, right_path])?;
-
-        instance.suggest_interaction_profile_bindings(
-            instance.string_to_path("/interaction_profiles/khr/simple_controller")?,
-            &[
-                xr::Binding::new(
-                    &grip_action,
-                    instance.string_to_path("/user/hand/left/input/grip/pose")?,
-                ),
-                xr::Binding::new(
-                    &grip_action,
-                    instance.string_to_path("/user/hand/right/input/grip/pose")?,
-                ),
-                xr::Binding::new(
-                    &trigger_action,
-                    instance.string_to_path("/user/hand/left/input/select/value")?,
-                ),
-                xr::Binding::new(
-                    &trigger_action,
-                    instance.string_to_path("/user/hand/right/input/select/value")?,
-                ),
-            ],
-        )?;
-
-        session.attach_action_sets(&[&action_set])?;
-
-        let base_space =
-            session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
-        let left_space =
-            grip_action.create_space(session.clone(), left_path, xr::Posef::IDENTITY)?;
-        let right_space =
-            grip_action.create_space(session.clone(), right_path, xr::Posef::IDENTITY)?;
-
-        Ok(Self {
-            session: session.clone(),
-            base_space,
-            action_set,
-            grip_action,
-            trigger_action,
-            left_path,
-            right_path,
-            left_space,
-            right_space,
-        })
+    )> {
+        let xr = self
+            .xr
+            .as_ref()
+            .ok_or_else(|| xr_error("graphics context was not initialized for XR"))?;
+        unsafe {
+            xr.instance.create_session::<xr::Vulkan>(
+                xr.system,
+                &xr::vulkan::SessionCreateInfo {
+                    instance: self.instance.handle().as_raw() as _,
+                    physical_device: self.pdevice.as_raw() as _,
+                    device: self.device.handle().as_raw() as _,
+                    queue_family_index: self.gfx_queue.family,
+                    queue_index: 0,
+                },
+            )
+        }
+        .map_err(xr_error)
     }
 
-    /// Poll the current state of input actions.
+    /// Registers an image owned by the runtime. Destroying the handle releases cached views,
+    /// but never frees the runtime's VkImage or memory.
     ///
-    /// # Prerequisites
-    /// - Requires a supported OpenXR runtime and an active session created
-    ///   from a Vulkan instance with the necessary extensions.
-    /// - Any spaces referenced remain valid only while the session is active.
-    pub fn poll_inputs(&mut self) -> xr::Result<XrInputState> {
-        self.session.sync_actions(&[(&self.action_set).into()])?;
-
-        let left_trigger = self
-            .trigger_action
-            .state(&self.session, self.left_path)?
-            .current_state;
-        let right_trigger = self
-            .trigger_action
-            .state(&self.session, self.right_path)?
-            .current_state;
-
-        let left_active = self.grip_action.is_active(&self.session, self.left_path)?;
-        let right_active = self.grip_action.is_active(&self.session, self.right_path)?;
-
-        Ok(XrInputState {
-            left_trigger,
-            right_trigger,
-            left_active,
-            right_active,
-        })
-    }
-
-    /// Return the space of the left controller grip.
-    ///
-    /// # Prerequisites
-    /// - Requires a supported OpenXR runtime and an active session created
-    ///   from a Vulkan instance with the required extensions.
-    /// - The returned space remains valid only while the session is active.
-    pub fn left_space(&self) -> &xr::Space {
-        &self.left_space
-    }
-
-    /// Return the space of the right controller grip.
-    ///
-    /// # Prerequisites
-    /// - Requires a supported OpenXR runtime and an active session created
-    ///   from a Vulkan instance with the required extensions.
-    /// - The returned space remains valid only while the session is active.
-    pub fn right_space(&self) -> &xr::Space {
-        &self.right_space
-    }
-
-    /// Return the base reference space used for locating controllers.
-    ///
-    /// # Prerequisites
-    /// - Requires a supported OpenXR runtime and an active session created
-    ///   from a Vulkan instance with the required extensions.
-    /// - The returned space remains valid only while the session is active.
-    pub fn base_space(&self) -> &xr::Space {
-        &self.base_space
+    /// # Safety
+    /// `image` must be an image from this context's XR session, described exactly by `info`.
+    /// It must outlive this registration and all GPU uses. The caller must acquire/wait before
+    /// use, and submit all work with the required final layout before releasing to OpenXR.
+    pub unsafe fn import_xr_image(
+        &mut self,
+        image: u64,
+        info: &ImageInfo,
+    ) -> Result<Handle<Image>> {
+        if self.xr.is_none()
+            || image == 0
+            || info.layers == 0
+            || info.dim.contains(&0)
+            || info.mip_levels != 1
+        {
+            return Err(xr_error("invalid XR image registration"));
+        }
+        let info_handle = self
+            .image_infos
+            .insert(ImageInfoRecord::new(info))
+            .ok_or(GPUError::SlotError())?;
+        match self.images.insert(Image {
+            img: vk::Image::from_raw(image),
+            alloc: Allocation::Borrowed,
+            externally_owned: true,
+            layouts: vec![vk::ImageLayout::UNDEFINED],
+            info_handle,
+        }) {
+            Some(handle) => Ok(handle),
+            None => {
+                self.image_infos.release(info_handle);
+                Err(GPUError::SlotError())
+            }
+        }
     }
 }

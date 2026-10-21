@@ -279,6 +279,10 @@ fn validate_render_pass_compatibility(
     render_pass: &RenderPass,
     subpass_index: usize,
 ) -> Result<(), GPUError> {
+    if pipeline.view_mask != render_pass.view_mask {
+        return Err(GPUError::LibraryError("Pipeline and render pass multiview masks differ".into()));
+    }
+
     let subpass_formats = render_pass
         .subpass_formats
         .get(subpass_index)
@@ -1215,6 +1219,7 @@ impl CommandSink for CommandQueue {
                 &attachment_infos,
                 target_width,
                 target_height,
+                ctx.render_passes.get_ref(cmd.render_pass).ok_or(GPUError::SlotError())?.view_mask != 0,
             )?;
             let updated_attachment_infos = attachment_infos;
             unsafe {
@@ -1465,6 +1470,7 @@ impl CommandSink for CommandQueue {
                 &attachment_infos,
                 target_width,
                 target_height,
+                ctx.render_passes.get_ref(cmd.render_pass).ok_or(GPUError::SlotError())?.view_mask != 0,
             )?;
             let updated_attachment_infos = attachment_infos;
             unsafe {
