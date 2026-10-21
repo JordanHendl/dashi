@@ -6,7 +6,6 @@ mod error;
 mod external;
 mod paging;
 mod uploads;
-pub use uploads::{ImageUploadRegion, UploadBatch, UploadTicket};
 use crate::{
     cmd::{CommandStream, Executable},
     driver::{
@@ -28,6 +27,7 @@ use std::{
     mem::ManuallyDrop,
     path::PathBuf,
 };
+pub use uploads::{ImageUploadRegion, UploadBatch, UploadTicket};
 use vk_mem::Alloc;
 
 pub mod device_selector;
@@ -2587,7 +2587,9 @@ impl VulkanContext {
     }
 
     fn init_image(&mut self, image: Handle<Image>, info: &ImageInfo) -> Result<()> {
-        let Some(data) = info.initial_data else { return Ok(()); };
+        let Some(data) = info.initial_data else {
+            return Ok(());
+        };
         let mut batch = UploadBatch::new();
         if let Err(error) = self.stage_image_initial_data(&mut batch, image, data) {
             self.discard_upload_batch(batch)?;
@@ -3173,6 +3175,30 @@ impl VulkanContext {
             })
             .unwrap();
         self.bind_table_layouts.release(handle);
+    }
+
+    /// Destroys an idle graphics pipeline and releases its pool slot.
+    pub fn destroy_graphics_pipeline(&mut self, handle: Handle<GraphicsPipeline>) {
+        self.gfx_pipelines
+            .with_mut(handle, |pipeline| unsafe {
+                self.device.destroy_pipeline(pipeline.raw, None);
+            })
+            .unwrap();
+        self.gfx_pipelines.release(handle);
+    }
+
+    /// Destroys an unused graphics layout and its owned shader modules.
+    /// Descriptor-set layouts remain caller-owned.
+    pub fn destroy_graphics_pipeline_layout(&mut self, handle: Handle<GraphicsPipelineLayout>) {
+        self.gfx_pipeline_layouts
+            .with_mut(handle, |layout| unsafe {
+                for stage in &layout.shader_stages {
+                    self.device.destroy_shader_module(stage.module, None);
+                }
+                self.device.destroy_pipeline_layout(layout.layout, None);
+            })
+            .unwrap();
+        self.gfx_pipeline_layouts.release(handle);
     }
 
     /// Destroys a compute pipeline.

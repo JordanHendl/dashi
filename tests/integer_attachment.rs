@@ -172,6 +172,8 @@ fn rgba32_uint_attachment_preserves_clear_and_fragment_bits() {
         assert_eq!(words, expected, "pixel {pixel}");
     }
     ctx.destroy_command_queue(queue);
+    ctx.destroy_graphics_pipeline(pipeline);
+    ctx.destroy_graphics_pipeline_layout(layout);
     ctx.destroy_buffer(readback);
     ctx.destroy_buffer(vertices);
     ctx.destroy_render_pass(pass);

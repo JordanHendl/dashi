@@ -210,6 +210,29 @@ impl Context {
         }
     }
 
+    /// Caller must wait for every submission using this pipeline to finish.
+    pub fn destroy_graphics_pipeline(&mut self, handle: crate::Handle<crate::GraphicsPipeline>) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_graphics_pipeline(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_graphics_pipeline(handle),
+        }
+    }
+
+    /// Caller must retire pipelines using the layout before destroying it.
+    pub fn destroy_graphics_pipeline_layout(
+        &mut self,
+        handle: crate::Handle<crate::GraphicsPipelineLayout>,
+    ) {
+        match &mut self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.destroy_graphics_pipeline_layout(handle),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(ctx) => ctx.destroy_graphics_pipeline_layout(handle),
+        }
+    }
+
     pub fn destroy_compute_pipeline(&mut self, handle: crate::Handle<ComputePipeline>) {
         match &mut self.backend {
             #[cfg(feature = "vulkan")]
@@ -272,7 +295,10 @@ impl Context {
     /// Read a completed timestamp interval without blocking. Call only after the
     /// owning submission completes to avoid reading a preceding use of the query.
     /// Returns None for unavailable, wrapped or unsupported timestamp pairs.
-    pub fn get_gpu_timestamp_interval(&mut self, frame: usize) -> Option<crate::GpuTimestampInterval> {
+    pub fn get_gpu_timestamp_interval(
+        &mut self,
+        frame: usize,
+    ) -> Option<crate::GpuTimestampInterval> {
         match &mut self.backend {
             #[cfg(feature = "vulkan")]
             ContextBackend::Vulkan(ctx) => ctx.get_gpu_timestamp_interval(frame),
