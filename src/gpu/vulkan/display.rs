@@ -776,6 +776,9 @@ impl VulkanContext {
         let fence = dsp.fences[dsp.frame_idx as usize];
 
         self.wait(fence)?;
+        let raw_fence = self.fences.get_ref(fence).unwrap().raw;
+        // Waiting preserves completion for observers. Reset only when reusing the fence.
+        unsafe { self.device.reset_fences(&[raw_fence])? };
 
         let signal_sem = self.semaphores.get_ref(signal_sem_handle).unwrap();
         let acquire_result = unsafe {
@@ -783,7 +786,7 @@ impl VulkanContext {
                 &vk::AcquireNextImageInfoKHR::builder()
                     .swapchain(dsp.swapchain)
                     .semaphore(signal_sem.raw)
-                    .fence(self.fences.get_ref(fence).unwrap().raw)
+                    .fence(raw_fence)
                     .timeout(std::u64::MAX)
                     .device_mask(0x1)
                     .build(),
