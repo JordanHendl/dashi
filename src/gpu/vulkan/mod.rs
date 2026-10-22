@@ -658,6 +658,9 @@ fn select_enabled_core_features(
     if enable_bindless_profile && supported.fragment_stores_and_atomics == vk::TRUE {
         features = features.fragment_stores_and_atomics(true);
     }
+    if enable_bindless_profile && supported.vertex_pipeline_stores_and_atomics == vk::TRUE {
+        features = features.vertex_pipeline_stores_and_atomics(true);
+    }
     features.build()
 }
 
@@ -748,6 +751,27 @@ mod tests {
         assert_eq!(
             select_enabled_core_features(supported, false).sample_rate_shading,
             vk::TRUE
+        );
+    }
+
+    #[test]
+    fn vertex_feedback_atomics_require_support_and_bindless_profile() {
+        let supported = vk::PhysicalDeviceFeatures {
+            vertex_pipeline_stores_and_atomics: vk::TRUE,
+            ..Default::default()
+        };
+        assert_eq!(
+            select_enabled_core_features(supported, true).vertex_pipeline_stores_and_atomics,
+            vk::TRUE
+        );
+        assert_eq!(
+            select_enabled_core_features(supported, false).vertex_pipeline_stores_and_atomics,
+            vk::FALSE
+        );
+        assert_eq!(
+            select_enabled_core_features(vk::PhysicalDeviceFeatures::default(), true)
+                .vertex_pipeline_stores_and_atomics,
+            vk::FALSE
         );
     }
 }
