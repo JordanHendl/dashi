@@ -654,6 +654,7 @@ fn select_enabled_core_features(
         .shader_clip_distance(true)
         .multi_draw_indirect(true)
         .sample_rate_shading(supported.sample_rate_shading == vk::TRUE)
+        .independent_blend(supported.independent_blend == vk::TRUE)
         .draw_indirect_first_instance(supported.draw_indirect_first_instance == vk::TRUE);
     if enable_bindless_profile && supported.fragment_stores_and_atomics == vk::TRUE {
         features = features.fragment_stores_and_atomics(true);
@@ -685,6 +686,16 @@ mod tests {
         }
 
         vk::FALSE
+    }
+
+    #[test]
+    fn independent_attachment_blending_is_enabled_only_when_supported() {
+        for enabled in [vk::FALSE, vk::TRUE] {
+            let supported = vk::PhysicalDeviceFeatures { independent_blend: enabled, ..Default::default() };
+            for bindless in [false, true] {
+                assert_eq!(select_enabled_core_features(supported, bindless).independent_blend, enabled);
+            }
+        }
     }
 
     #[test]
@@ -2355,7 +2366,7 @@ impl VulkanContext {
                     .subresource_range(sub_range)
                     .view_type(info.view_type.into())
                     .build(),
-                Default::default(),
+                self.allocation_callbacks.as_deref(),
             )?
         };
 

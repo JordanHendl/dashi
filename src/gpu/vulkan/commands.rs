@@ -81,6 +81,22 @@ fn clear_value_to_vk(cv: &ClearValue) -> vk::ClearValue {
     }
 }
 
+fn render_pass_clear_values(
+    colors: &[Option<crate::ImageView>; 8],
+    values: &[Option<ClearValue>; 8],
+    has_depth: bool,
+    depth: Option<&ClearValue>,
+) -> SmallVec<[vk::ClearValue; 9]> {
+    // Vulkan indexes clear values by attachment, including attachments loaded unchanged.
+    let mut clears: SmallVec<[vk::ClearValue; 9]> = colors.iter().zip(values)
+        .filter_map(|(image, value)| image.map(|_| value.as_ref().map(clear_value_to_vk).unwrap_or_default()))
+        .collect();
+    if has_depth {
+        clears.push(depth.map(clear_value_to_vk).unwrap_or_default());
+    }
+    clears
+}
+
 fn collect_imageless_attachment_infos(
     ctx: &VulkanContext,
     attachments: &[(Handle<super::VkImageView>, vk::ImageLayout)],
@@ -1267,16 +1283,12 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let mut clears: SmallVec<[vk::ClearValue; 9]> = cmd
-            .clear_values
-            .iter()
-            .flatten()
-            .map(clear_value_to_vk)
-            .collect();
-
-        if let Some(dc) = cmd.depth_clear {
-            clears.push(clear_value_to_vk(&dc));
-        }
+        let clears = render_pass_clear_values(
+            &cmd.color_attachments,
+            &cmd.clear_values,
+            cmd.depth_attachment.is_some(),
+            cmd.depth_clear.as_ref(),
+        );
 
         unsafe {
             self.ctx_ref().device.cmd_begin_render_pass(
@@ -1518,16 +1530,12 @@ impl CommandSink for CommandQueue {
         let mut attachment_info =
             vk::RenderPassAttachmentBeginInfo::builder().attachments(&attachments_vk);
 
-        let mut clears: SmallVec<[vk::ClearValue; 9]> = cmd
-            .clear_values
-            .iter()
-            .flatten()
-            .map(clear_value_to_vk)
-            .collect();
-
-        if let Some(depth_clear) = cmd.depth_clear.as_ref() {
-            clears.push(clear_value_to_vk(depth_clear));
-        }
+        let clears = render_pass_clear_values(
+            &cmd.color_attachments,
+            &cmd.clear_values,
+            cmd.depth_attachment.is_some(),
+            cmd.depth_clear.as_ref(),
+        );
 
         unsafe {
             self.ctx_ref().device.cmd_begin_render_pass(

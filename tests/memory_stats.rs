@@ -179,6 +179,15 @@ fn vulkan_host_callbacks_and_vma_stats_follow_resource_lifetime() {
         FREED.load(Ordering::Relaxed) > freed,
         "pipeline retirement uses the supplied allocator"
     );
+    let image = ctx.make_image(&dashi::ImageInfo {
+        dim: [2,2,1], format: dashi::Format::RGBA8, ..Default::default()
+    }).unwrap();
+    let created = CREATED.load(Ordering::Relaxed);
+    ctx.native_image_descriptor(dashi::ImageView { img: image, ..Default::default() }).unwrap();
+    assert!(CREATED.load(Ordering::Relaxed) > created, "image view creation uses the supplied allocator");
+    let freed = FREED.load(Ordering::Relaxed);
+    ctx.destroy_image(image);
+    assert!(FREED.load(Ordering::Relaxed) > freed, "image view retirement uses the supplied allocator");
     ctx.destroy();
     assert!(CREATED.load(Ordering::Relaxed) > 0);
     assert_eq!(
