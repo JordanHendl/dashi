@@ -1,5 +1,6 @@
 #![allow(deprecated)]
 mod mesh;
+mod subgroup;
 
 mod allocation;
 mod error;

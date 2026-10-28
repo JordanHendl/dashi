@@ -432,6 +432,17 @@ impl Context {
 }
 
 impl Context {
+    /// Whether compute shaders support subgroup election and arithmetic reductions.
+    /// Query at pipeline initialization; this does not imply a fixed subgroup size.
+    pub fn supports_compute_subgroup_arithmetic(&self) -> bool {
+        match &self.backend {
+            #[cfg(feature = "vulkan")]
+            ContextBackend::Vulkan(ctx) => ctx.supports_compute_subgroup_arithmetic(),
+            #[cfg(feature = "webgpu")]
+            ContextBackend::WebGpu(_) => false,
+        }
+    }
+
     pub fn mesh_shader_capabilities(&self) -> crate::MeshShaderCapabilities {
         match &self.backend {
             #[cfg(feature = "vulkan")]
