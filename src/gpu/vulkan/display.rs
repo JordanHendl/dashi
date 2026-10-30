@@ -123,6 +123,9 @@ pub struct Display {
 }
 
 impl Display {
+    /// Ask the window owner to rebuild after retiring a detached presenter.
+    pub fn request_swapchain_rebuild(&self) { self.needs_rebuild.set(true); }
+
     #[cfg(feature = "dashi-minifb")]
     pub fn minifb_window(&mut self) -> &mut minifb::Window {
         &mut self.window
@@ -522,7 +525,7 @@ impl VulkanContext {
         requested_size: [u32; 2],
     ) -> Result<(), GPUError> {
         dsp.needs_rebuild.set(true);
-        unsafe { self.device.device_wait_idle()? };
+        { let _guard = self.submission_lock.lock().unwrap(); unsafe { self.device.device_wait_idle()? }; }
         self.destroy_swapchain_resources(dsp);
         dsp.info.window.size = requested_size;
 
@@ -844,6 +847,7 @@ impl VulkanContext {
             .map(|sem| self.semaphores.get_ref(*sem).unwrap().raw)
             .collect();
 
+        let _queue_guard = self.submission_lock.lock().unwrap();
         let present_result = unsafe {
             dsp.sc_loader.queue_present(
                 self.gfx_queue.queue,

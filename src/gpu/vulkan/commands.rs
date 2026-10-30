@@ -487,6 +487,7 @@ impl CommandQueue {
                 .ok_or(GPUError::SlotError())?
                 .raw;
             (*self.ctx).device.reset_fences(&[fence])?;
+            let _queue_guard = (*self.ctx).submission_lock.lock().unwrap();
             (*self.ctx).device.queue_submit(
                 queue,
                 &[vk::SubmitInfo::builder()

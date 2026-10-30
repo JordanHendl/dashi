@@ -56,6 +56,8 @@ pub use memory::*;
 pub mod image;
 pub use image::*;
 pub mod display;
+mod detached_presenter;
+pub use detached_presenter::*;
 pub use display::*;
 
 mod descriptor_sets;
@@ -507,6 +509,7 @@ pub struct VulkanContext {
     pub(super) allocation_callbacks: Option<Box<vk::AllocationCallbacks>>,
     allocation_activity: GpuAllocationActivity,
     pub(super) gfx_queue: Queue,
+    pub(super) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(super) compute_queue: Option<Queue>,
     pub(super) transfer_queue: Option<Queue>,
     pub(super) buffers: Pool<Buffer>,
@@ -1639,6 +1642,7 @@ impl VulkanContext {
             allocation_callbacks,
             allocation_activity: GpuAllocationActivity::default(),
             gfx_queue,
+            submission_lock: Default::default(),
             compute_queue,
             transfer_queue,
 
@@ -1833,6 +1837,7 @@ impl VulkanContext {
             allocation_callbacks,
             allocation_activity: GpuAllocationActivity::default(),
             gfx_queue,
+            submission_lock: Default::default(),
             compute_queue,
             transfer_queue,
 
@@ -2671,6 +2676,7 @@ impl VulkanContext {
 
     /// Block until the current device finishes all queued work.
     pub fn sync_current_device(&mut self) {
+        let _guard = self.submission_lock.lock().unwrap();
         unsafe { self.device.device_wait_idle().unwrap() };
     }
 
@@ -3006,6 +3012,7 @@ impl VulkanContext {
         // Ensure all in-flight work has completed so resources can be released safely
         // regardless of the state the caller leaves the context in.
         unsafe {
+            let _guard = self.submission_lock.lock().unwrap();
             let _ = self.device.device_wait_idle();
         }
 
