@@ -63,3 +63,23 @@ cargo test --test winit_window_controls -- --ignored
 
 The `winit_window_controls` test is Windows-only and ignored by default because
 it opens a native window and exercises minimize/restore behavior.
+
+## Winit 0.30 native windows
+
+Native windows share `NativeEventLoop` on their owner thread. Pump once per frame
+and route `WindowEvent` by `WindowId`; device events are delivered once. The loop
+survives destruction of its last window. Startup displays adopt the same loop.
+`create_window` uses the active loop; custom cursors use `create_custom_cursor`.
+Create cursors outside event callbacks. Recursive pumping returns an error.
+The `rwh_04` feature preserves the Vulkan surface handle ABI.
+
+Run native checks individually so each process owns one event-loop thread:
+
+```text
+cargo test --lib windows_and_cursors_share_loop_across_recreation -- --ignored
+cargo test --test winit_window_controls prepare_display_handles_resize_and_minimize -- --ignored
+cargo test --test winit_window_controls borderless_primary_uses_primary_physical_extent_without_exclusive_mode -- --ignored
+```
+
+The orbclient resolution-only stub version covers Winit 0.30's Redox dependency;
+this does not add Redox backend support.

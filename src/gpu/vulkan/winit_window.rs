@@ -1,23 +1,11 @@
 use super::error::GPUError;
+use super::NativeEventLoop;
 use crate::gpu::structs::{DisplayInfo, MonitorSelection, WindowMode};
 use ash::{vk, Entry, Instance};
 #[cfg(target_os = "linux")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use winit::dpi::PhysicalSize;
-#[cfg(target_os = "linux")]
-use winit::event::Event;
-#[cfg(target_os = "linux")]
-use winit::event_loop::ControlFlow;
-use winit::event_loop::EventLoop;
-#[cfg(target_os = "linux")]
-use winit::platform::run_return::EventLoopExtRunReturn;
-#[cfg(target_os = "linux")]
-use winit::platform::unix::EventLoopExtUnix;
-#[cfg(target_os = "windows")]
-use winit::platform::windows::EventLoopExtWindows;
-#[cfg(target_os = "linux")]
-use winit::window::Window;
-use winit::window::{Fullscreen, WindowBuilder};
+use winit::window::{Fullscreen, Window};
 
 #[cfg(target_os = "linux")]
 use std::thread;
@@ -103,7 +91,7 @@ fn resolve_initial_extent(
 
 #[cfg(target_os = "linux")]
 fn settle_x11_primary_extent(
-    event_loop: &mut EventLoop<()>,
+    event_loop: &NativeEventLoop,
     window: &Window,
     expected_size: PhysicalSize<u32>,
 ) -> Result<PhysicalSize<u32>, GPUError> {
@@ -121,12 +109,7 @@ fn settle_x11_primary_extent(
             return Ok(actual_size);
         }
 
-        event_loop.run_return(|event, _target, control_flow| {
-            *control_flow = ControlFlow::Poll;
-            if matches!(event, Event::MainEventsCleared | Event::LoopDestroyed) {
-                *control_flow = ControlFlow::Exit;
-            }
-        });
+        event_loop.pump_events(|_, _| {})?;
 
         let actual_size = window.inner_size();
         if actual_size == expected_size {
@@ -144,18 +127,13 @@ fn settle_x11_primary_extent(
 
 fn create_native_window(
     info: &DisplayInfo,
-) -> Result<(EventLoop<()>, winit::window::Window, [u32; 2]), GPUError> {
-    #[cfg(target_os = "linux")]
-    let mut event_loop = EventLoop::new_any_thread();
-    #[cfg(target_os = "windows")]
-    let event_loop = EventLoop::new_any_thread();
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    let event_loop = EventLoop::new();
-
+) -> Result<(NativeEventLoop, winit::window::Window, [u32; 2]), GPUError> {
+    let event_loop = NativeEventLoop::shared()?;
+    let (window, _initial_extent) = event_loop.with_active(|active| -> Result<_, GPUError> {
     let primary_monitor = if info.window_mode == WindowMode::BorderlessFullscreen
         && info.monitor_selection == MonitorSelection::Primary
     {
-        event_loop.primary_monitor()
+        active.primary_monitor()
     } else {
         None
     };
@@ -193,7 +171,7 @@ fn create_native_window(
         initial_extent.source,
     );
 
-    let builder = WindowBuilder::new().with_title(info.window.title.clone());
+    let builder = Window::default_attributes().with_title(info.window.title.clone());
     let builder = match creation_mode {
         WindowCreationMode::Windowed => builder
             .with_inner_size(initial_extent.size)
@@ -214,14 +192,16 @@ fn create_native_window(
         }
     };
 
-    let window = builder.build(&event_loop).map_err(|err| {
+    let window = active.create_window(builder).map_err(|err| {
         GPUError::LibraryError(format!(
             "failed to initialize winit window: {err}; params: {info:?}"
         ))
     })?;
+    Ok((window, initial_extent))
+    })??;
     #[cfg(target_os = "linux")]
-    let actual_size = if initial_extent.source == InitialExtentSource::PrimaryMonitor {
-        settle_x11_primary_extent(&mut event_loop, &window, initial_extent.size)?
+    let actual_size = if _initial_extent.source == InitialExtentSource::PrimaryMonitor {
+        settle_x11_primary_extent(&event_loop, &window, _initial_extent.size)?
     } else {
         window.inner_size()
     };
@@ -232,6 +212,7 @@ fn create_native_window(
             "winit created a zero-sized window for params: {info:?}"
         )));
     }
+    window.set_ime_allowed(true);
     window.request_redraw();
     let _ = window.focus_window();
 
@@ -242,7 +223,7 @@ use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
-type PendingWindow = (EventLoop<()>, winit::window::Window, [u32; 2]);
+type PendingWindow = (NativeEventLoop, winit::window::Window, [u32; 2]);
 thread_local! {
     static STARTUP: RefCell<Weak<RefCell<Option<PendingWindow>>>> = RefCell::new(Weak::new());
 }
@@ -267,30 +248,14 @@ impl StartupDisplay {
     }
 
     pub fn pump(&self) -> bool {
-        use winit::platform::run_return::EventLoopExtRunReturn;
-        use winit::{
-            event::{Event, WindowEvent},
-            event_loop::ControlFlow,
-        };
         let mut pending = self.0.borrow_mut();
         let Some((events, window, _)) = pending.as_mut() else {
             return true;
         };
-        let mut open = true;
-        events.run_return(|event, _, flow| {
-            *flow = ControlFlow::Poll;
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    open = false;
-                    *flow = ControlFlow::Exit;
-                }
-                Event::MainEventsCleared => *flow = ControlFlow::Exit,
-                _ => {}
-            }
-        });
+        if events.pump_events(|_, _| {}).is_err() {
+            return false;
+        }
+        let open = !events.close_requested(window.id());
         paint_startup(window);
         open
     }
@@ -309,7 +274,7 @@ pub(super) fn create_window(
     allocation_callbacks: Option<&vk::AllocationCallbacks>,
 ) -> Result<
     (
-        EventLoop<()>,
+        NativeEventLoop,
         winit::window::Window,
         vk::SurfaceKHR,
         [u32; 2],
@@ -334,10 +299,11 @@ fn take_native_window(info: &DisplayInfo) -> Result<PendingWindow, GPUError> {
     if info.window_mode == WindowMode::Windowed {
         window.set_fullscreen(None);
         window.set_decorations(true);
-        window.set_inner_size(PhysicalSize::new(info.window.size[0], info.window.size[1]));
+        let _ =
+            window.request_inner_size(PhysicalSize::new(info.window.size[0], info.window.size[1]));
     } else {
         let monitor = (info.monitor_selection == MonitorSelection::Primary)
-            .then(|| events.primary_monitor())
+            .then(|| window.primary_monitor())
             .flatten();
         window.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
     }
@@ -347,6 +313,7 @@ fn take_native_window(info: &DisplayInfo) -> Result<PendingWindow, GPUError> {
 
 #[cfg(target_os = "windows")]
 fn paint_startup(window: &winit::window::Window) {
+    use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
     use windows_sys::Win32::{
         Foundation::RECT,
         Graphics::Gdi::{
@@ -354,9 +321,11 @@ fn paint_startup(window: &winit::window::Window) {
             SetTextColor, DT_CENTER, DT_SINGLELINE, DT_VCENTER, TRANSPARENT,
         },
     };
-    use winit::platform::windows::WindowExtWindows;
     let size = window.inner_size();
-    let hwnd = window.hwnd() as _;
+    let RawWindowHandle::Win32(handle) = window.raw_window_handle() else {
+        return;
+    };
+    let hwnd = handle.hwnd as _;
     unsafe {
         let dc = GetDC(hwnd);
         if dc.is_null() {
@@ -395,6 +364,7 @@ fn paint_startup(window: &winit::window::Window) {
 }
 #[cfg(not(target_os = "windows"))]
 fn paint_startup(window: &winit::window::Window) {
+    window.set_ime_allowed(true);
     window.request_redraw();
 }
 

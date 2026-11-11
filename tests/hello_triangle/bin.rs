@@ -2,9 +2,9 @@ use dashi::*;
 #[cfg(feature = "dashi-tests")]
 use dashi::driver::command::{BeginDrawing, BlitImage, DrawIndexed};
 use std::time::{Duration, Instant};
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
-use winit::event_loop::ControlFlow;
-use winit::platform::run_return::EventLoopExtRunReturn;
+use winit::event::{ElementState, Event, KeyEvent, WindowEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
+
 
 #[cfg(feature = "dashi-tests")]
 pub struct Timer {
@@ -286,15 +286,12 @@ void main() {
         let mut should_exit = false;
         {
             let event_loop = display.winit_event_loop();
-            event_loop.run_return(|event, _target, control_flow| {
-                *control_flow = ControlFlow::Exit;
+            event_loop.pump_events(|event, _target| {
                 if let Event::WindowEvent { event, .. } = event {
                     match event {
                         WindowEvent::CloseRequested => should_exit = true,
                         WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                            event: KeyEvent { physical_key: PhysicalKey::Code(KeyCode::Escape),
                                     state: ElementState::Pressed,
                                     ..
                                 },
@@ -303,7 +300,7 @@ void main() {
                         _ => {}
                     }
                 }
-            });
+            }).unwrap();
         }
         if should_exit {
             break 'running;

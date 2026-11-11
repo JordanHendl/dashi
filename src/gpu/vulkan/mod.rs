@@ -5330,3 +5330,8 @@ impl VulkanContext {
             .unwrap());
     }
 }
+
+#[cfg(feature = "dashi-winit")]
+mod native_events;
+#[cfg(feature = "dashi-winit")]
+pub use native_events::NativeEventLoop;

@@ -13,12 +13,7 @@ use super::minifb_window;
 #[cfg(feature = "dashi-winit")]
 use super::winit_window;
 #[cfg(feature = "dashi-winit")]
-use winit::{
-    dpi::PhysicalSize,
-    event::{Event, WindowEvent},
-    event_loop::ControlFlow,
-    platform::run_return::EventLoopExtRunReturn,
-};
+use winit::dpi::PhysicalSize;
 
 #[cfg(feature = "dashi-winit")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -103,7 +98,7 @@ pub struct Display {
     #[cfg(feature = "dashi-winit")]
     pub(crate) window: winit::window::Window,
     #[cfg(feature = "dashi-winit")]
-    pub(crate) event_loop: winit::event_loop::EventLoop<()>,
+    pub(crate) event_loop: super::NativeEventLoop,
     pub(crate) swapchain: ash::vk::SwapchainKHR,
     pub(crate) surface: ash::vk::SurfaceKHR,
     pub(crate) images: Vec<Handle<Image>>,
@@ -137,8 +132,8 @@ impl Display {
     }
 
     #[cfg(feature = "dashi-winit")]
-    pub fn winit_event_loop(&mut self) -> &mut winit::event_loop::EventLoop<()> {
-        &mut self.event_loop
+    pub fn winit_event_loop(&self) -> super::NativeEventLoop {
+        self.event_loop.clone()
     }
 
     #[cfg(feature = "dashi-winit")]
@@ -150,7 +145,7 @@ impl Display {
     #[cfg(feature = "dashi-winit")]
     pub fn set_size(&mut self, width: u32, height: u32) {
         self.info.window.size = [width, height];
-        self.window.set_inner_size(PhysicalSize::new(width, height));
+        let _ = self.window.request_inner_size(PhysicalSize::new(width, height));
     }
 
     #[cfg(feature = "dashi-winit")]
@@ -173,30 +168,8 @@ impl Display {
 
     #[cfg(feature = "dashi-winit")]
     fn pump_events(&mut self, _wait_for_events: bool) -> WinitEventBatch {
-        let mut batch = WinitEventBatch::default();
-        let window_id = self.window.id();
-
-        self.event_loop.run_return(|event, _target, control_flow| {
-            *control_flow = ControlFlow::Poll;
-
-            match event {
-                Event::WindowEvent {
-                    window_id: event_window_id,
-                    event,
-                } if event_window_id == window_id => match event {
-                    WindowEvent::CloseRequested => batch.close_requested = true,
-                    WindowEvent::Resized(_) => batch.resized = true,
-                    WindowEvent::ScaleFactorChanged { .. } => batch.scale_factor_changed = true,
-                    _ => {}
-                },
-                Event::MainEventsCleared | Event::LoopDestroyed => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                _ => {}
-            }
-        });
-
-        batch
+        if let Err(error) = self.event_loop.pump_events(|_, _| {}) { tracing::warn!("{error:?}"); }
+        WinitEventBatch { close_requested: self.event_loop.close_requested(self.window.id()), ..Default::default() }
     }
 
     #[cfg(all(
@@ -642,7 +615,7 @@ impl VulkanContext {
         info: &DisplayInfo,
     ) -> Result<
         (
-            winit::event_loop::EventLoop<()>,
+            super::NativeEventLoop,
             winit::window::Window,
             vk::SurfaceKHR,
             [u32; 2],
@@ -712,6 +685,7 @@ impl VulkanContext {
         dsp: &mut Display,
         close_requested: bool,
     ) -> Result<Option<DisplayStatus>, GPUError> {
+        let close_requested = close_requested || dsp.event_loop.close_requested(dsp.window.id());
         if close_requested {
             dsp.closed = true;
         }
