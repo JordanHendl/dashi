@@ -70,7 +70,8 @@ Native windows share `NativeEventLoop` on their owner thread. Pump once per fram
 and route `WindowEvent` by `WindowId`; device events are delivered once. The loop
 survives destruction of its last window. Startup displays adopt the same loop.
 `create_window` uses the active loop; custom cursors use `create_custom_cursor`.
-Create cursors outside event callbacks. Recursive pumping returns an error.
+Cursor creation also works inside event callbacks through the scoped active loop.
+Recursive pumping returns an error.
 The `rwh_04` feature preserves the Vulkan surface handle ABI.
 
 Run native checks individually so each process owns one event-loop thread:

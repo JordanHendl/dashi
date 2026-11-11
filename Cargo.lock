@@ -514,6 +514,7 @@ dependencies = [
  "raw-window-handle 0.4.3",
  "rayon",
  "resource_pool",
+ "scoped-tls",
  "sdl2",
  "serde",
  "serde_json",

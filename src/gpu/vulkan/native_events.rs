@@ -9,6 +9,8 @@ use winit::{
     window::{CustomCursor, CustomCursorSource, Window, WindowAttributes, WindowId},
 };
 
+scoped_tls::scoped_thread_local!(static ACTIVE_LOOP: ActiveEventLoop);
+
 thread_local! {
     static NATIVE_EVENTS: RefCell<Option<NativeEventLoop>> = const { RefCell::new(None) };
 }
@@ -24,15 +26,21 @@ struct Handler<'a, F> {
     closed: &'a RefCell<HashSet<WindowId>>,
 }
 
+impl<F: FnMut(Event<()>, &ActiveEventLoop)> Handler<'_, F> {
+    fn dispatch(&mut self, event: Event<()>, active: &ActiveEventLoop) {
+        ACTIVE_LOOP.set(active, || (self.callback)(event, active));
+    }
+}
+
 impl<F: FnMut(Event<()>, &ActiveEventLoop)> ApplicationHandler for Handler<'_, F> {
     fn new_events(&mut self, active: &ActiveEventLoop, cause: StartCause) {
-        (self.callback)(Event::NewEvents(cause), active);
+        self.dispatch(Event::NewEvents(cause), active);
     }
     fn resumed(&mut self, active: &ActiveEventLoop) {
-        (self.callback)(Event::Resumed, active);
+        self.dispatch(Event::Resumed, active);
     }
     fn suspended(&mut self, active: &ActiveEventLoop) {
-        (self.callback)(Event::Suspended, active);
+        self.dispatch(Event::Suspended, active);
     }
     fn window_event(&mut self, active: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         match event {
@@ -44,16 +52,16 @@ impl<F: FnMut(Event<()>, &ActiveEventLoop)> ApplicationHandler for Handler<'_, F
             }
             _ => {}
         }
-        (self.callback)(Event::WindowEvent { window_id, event }, active);
+        self.dispatch(Event::WindowEvent { window_id, event }, active);
     }
     fn device_event(&mut self, active: &ActiveEventLoop, device_id: DeviceId, event: DeviceEvent) {
-        (self.callback)(Event::DeviceEvent { device_id, event }, active);
+        self.dispatch(Event::DeviceEvent { device_id, event }, active);
     }
     fn about_to_wait(&mut self, active: &ActiveEventLoop) {
-        (self.callback)(Event::AboutToWait, active);
+        self.dispatch(Event::AboutToWait, active);
     }
     fn exiting(&mut self, active: &ActiveEventLoop) {
-        (self.callback)(Event::LoopExiting, active);
+        self.dispatch(Event::LoopExiting, active);
     }
 }
 
@@ -142,9 +150,13 @@ impl NativeEventLoop {
         &self,
         source: CustomCursorSource,
     ) -> Result<CustomCursor, GPUError> {
-        let events = self.events.try_borrow().map_err(|_| {
-            GPUError::LibraryError("set cursors outside native event callbacks".into())
-        })?;
+        if ACTIVE_LOOP.is_set() {
+            return Ok(ACTIVE_LOOP.with(|active| active.create_custom_cursor(source)));
+        }
+        let events = self
+            .events
+            .try_borrow()
+            .map_err(|_| GPUError::LibraryError("native loop unavailable".into()))?;
         Ok(events.create_custom_cursor(source))
     }
 
@@ -169,6 +181,18 @@ mod tests {
         assert_ne!(first.id(), second.id());
         let source = CustomCursor::from_rgba(vec![255; 16 * 16 * 4], 16, 16, 3, 5).unwrap();
         first.set_cursor(events.create_custom_cursor(source).unwrap());
+        let mut created_in_callback = false;
+        events
+            .pump_events(|event, _| {
+                if matches!(event, Event::AboutToWait) {
+                    let source =
+                        CustomCursor::from_rgba(vec![255; 16 * 16 * 4], 16, 16, 3, 5).unwrap();
+                    first.set_cursor(events.create_custom_cursor(source).unwrap());
+                    created_in_callback = true;
+                }
+            })
+            .unwrap();
+        assert!(created_in_callback);
         second.set_cursor(winit::window::CursorIcon::Crosshair);
         events.pump_events(|_, _| {}).unwrap();
         first.set_cursor_visible(false);

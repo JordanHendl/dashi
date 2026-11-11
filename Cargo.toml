@@ -6,7 +6,7 @@ license = "MIT"
 
 [features]
 default = ["dashi-winit", "dashi-serde", "vulkan"]
-dashi-winit = ["dep:winit"]
+dashi-winit = ["dep:winit", "dep:scoped-tls"]
 dashi-sdl2 = ["dep:sdl2"]
 dashi-minifb = ["dep:minifb"]
 dashi-openxr = ["dep:openxr", "vulkan"]
@@ -31,6 +31,7 @@ sdl2 = {version = "0.37.0", features = ["bundled", "static-link", "raw-window-ha
 ash-window = { version = "0.11", optional = true }
 minifb = { version = "0.24", optional = true }
 winit = { version = "0.30.13", features = ["rwh_04"], optional = true }
+scoped-tls = { version = "1", optional = true }
 offset-allocator = { git = "https://github.com/JordanHendl/offsetallocator-rs" }
 resource_pool = { git = "https://github.com/JordanHendl/ResourcePool" }
 openxr = { version = "0.19", optional = true }
