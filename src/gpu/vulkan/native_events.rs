@@ -19,16 +19,24 @@ thread_local! {
 pub struct NativeEventLoop {
     events: Rc<RefCell<EventLoop<()>>>,
     closed: Rc<RefCell<HashSet<WindowId>>>,
+    pending: Rc<RefCell<Vec<Event<()>>>>,
 }
 
 struct Handler<'a, F> {
     callback: F,
     closed: &'a RefCell<HashSet<WindowId>>,
+    pending: &'a RefCell<Vec<Event<()>>>,
 }
 
 impl<F: FnMut(Event<()>, &ActiveEventLoop)> Handler<'_, F> {
     fn dispatch(&mut self, event: Event<()>, active: &ActiveEventLoop) {
-        ACTIVE_LOOP.set(active, || (self.callback)(event, active));
+        ACTIVE_LOOP.set(active, || {
+            let pending = std::mem::take(&mut *self.pending.borrow_mut());
+            for event in pending {
+                (self.callback)(event, active);
+            }
+            (self.callback)(event, active);
+        });
     }
 }
 
@@ -100,6 +108,7 @@ impl NativeEventLoop {
             let native = Self {
                 events: Rc::new(RefCell::new(events)),
                 closed: Default::default(),
+                pending: Default::default(),
             };
             *slot = Some(native.clone());
             Ok(native)
@@ -120,6 +129,7 @@ impl NativeEventLoop {
             &mut Handler {
                 callback,
                 closed: &self.closed,
+                pending: &self.pending,
             },
         );
         match status {
@@ -134,15 +144,24 @@ impl NativeEventLoop {
         &self,
         action: impl FnOnce(&ActiveEventLoop) -> T,
     ) -> Result<T, GPUError> {
+        if ACTIVE_LOOP.is_set() {
+            return Ok(ACTIVE_LOOP.with(action));
+        }
         let mut action = Some(action);
         let mut result = None;
-        self.pump_events(|event, active| {
+        let mut pending = Vec::new();
+        let status = self.pump_events(|event, active| {
             if matches!(event, Event::Resumed | Event::AboutToWait) {
                 if let Some(action) = action.take() {
                     result = Some(action(active));
                 }
             }
-        })?;
+            if matches!(event, Event::WindowEvent { .. } | Event::DeviceEvent { .. }) {
+                pending.push(event);
+            }
+        });
+        self.pending.borrow_mut().extend(pending);
+        status?;
         result.ok_or_else(|| GPUError::LibraryError("native loop did not become active".into()))
     }
 
@@ -175,6 +194,7 @@ mod tests {
         let first = events
             .create_window(Window::default_attributes().with_title("Dashi cursor 1"))
             .unwrap();
+        first.request_redraw();
         let second = events
             .create_window(Window::default_attributes().with_title("Dashi cursor 2"))
             .unwrap();
@@ -182,8 +202,12 @@ mod tests {
         let source = CustomCursor::from_rgba(vec![255; 16 * 16 * 4], 16, 16, 3, 5).unwrap();
         first.set_cursor(events.create_custom_cursor(source).unwrap());
         let mut created_in_callback = false;
+        let mut first_window_event = false;
         events
             .pump_events(|event, _| {
+                if matches!(&event, Event::WindowEvent { window_id, .. } if *window_id == first.id()) {
+                    first_window_event = true;
+                }
                 if matches!(event, Event::AboutToWait) {
                     let source =
                         CustomCursor::from_rgba(vec![255; 16 * 16 * 4], 16, 16, 3, 5).unwrap();
@@ -193,6 +217,10 @@ mod tests {
             })
             .unwrap();
         assert!(created_in_callback);
+        assert!(
+            first_window_event,
+            "window creation must retain existing window events"
+        );
         second.set_cursor(winit::window::CursorIcon::Crosshair);
         events.pump_events(|_, _| {}).unwrap();
         first.set_cursor_visible(false);
